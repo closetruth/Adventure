@@ -34,17 +34,21 @@
 - 支持拖动移动、最小化、右键菜单（置顶 / 全桌面 / 开机自启 / 退出）
 - 同时驻留系统托盘，关闭悬浮窗后可从托盘再次唤出
 
-### 小游戏（计划中）
-- 🐾 小动物自走棋：使用金币 / 钻石抽宠物自动战斗（即将上线）
+### 小游戏：小动物竞技场（pygame）
+- 在「奖励背包」点击 **开始游戏** 进入
+- 入场费 **10 金币**；用金币招募小猫/小狗/小熊（按键 1/2/3）
+- 空格开始波次战斗，自动攻击；通关获得金币，每 5 波额外 **1 钻石**
+- **ESC** 退出并结算到背包
 
 ---
 
 ## 一键安装到 Windows 10（推荐路径）
 
-> 前置条件：本机已安装 **Python 3.10 或更新版本**。可从 [python.org](https://www.python.org/downloads/windows/) 下载，安装时记得勾选 *Add Python to PATH*。
+> 推荐 **Python 3.12 或 3.13**。若使用 **Python 3.14**，小游戏依赖 `pygame-ce`（不要用官方 `pygame`，会编译失败）。
 
 1. 把整个项目目录复制到本机任意位置（例如 `C:\Users\<你>\Desktop\Adventure`）。
-2. 双击 `install.bat`：脚本会创建 `.venv` 虚拟环境并自动安装所需依赖（PySide6 / pynput / pywin32 / pyvda）。
+2. 双击 `install.bat`：创建 `.venv` 并安装依赖（含 `pygame-ce`）。
+3. 若只修复游戏依赖：双击 `fix_game.bat`。
 3. 双击 `run.bat` 即可启动 Adventure。
 4. 在悬浮窗右键菜单中勾选「开机自启」，开机后即可自动随系统启动。
 
@@ -116,6 +120,8 @@ Adventure/
 ├── run.bat                # Win10 一键启动 (pythonw, 无黑框)
 ├── build.bat              # PyInstaller 打包为 .exe
 ├── run.py                 # 跨平台开发入口
+├── games/
+│   └── pet_arena.py       # pygame 小动物竞技场
 └── src/
     ├── __init__.py
     ├── main.py            # Qt 应用入口、信号桥接
@@ -127,6 +133,8 @@ Adventure/
     ├── input_monitor.py   # pynput 全局键鼠监听
     ├── storage.py         # JSON 持久化 (原子写入)
     ├── models.py          # 数据模型 (dataclass)
+    ├── game_launcher.py   # 启动小游戏子进程并结算
+    ├── game_protocol.py   # 主程序与小游戏 JSON 通信
     └── win_utils.py       # Windows 专属：固定虚拟桌面 / 开机启动
 ```
 

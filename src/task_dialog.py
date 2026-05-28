@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (
 
 from .models import AppState, Task, TaskStatus
 from .task_manager import TaskManager
-from .ui_text import format_pending, format_reward_gain
+from .ui_task_stats import TASK_STATS_QSS, TaskRewardStrip
+from .ui_text import format_reward_gain
 
 
 DIALOG_STYLESHEET = """
@@ -57,7 +58,8 @@ QFrame#Card[active="true"] { border: 1px solid #3a5cff; }
 QLabel#TaskTitle { font-size: 15px; font-weight: 700; }
 QLabel#Meta { color: #b8bcc8; font-size: 12px; font-weight: 500; }
 QLabel#Status { font-size: 12px; font-weight: 700; }
-"""
+QLabel#CreatedMeta { color: #9aa0b4; font-size: 11px; }
+""" + TASK_STATS_QSS
 
 
 class TaskCard(QFrame):
@@ -105,9 +107,25 @@ class TaskCard(QFrame):
             note.setStyleSheet("color: #c4c7d6; font-size: 12px;")
             v.addWidget(note)
 
-        meta = QLabel(self._meta_text())
-        meta.setObjectName("Meta")
-        v.addWidget(meta)
+        created = time.strftime("%Y-%m-%d %H:%M", time.localtime(self.task.created_at))
+        meta_created = QLabel(f"创建：{created}")
+        meta_created.setObjectName("CreatedMeta")
+        v.addWidget(meta_created)
+
+        if self.task.completed_at:
+            done = time.strftime("%Y-%m-%d %H:%M", time.localtime(self.task.completed_at))
+            meta_done = QLabel(f"完成：{done}")
+            meta_done.setObjectName("CreatedMeta")
+            v.addWidget(meta_done)
+
+        summary = self.task.pending_summary()
+        self.task_stats = TaskRewardStrip()
+        self.task_stats.show_active(
+            self.task.operations,
+            summary.gold,
+            summary.diamond,
+        )
+        v.addWidget(self.task_stats)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
@@ -137,18 +155,6 @@ class TaskCard(QFrame):
         b_del.clicked.connect(lambda: self.action.emit(self.task.id, "delete"))
         btn_row.addWidget(b_del)
         v.addLayout(btn_row)
-
-    def _meta_text(self) -> str:
-        created = time.strftime("%Y-%m-%d %H:%M", time.localtime(self.task.created_at))
-        parts = [f"创建：{created}", f"操作 {self.task.operations}"]
-        summary = self.task.pending_summary()
-        if summary.gold or summary.diamond:
-            parts.append(format_pending(summary.gold, summary.diamond))
-        if self.task.completed_at:
-            done = time.strftime("%Y-%m-%d %H:%M", time.localtime(self.task.completed_at))
-            parts.append(f"完成：{done}")
-        return "  ·  ".join(parts)
-
 
 class TaskDialog(QDialog):
     """任务管理主对话框。"""

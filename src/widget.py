@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from .models import AppState, Task, TaskStatus
 from .storage import save_state
 from .task_manager import TaskManager
-from .ui_text import format_pending
+from .ui_task_stats import TaskRewardStrip
 from .win_utils import (
     is_windows,
     pin_window_to_all_desktops,
@@ -47,7 +47,6 @@ QLabel#StatCap { color: #d8dce8; font-size: 13px; font-weight: 700; }
 QLabel#GoldCap { color: #ffd54f; font-size: 13px; font-weight: 700; }
 QLabel#DiamCap { color: #7dd3fc; font-size: 13px; font-weight: 700; }
 QLabel#TaskTitle { font-size: 14px; font-weight: 700; }
-QLabel#TaskSubtle { color: #c8ccd8; font-size: 12px; font-weight: 500; }
 QPushButton {
     background-color: rgba(255,255,255,18);
     color: #f5f5f7;
@@ -106,8 +105,8 @@ class FloatingWidget(QWidget):
             | Qt.WindowStaysOnTopHint
         )
         self.setWindowFlags(flags)
-        self.setFixedWidth(280)
-        self.setMinimumHeight(220)
+        self.setFixedWidth(300)
+        self.setMinimumHeight(260)
 
         self._build_ui()
         self._refresh()
@@ -186,11 +185,9 @@ class FloatingWidget(QWidget):
         self.task_title = QLabel("暂无进行中的任务")
         self.task_title.setObjectName("TaskTitle")
         self.task_title.setWordWrap(True)
-        self.task_subtle = QLabel("")
-        self.task_subtle.setObjectName("TaskSubtle")
-        self.task_subtle.setWordWrap(True)
         v.addWidget(self.task_title)
-        v.addWidget(self.task_subtle)
+        self.task_stats = TaskRewardStrip()
+        v.addWidget(self.task_stats)
 
         # 按钮
         btns = QHBoxLayout()
@@ -326,17 +323,21 @@ class FloatingWidget(QWidget):
             paused = self.manager.by_status(TaskStatus.PAUSED)
             if paused:
                 self.task_title.setText("无进行中任务")
-                self.task_subtle.setText(f"已暂停 {len(paused)} 个任务，点击「任务管理」继续")
+                self.task_stats.show_hint(
+                    f"已暂停 {len(paused)} 个任务，点击「任务管理」继续"
+                )
             else:
                 self.task_title.setText("还没有任务")
-                self.task_subtle.setText("点击「任务管理」创建第一个任务")
+                self.task_stats.show_hint("点击「任务管理」创建第一个任务")
         else:
             self.task_title.setText(active.title)
             summary = active.pending_summary()
             duration = _format_duration(time.time() - active.created_at)
-            pending = format_pending(summary.gold, summary.diamond)
-            self.task_subtle.setText(
-                f"操作 {active.operations}  ·  {pending}  ·  {duration}"
+            self.task_stats.show_active(
+                active.operations,
+                summary.gold,
+                summary.diamond,
+                duration,
             )
 
     def _refresh_runtime(self) -> None:
@@ -345,9 +346,11 @@ class FloatingWidget(QWidget):
         if active is not None:
             summary = active.pending_summary()
             duration = _format_duration(time.time() - active.created_at)
-            pending = format_pending(summary.gold, summary.diamond)
-            self.task_subtle.setText(
-                f"操作 {active.operations}  ·  {pending}  ·  {duration}"
+            self.task_stats.show_active(
+                active.operations,
+                summary.gold,
+                summary.diamond,
+                duration,
             )
 
     # ---------- 显示时初始化窗口属性 ----------

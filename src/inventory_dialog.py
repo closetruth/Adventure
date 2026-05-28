@@ -1,7 +1,7 @@
 """奖励背包对话框：展示玩家拥有的金币 / 钻石以及历史奖励统计。"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -33,10 +33,14 @@ QPushButton {
     font-size: 13px;
 }
 QPushButton:hover { background-color: #3a4070; }
+QPushButton#Primary { background-color: #3a5cff; border-color: #3a5cff; font-weight: 700; }
+QPushButton#Primary:hover { background-color: #4d6dff; }
 """
 
 
 class InventoryDialog(QDialog):
+    request_play_game = Signal()
+
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
         self.state = state
@@ -70,14 +74,19 @@ class InventoryDialog(QDialog):
         gl = QVBoxLayout(games)
         gl.setContentsMargins(14, 12, 14, 12)
         gl.setSpacing(6)
-        gl.addWidget(QLabel("小动物自走棋"))
-        sub = QLabel("敬请期待。用金币 / 钻石抽宠物，自动战斗赢取更多奖励。")
+        gl.addWidget(QLabel("小动物竞技场"))
+        sub = QLabel(
+            "用金币招募小猫/小狗/小熊，自动战斗通关波次赢取更多金币与钻石。"
+            "入场费 10 金币。"
+        )
         sub.setObjectName("StatLine")
         sub.setWordWrap(True)
         gl.addWidget(sub)
-        btn = QPushButton("即将上线")
-        btn.setEnabled(False)
-        gl.addWidget(btn, alignment=Qt.AlignRight)
+        self.btn_play = QPushButton("开始游戏")
+        self.btn_play.setObjectName("Primary")
+        self.btn_play.setCursor(Qt.PointingHandCursor)
+        self.btn_play.clicked.connect(self.request_play_game.emit)
+        gl.addWidget(self.btn_play, alignment=Qt.AlignRight)
         v.addWidget(games)
 
         v.addStretch(1)

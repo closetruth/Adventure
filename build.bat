@@ -22,7 +22,8 @@ if errorlevel 1 (
 )
 
 echo === Building Adventure.exe ===
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --windowed --name Adventure --collect-submodules pynput --collect-submodules PySide6 --hidden-import pyvda --hidden-import win32api --hidden-import win32con --hidden-import winreg run.py
+".venv\Scripts\python.exe" -m pip install pygame-ce -q
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean Adventure.spec
 
 if errorlevel 1 (
     echo [ERROR] Build failed.

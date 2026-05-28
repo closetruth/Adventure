@@ -23,6 +23,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
+from .game_launcher import launch_pet_arena
 from .input_monitor import InputMonitor
 from .inventory_dialog import InventoryDialog
 from .models import AppState
@@ -181,10 +182,23 @@ class Application(QObject):
     def show_inventory(self) -> None:
         if self._inv_dialog is None:
             self._inv_dialog = InventoryDialog(self.state, parent=self.widget)
+            self._inv_dialog.request_play_game.connect(self.play_pet_arena)
         self._inv_dialog.refresh()
         self._inv_dialog.show()
         self._inv_dialog.raise_()
         self._inv_dialog.activateWindow()
+
+    def play_pet_arena(self) -> None:
+        """暂停主窗交互感，启动 pygame 子进程并结算。"""
+        ok, msg, _result = launch_pet_arena(self.state)
+        save_state(self.state)
+        self.widget.refresh()
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+        if ok:
+            QMessageBox.information(self.widget, "竞技场结算", msg)
+        else:
+            QMessageBox.warning(self.widget, "无法开始", msg)
 
     # ---------- 退出 ----------
     def quit(self) -> None:
