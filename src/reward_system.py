@@ -4,7 +4,22 @@ from __future__ import annotations
 import random
 from typing import Optional
 
-from .models import AppState, Reward
+from .models import AppState, Reward, RollAccum, RollHistoryEntry
+
+
+def _append_roll_history(state: AppState, reward: Reward) -> None:
+    active = state.active_task()
+    entry = RollHistoryEntry(
+        op_at=state.total_operations,
+        hit=not reward.is_empty(),
+        gold=reward.gold,
+        diamond=reward.diamond,
+        task_title=active.title if active else "",
+    )
+    state.roll_history.insert(0, entry)
+    max_len = max(10, int(state.settings.get("roll_history_max", 100)))
+    if len(state.roll_history) > max_len:
+        del state.roll_history[max_len:]
 
 
 def maybe_roll(state: AppState) -> Optional[Reward]:
@@ -24,15 +39,30 @@ def maybe_roll(state: AppState) -> Optional[Reward]:
         return None
 
     state.last_roll_at = (state.total_operations // interval) * interval
+    state.since_roll = RollAccum()
 
     chance = float(s.get("roll_chance", 0.35))
     if random.random() >= chance:
-        return Reward(op_at=state.total_operations)
+        reward = Reward(op_at=state.total_operations)
+        _append_roll_history(state, reward)
+        return reward
 
     diamond_chance = float(s.get("diamond_chance", 0.08))
     if random.random() < diamond_chance:
-        return Reward(diamond=1, op_at=state.total_operations)
+        dmin = float(s.get("diamond_min", 0.1))
+        dmax = max(dmin, float(s.get("diamond_max", 1.0)))
+        reward = Reward(
+            diamond=round(random.uniform(dmin, dmax), 1),
+            op_at=state.total_operations,
+        )
+        _append_roll_history(state, reward)
+        return reward
 
-    gold_min = int(s.get("gold_min", 1))
-    gold_max = max(gold_min, int(s.get("gold_max", 10)))
-    return Reward(gold=random.randint(gold_min, gold_max), op_at=state.total_operations)
+    gold_min = float(s.get("gold_min", 0.1))
+    gold_max = max(gold_min, float(s.get("gold_max", 1.0)))
+    reward = Reward(
+        gold=round(random.uniform(gold_min, gold_max), 1),
+        op_at=state.total_operations,
+    )
+    _append_roll_history(state, reward)
+    return reward

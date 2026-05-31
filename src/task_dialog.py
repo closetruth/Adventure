@@ -124,6 +124,7 @@ class TaskCard(QFrame):
             self.task.operations,
             summary.gold,
             summary.diamond,
+            show_runtime=False,
         )
         v.addWidget(self.task_stats)
 

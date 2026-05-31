@@ -17,8 +17,8 @@ class TaskStatus(str, Enum):
 @dataclass
 class Reward:
     """单次奖励掉落记录。"""
-    gold: int = 0
-    diamond: int = 0
+    gold: float = 0.0
+    diamond: float = 0.0
     # 触发时所属的操作计数，便于排序回顾
     op_at: int = 0
 
@@ -72,12 +72,47 @@ class Task:
 @dataclass
 class Inventory:
     """玩家全局背包。"""
-    gold: int = 0
-    diamond: int = 0
+    gold: float = 0.0
+    diamond: float = 0.00
 
     def add(self, reward: Reward) -> None:
         self.gold += reward.gold
         self.diamond += reward.diamond
+
+
+@dataclass
+class RollAccum:
+    """自上次开奖检查点以来累计掉落到当前任务的奖励。"""
+    gold: float = 0.0
+    diamond: float = 0.0
+
+    def is_empty(self) -> bool:
+        return self.gold == 0.0 and self.diamond == 0.0
+
+
+@dataclass
+class RollHistoryEntry:
+    """单次开奖结果（命中或未中）。"""
+    op_at: int = 0
+    at: float = field(default_factory=time.time)
+    hit: bool = False
+    gold: float = 0.0
+    diamond: float = 0.0
+    task_title: str = ""
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "RollHistoryEntry":
+        return cls(
+            op_at=int(data.get("op_at", 0)),
+            at=float(data.get("at", time.time())),
+            hit=bool(data.get("hit", False)),
+            gold=float(data.get("gold", 0)),
+            diamond=float(data.get("diamond", 0)),
+            task_title=str(data.get("task_title", "")),
+        )
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
 
 
 @dataclass
@@ -87,14 +122,19 @@ class AppState:
     tasks: List[Task] = field(default_factory=list)
     total_operations: int = 0           # 全局历史操作数
     last_roll_at: int = 0               # 上一次开奖时所属的操作总数
+    since_roll: RollAccum = field(default_factory=RollAccum)
+    roll_history: List[RollHistoryEntry] = field(default_factory=list)
     settings: Dict = field(default_factory=lambda: {
         "pin_all_desktops": True,
         "always_on_top": True,
         "roll_interval": 10,           # 每多少次操作触发一次开奖
         "roll_chance": 0.35,           # 命中奖励的概率
-        "gold_min": 1,
-        "gold_max": 10,
+        "gold_min": 0.1,
+        "gold_max": 1.0,
         "diamond_chance": 0.08,        # 在命中奖励的前提下，钻石替代金币的概率
+        "diamond_min": 0.01,
+        "diamond_max": 0.1,
+        "pet_best_round": 0,
     })
 
     def active_task(self) -> Optional[Task]:
@@ -110,6 +150,8 @@ class AppState:
             "tasks": [t.to_dict() for t in self.tasks],
             "total_operations": self.total_operations,
             "last_roll_at": self.last_roll_at,
+            "since_roll": asdict(self.since_roll),
+            "roll_history": [e.to_dict() for e in self.roll_history],
             "settings": self.settings,
         }
 
@@ -117,11 +159,18 @@ class AppState:
     def from_dict(cls, data: Dict) -> "AppState":
         inv = Inventory(**data.get("inventory", {}))
         tasks = [Task.from_dict(t) for t in data.get("tasks", [])]
+        sr = data.get("since_roll", {})
+        history = [RollHistoryEntry.from_dict(x) for x in data.get("roll_history", [])]
         s = cls(
             inventory=inv,
             tasks=tasks,
             total_operations=data.get("total_operations", 0),
             last_roll_at=data.get("last_roll_at", 0),
+            since_roll=RollAccum(
+                gold=float(sr.get("gold", 0)),
+                diamond=float(sr.get("diamond", 0)),
+            ),
+            roll_history=history,
         )
         s.settings.update(data.get("settings", {}))
         return s
