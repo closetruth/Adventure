@@ -20,8 +20,8 @@ def _sessions_dir() -> Path:
 @dataclass
 class GameSession:
     session_id: str
-    gold: int
-    diamond: int
+    gold: float
+    diamond: float
     created_at: float = 0.0
 
     def __post_init__(self) -> None:
@@ -29,7 +29,7 @@ class GameSession:
             self.created_at = time.time()
 
     @classmethod
-    def create(cls, gold: int, diamond: int) -> "GameSession":
+    def create(cls, gold: float, diamond: float) -> "GameSession":
         return cls(session_id=uuid.uuid4().hex[:16], gold=gold, diamond=diamond)
 
     def session_path(self) -> Path:
@@ -50,8 +50,8 @@ class GameSession:
             data = json.load(f)
         return cls(
             session_id=data["session_id"],
-            gold=int(data["gold"]),
-            diamond=int(data["diamond"]),
+            gold=float(data["gold"]),
+            diamond=float(data["diamond"]),
             created_at=float(data.get("created_at", 0)),
         )
 
@@ -59,8 +59,8 @@ class GameSession:
 @dataclass
 class GameResult:
     session_id: str
-    gold_delta: int = 0
-    diamond_delta: int = 0
+    gold_delta: float = 0.0
+    diamond_delta: float = 0.0
     waves_cleared: int = 0
     message: str = ""
 
@@ -73,8 +73,8 @@ class GameResult:
                 data = json.load(f)
             return cls(
                 session_id=data.get("session_id", ""),
-                gold_delta=int(data.get("gold_delta", 0)),
-                diamond_delta=int(data.get("diamond_delta", 0)),
+                gold_delta=float(data.get("gold_delta", 0)),
+                diamond_delta=float(data.get("diamond_delta", 0)),
                 waves_cleared=int(data.get("waves_cleared", 0)),
                 message=str(data.get("message", "")),
             )

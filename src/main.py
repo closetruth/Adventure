@@ -23,7 +23,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from .game_launcher import launch_pet_arena
+from .game_launcher import launch_pet_arena, launch_pixel_tactics
 from .input_monitor import InputMonitor
 from .inventory_dialog import InventoryDialog
 from .models import AppState
@@ -161,6 +161,7 @@ class Application(QObject):
         self.state.total_operations += 1
         reward = maybe_roll(self.state)
         self.manager.record_operation(reward)
+        self.widget.note_operation()
         # 即时刷新（保持成本低）
         self.widget.refresh()
         if self._task_dialog is not None and self._task_dialog.isVisible():
@@ -183,6 +184,7 @@ class Application(QObject):
         if self._inv_dialog is None:
             self._inv_dialog = InventoryDialog(self.state, parent=self.widget)
             self._inv_dialog.request_play_game.connect(self.play_pet_arena)
+            self._inv_dialog.request_play_grid_game.connect(self.play_pixel_tactics)
         self._inv_dialog.refresh()
         self._inv_dialog.show()
         self._inv_dialog.raise_()
@@ -197,6 +199,17 @@ class Application(QObject):
             self._inv_dialog.refresh()
         if ok:
             QMessageBox.information(self.widget, "竞技场结算", msg)
+        else:
+            QMessageBox.warning(self.widget, "无法开始", msg)
+
+    def play_pixel_tactics(self) -> None:
+        ok, msg, _result = launch_pixel_tactics(self.state)
+        save_state(self.state)
+        self.widget.refresh()
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+        if ok:
+            QMessageBox.information(self.widget, "像素战场结算", msg)
         else:
             QMessageBox.warning(self.widget, "无法开始", msg)
 

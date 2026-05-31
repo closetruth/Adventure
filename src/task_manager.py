@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import List, Optional
 
-from .models import AppState, Reward, Task, TaskStatus
+from .models import AppState, Reward, RollAccum, Task, TaskStatus
 
 
 class TaskManager:
@@ -77,3 +77,5 @@ class TaskManager:
             active.operations += 1
             if reward is not None and not reward.is_empty():
                 active.pending_rewards.append(reward)
+                self.state.since_roll.gold += reward.gold
+                self.state.since_roll.diamond += reward.diamond

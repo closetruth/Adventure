@@ -18,10 +18,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .op_tracker import OpRateTracker
 from .models import AppState, Task, TaskStatus
 from .storage import save_state
 from .task_manager import TaskManager
 from .ui_task_stats import TaskRewardStrip
+from .ui_text import format_amount, format_roll_history_lines
 from .win_utils import (
     is_windows,
     pin_window_to_all_desktops,
@@ -39,13 +41,8 @@ QWidget#WidgetRoot {
 QLabel { color: #f5f5f7; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"; }
 QLabel#Title { font-size: 15px; font-weight: 700; }
 QLabel#Subtle { color: #b8bcc8; font-size: 12px; }
-QLabel#StatNum { font-size: 24px; font-weight: 800; }
-QLabel#GoldNum  { color: #ffd54f; font-size: 26px; font-weight: 800; }
-QLabel#DiamNum  { color: #7dd3fc; font-size: 26px; font-weight: 800; }
-QLabel#OpNum    { color: #86efac; font-size: 24px; font-weight: 800; }
-QLabel#StatCap { color: #d8dce8; font-size: 13px; font-weight: 700; }
-QLabel#GoldCap { color: #ffd54f; font-size: 13px; font-weight: 700; }
-QLabel#DiamCap { color: #7dd3fc; font-size: 13px; font-weight: 700; }
+QLabel#GlobalSummary { color: #7a8090; font-size: 11px; font-weight: 500; }
+QLabel#RollHist { color: #aeb4c4; font-size: 11px; font-weight: 500; line-height: 1.35; }
 QLabel#TaskTitle { font-size: 14px; font-weight: 700; }
 QPushButton {
     background-color: rgba(255,255,255,18);
@@ -106,7 +103,9 @@ class FloatingWidget(QWidget):
         )
         self.setWindowFlags(flags)
         self.setFixedWidth(300)
-        self.setMinimumHeight(260)
+        self.setMinimumHeight(340)
+
+        self._op_tracker = OpRateTracker(window_sec=60.0)
 
         self._build_ui()
         self._refresh()
@@ -153,16 +152,10 @@ class FloatingWidget(QWidget):
         top.addWidget(self.close_btn)
         v.addLayout(top)
 
-        # 统计
-        stats = QHBoxLayout()
-        stats.setSpacing(6)
-        self.op_num = self._make_stat("操作数", "OpNum", "StatCap")
-        self.gold_num = self._make_stat("金币", "GoldNum", "GoldCap")
-        self.diam_num = self._make_stat("钻石", "DiamNum", "DiamCap")
-        stats.addWidget(self.op_num["box"])
-        stats.addWidget(self.gold_num["box"])
-        stats.addWidget(self.diam_num["box"])
-        v.addLayout(stats)
+        self.global_summary = QLabel("")
+        self.global_summary.setObjectName("GlobalSummary")
+        self.global_summary.setAlignment(Qt.AlignCenter)
+        v.addWidget(self.global_summary)
 
         # 开奖进度
         bar_row = QVBoxLayout()
@@ -176,6 +169,18 @@ class FloatingWidget(QWidget):
         bar_row.addWidget(cap)
         bar_row.addWidget(self.roll_bar)
         v.addLayout(bar_row)
+
+        hist_row = QVBoxLayout()
+        hist_row.setSpacing(2)
+        hist_cap = QLabel("开奖历史")
+        hist_cap.setObjectName("Subtle")
+        self.roll_history_lbl = QLabel("暂无开奖记录")
+        self.roll_history_lbl.setObjectName("RollHist")
+        self.roll_history_lbl.setWordWrap(True)
+        self.roll_history_lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        hist_row.addWidget(hist_cap)
+        hist_row.addWidget(self.roll_history_lbl)
+        v.addLayout(hist_row)
 
         divider = QFrame()
         divider.setObjectName("Divider")
@@ -202,21 +207,9 @@ class FloatingWidget(QWidget):
         btns.addWidget(self.inv_btn)
         v.addLayout(btns)
 
-    def _make_stat(self, caption: str, num_object_name: str, cap_object_name: str = "StatCap") -> dict:
-        box = QWidget()
-        lay = QVBoxLayout(box)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(2)
-        num = QLabel("0")
-        num.setObjectName(num_object_name)
-        num.setAlignment(Qt.AlignCenter)
-        cap = QLabel(caption)
-        cap.setObjectName(cap_object_name)
-        cap.setAlignment(Qt.AlignCenter)
-        lay.addWidget(num)
-        lay.addWidget(cap)
-        box.setStyleSheet("background-color: rgba(255,255,255,14); border-radius: 8px;")
-        return {"box": box, "num": num}
+    def note_operation(self) -> None:
+        """记录一次全局操作（用于近1分钟计数）。"""
+        self._op_tracker.record()
 
     # ---------- 拖动 ----------
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -307,9 +300,20 @@ class FloatingWidget(QWidget):
 
     def _refresh(self) -> None:
         s = self.state
-        self.op_num["num"].setText(str(s.total_operations))
-        self.gold_num["num"].setText(str(s.inventory.gold))
-        self.diam_num["num"].setText(str(s.inventory.diamond))
+        ops_1min = self._op_tracker.count_recent()
+        active = s.active_task()
+
+        if active is None:
+            self.global_summary.setText(
+                f"近1分钟 {ops_1min} · 总操作 {s.total_operations:,} · "
+                f"金币 {format_amount(s.inventory.gold)} · "
+                f"钻石 {format_amount(s.inventory.diamond)}"
+            )
+        else:
+            self.global_summary.setText(
+                f"总操作 {s.total_operations:,} · 金币 {format_amount(s.inventory.gold)} · "
+                f"钻石 {format_amount(s.inventory.diamond)}"
+            )
 
         interval = int(s.settings.get("roll_interval", 10))
         self.roll_bar.setRange(0, interval)
@@ -318,7 +322,11 @@ class FloatingWidget(QWidget):
         self.roll_bar.setValue(progress)
         self.roll_bar.setFormat(f"{progress}/{interval}")
 
-        active = s.active_task()
+        hist_lines = format_roll_history_lines(s.roll_history, limit=5)
+        self.roll_history_lbl.setText("\n".join(hist_lines))
+
+        since = s.since_roll
+
         if active is None:
             paused = self.manager.by_status(TaskStatus.PAUSED)
             if paused:
@@ -337,21 +345,37 @@ class FloatingWidget(QWidget):
                 active.operations,
                 summary.gold,
                 summary.diamond,
-                duration,
+                ops_1min=ops_1min,
+                since_roll_gold=since.gold,
+                since_roll_diamond=since.diamond,
+                duration=duration,
             )
 
     def _refresh_runtime(self) -> None:
         """仅刷新与时间相关的字段，避免整窗口频繁重绘。"""
+        ops_1min = self._op_tracker.count_recent()
         active = self.state.active_task()
-        if active is not None:
-            summary = active.pending_summary()
-            duration = _format_duration(time.time() - active.created_at)
-            self.task_stats.show_active(
-                active.operations,
-                summary.gold,
-                summary.diamond,
-                duration,
+        if active is None:
+            s = self.state
+            self.global_summary.setText(
+                f"近1分钟 {ops_1min} · 总操作 {s.total_operations:,} · "
+                f"金币 {format_amount(s.inventory.gold)} · "
+                f"钻石 {format_amount(s.inventory.diamond)}"
             )
+            return
+
+        summary = active.pending_summary()
+        duration = _format_duration(time.time() - active.created_at)
+        since = self.state.since_roll
+        self.task_stats.show_active(
+            active.operations,
+            summary.gold,
+            summary.diamond,
+            ops_1min=ops_1min,
+            since_roll_gold=since.gold,
+            since_roll_diamond=since.diamond,
+            duration=duration,
+        )
 
     # ---------- 显示时初始化窗口属性 ----------
     def showEvent(self, event) -> None:

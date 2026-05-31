@@ -8,9 +8,11 @@ from typing import List, Optional, Tuple
 
 from .game_protocol import GameResult, GameSession
 from .models import AppState
+from .ui_text import format_amount
 
 
 ENTRY_GOLD_COST = 10
+GRID_GAME_ENTRY_GOLD_COST = 12
 
 
 def project_root() -> Path:
@@ -30,8 +32,12 @@ def python_for_subprocess() -> str:
     return str(exe)
 
 
-def game_script_path() -> Path:
-    return project_root() / "games" / "pet_arena.py"
+def game_script_path(game_key: str) -> Path:
+    mapping = {
+        "pet": "pet_arena.py",
+        "grid": "pixel_tactics.py",
+    }
+    return project_root() / "games" / mapping.get(game_key, "pet_arena.py")
 
 
 def pygame_available() -> bool:
@@ -42,26 +48,27 @@ def pygame_available() -> bool:
         return False
 
 
-def build_game_command(session_in: Path) -> List[str]:
+def build_game_command(game_key: str, session_in: Path) -> List[str]:
     """构造启动小游戏的命令行（开发态 / 打包态通用）。"""
     session_str = str(session_in.resolve())
     py = python_for_subprocess()
     if getattr(sys, "frozen", False):
-        return [py, "--game", session_str]
+        return [py, "--game", game_key, session_str]
 
     root = project_root()
     run_py = root / "run.py"
     if run_py.exists():
-        return [py, str(run_py), "--game", session_str]
+        return [py, str(run_py), "--game", game_key, session_str]
 
-    script = game_script_path()
+    script = game_script_path(game_key)
     if script.exists():
         return [py, str(script), session_str]
 
-    return [py, "-m", "games.pet_arena", session_str]
+    module = "games.pet_arena" if game_key == "pet" else "games.pixel_tactics"
+    return [py, "-m", module, session_str]
 
 
-def can_start_game(state: AppState) -> Tuple[bool, str]:
+def can_start_game(state: AppState, game_key: str) -> Tuple[bool, str]:
     if not pygame_available():
         return (
             False,
@@ -72,16 +79,17 @@ def can_start_game(state: AppState) -> Tuple[bool, str]:
             "  .venv\\Scripts\\python.exe -m pip install pygame-ce\n"
             "推荐用 Python 3.12 重建环境：install.bat",
         )
-    if state.inventory.gold < ENTRY_GOLD_COST:
+    need = ENTRY_GOLD_COST if game_key == "pet" else GRID_GAME_ENTRY_GOLD_COST
+    if state.inventory.gold < need:
         return (
             False,
-            f"至少需要 {ENTRY_GOLD_COST} 金币才能进入竞技场。\n"
+            f"至少需要 {need} 金币才能进入游戏。\n"
             f"当前背包金币：{state.inventory.gold}",
         )
     if not getattr(sys, "frozen", False):
         root = project_root()
-        if not (root / "games" / "pet_arena.py").exists() and not (root / "run.py").exists():
-            return False, "找不到小游戏文件 games/pet_arena.py"
+        if not game_script_path(game_key).exists() and not (root / "run.py").exists():
+            return False, f"找不到小游戏文件 {game_script_path(game_key).name}"
     return True, ""
 
 
@@ -96,9 +104,8 @@ def _format_proc_error(proc: subprocess.CompletedProcess[str]) -> str:
     return f"退出码 {proc.returncode}"
 
 
-def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
-    """启动小游戏，成功返回 (True, 提示, GameResult)。"""
-    ok, msg = can_start_game(state)
+def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[GameResult]]:
+    ok, msg = can_start_game(state, game_key)
     if not ok:
         return False, msg, None
 
@@ -111,7 +118,7 @@ def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
     if result_path.exists():
         result_path.unlink()
 
-    cmd = build_game_command(in_path)
+    cmd = build_game_command(game_key, in_path)
     cwd = str(project_root())
     try:
         proc = subprocess.run(
@@ -140,16 +147,30 @@ def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
 
     state.inventory.gold = max(0, state.inventory.gold + result.gold_delta)
     state.inventory.diamond = max(0, state.inventory.diamond + result.diamond_delta)
+    state.settings["pet_best_round"] = max(
+        int(state.settings.get("pet_best_round", 0)),
+        int(result.waves_cleared),
+    )
 
     tip = result.message or "游戏结束"
     if result.gold_delta or result.diamond_delta:
         parts = []
         if result.gold_delta:
             sign = "+" if result.gold_delta > 0 else ""
-            parts.append(f"金币 {sign}{result.gold_delta}")
+            parts.append(f"金币 {sign}{format_amount(result.gold_delta)}")
         if result.diamond_delta:
             sign = "+" if result.diamond_delta > 0 else ""
-            parts.append(f"钻石 {sign}{result.diamond_delta}")
+            parts.append(f"钻石 {sign}{format_amount(result.diamond_delta)}")
         tip = f"{tip}\n（{', '.join(parts)}）"
 
     return True, tip, result
+
+
+def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
+    """启动 AutoPet 竞技场。"""
+    return _launch_game(state, "pet")
+
+
+def launch_pixel_tactics(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
+    """启动像素格子战场（类金铲铲）。"""
+    return _launch_game(state, "grid")
