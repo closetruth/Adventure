@@ -1,119 +1,148 @@
 # Adventure
 
-一个能在 Windows 10 桌面悬浮显示的「**任务 + 奖励**」小部件。
-做完任务领奖励，敲键盘/点鼠标随机掉落金币与钻石，让普通的工作时光变成一场冒险 ✨
-
-![preview](docs/preview-placeholder.png)
+一个能在 Windows 10/11 桌面悬浮显示的「**任务 + 奖励**」小部件。  
+敲键盘、点鼠标会累计操作数并周期性「开奖」；奖励先挂在当前任务上，完成任务后再领进背包。附带两个 pygame 小游戏。
 
 ---
 
 ## 功能特性
 
-### Todo 列表
-- ✅ 创建任务（标题 + 备注）
-- ⏸ 暂停 / ▶ 恢复任务
-- 🗑 删除任务
-- 🎉 完成任务并领取累计奖励
-- 显示任务创建时间 / 完成时间
-- 显示该任务进行期间累计的「操作数」
+### 任务
+- 创建任务（标题 + 备注）
+- 暂停 / 恢复 / 删除
+- 完成任务并领取该任务累计的待领奖励
+- 显示创建时间、完成时间、本任务操作数
+- 同一时间只能有一个「进行中」任务
 
-### 奖励系统
-- 奖励分为 🪙 金币 与 💎 钻石
-- 自动监听全局键盘 / 鼠标点击，每次操作累计计数
-- 每 `N` 次操作（默认 10 次）触发一次「开奖」
-- 命中概率与金币/钻石区间均可在 `data.json → settings` 自定义
-- 默认单次奖励区间：金币 `0.1~1.0`，钻石 `0.1~1.0`
-- 奖励先暂存在「当前进行中」的任务里，**任务完成后**才能领入背包
-- 一次只能有一个「进行中」任务，新建/恢复其它任务会自动暂停当前任务
+### 奖励
+- 金币与钻石（浮点数，界面最多显示 1 位小数）
+- 全局键鼠监听：每次独立按键按下或鼠标按下计 1 次操作（长按不重复计）
+- 每 `N` 次操作（默认 10）触发一次开奖；未命中也会记入开奖历史
+- 参数可在 `data.json` 的 `settings` 中调整（间隔、概率、金币/钻石区间）
+- 奖励先进入**当前进行中任务**的待领列表，**完成任务**后才进入背包
 
-### 小部件 (悬浮窗)
-- 常驻桌面，始终置顶
-- **Win10/Win11 自动固定到所有虚拟桌面**（依赖 `pyvda`）
-- 显示操作数、距下次开奖的进度条
-- 显示当前持有的金币 / 钻石
-- 显示进行中的任务标题 + 待领取奖励
-- 支持拖动移动、最小化、右键菜单（置顶 / 全桌面 / 开机自启 / 退出）
-- 同时驻留系统托盘，关闭悬浮窗后可从托盘再次唤出
+### 悬浮窗
+- 置顶、可拖动、系统托盘、右键菜单（置顶 / 固定到所有虚拟桌面 / 开机自启 / 退出）
+- **全局统计**（总操作、背包金币/钻石）以小字显示
+- **任务区**突出显示：本任务操作、待领金币/钻石、近 1 分钟操作、自上次开奖以来累计掉落
+- 距下次开奖进度条、最近 5 条开奖历史
 
-### 小游戏：小动物竞技场（pygame）
-- 在「奖励背包」点击 **开始游戏** 进入
-- 入场费 **10 金币**；AutoPet 风格商店回合（Q/W/E 购买，A/S/D 冻结，1~5 选槽位，左右换位，X 卖出，R 刷新）
-- 空格开始自动战斗；按回合结算胜负与奖励，胜场会持续获得金币并周期性获得钻石
-- **ESC** 退出并结算到背包
+### 奖励背包
+- 查看金币、钻石、任务统计、**完整开奖历史**（可滚动）
+- 启动小游戏并结算回背包
 
-### 小游戏：像素格子战场（类金铲铲）
-- 在「奖励背包」点击 **开始像素格子模式** 进入
-- 入场费 **12 金币**；6x4 像素棋盘，先布阵后自动战斗
-- 方向键移动光标，`1/2/3` 选备战单位，`Z` 放置，`X` 移除，`R` 刷新，`Space` 开战
-- 回合胜利可获得金币，并按胜场周期奖励钻石
+### 小游戏
+| 游戏 | 入口 | 入场费 | 说明 |
+|------|------|--------|------|
+| 小动物竞技场 | 开始游戏 | 10 金币 | AutoPet 风格商店 + 自动战斗，`ESC` 结算 |
+| 像素格子战场 | 开始像素格子模式 | 12 金币 | 6×4 布阵对战，`ESC` 结算 |
+
+操作说明见游戏内提示；主程序通过子进程 + JSON 会话文件与游戏通信。
 
 ---
 
-## 一键安装到 Windows 10（推荐路径）
+## 快速开始（Windows）
 
-> 推荐 **Python 3.12 或 3.13**。若使用 **Python 3.14**，小游戏依赖 `pygame-ce`（不要用官方 `pygame`，会编译失败）。
+> **推荐 Python 3.12 或 3.13。** 若使用 **3.14**，必须用 `pygame-ce`（`requirements.txt` 已指定），不要用官方 `pygame`。
 
-1. 把整个项目目录复制到本机任意位置（例如 `C:\Users\<你>\Desktop\Adventure`）。
-2. 双击 `install.bat`：创建 `.venv` 并安装依赖（含 `pygame-ce`）。
-3. 若只修复游戏依赖：双击 `fix_game.bat`。
-3. 双击 `run.bat` 即可启动 Adventure。
-4. 在悬浮窗右键菜单中勾选「开机自启」，开机后即可自动随系统启动。
+1. 将项目放到任意目录（如 `Desktop\Adventure`）。
+2. 双击 **`install.bat`**：创建 `.venv` 并安装依赖。
+3. 双击 **`run.bat`** 启动（无控制台窗口）。
+4. （可选）小游戏无法启动时，双击 **`fix_game.bat`** 仅重装 `pygame-ce`。
+5. 在悬浮窗右键菜单可勾选「开机自启」。
 
-如需打包成独立的 `.exe`（无需用户装 Python），执行：
+手动启动：
 
 ```bat
-build.bat
+.venv\Scripts\pythonw.exe run.py
 ```
-
-打包产物位于 `dist\Adventure\Adventure.exe`，可直接双击运行，也能拷贝到任意 Win10 机器上使用。
 
 ---
 
-## 手动安装（开发者 / 跨平台）
+## 手动安装（开发者）
 
 ```bash
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
 pip install -r requirements.txt
 python run.py
 ```
 
-> ⚠️ 非 Windows 平台无法使用「固定到所有虚拟桌面」功能；其余 Todo / 奖励 / 监听仍可工作（依赖 pynput 的全局监听在 macOS 上需要授予「辅助功能」权限）。
+小游戏子进程（调试）：
+
+```bat
+python run.py --game pet <session_in.json>
+python run.py --game grid <session_in.json>
+```
+
+> 非 Windows 无法使用「固定到所有虚拟桌面」；macOS 上 pynput 需授予辅助功能权限。
 
 ---
 
-## 使用指南
+## 打包为 exe
 
-| 入口 | 说明 |
-| --- | --- |
-| 悬浮窗 - 拖动 | 左键按住任意位置拖动小部件移动 |
-| 悬浮窗 - 右键 | 弹出菜单：置顶 / 全桌面固定 / 开机自启 / 退出 |
-| 悬浮窗 - 任务管理 | 打开任务面板：创建 / 暂停 / 恢复 / 完成 / 删除 |
-| 悬浮窗 - 奖励背包 | 查看金币、钻石及统计 |
-| 系统托盘 - 单击 | 重新显示悬浮窗 |
-| 系统托盘 - 右键 | 与悬浮窗右键菜单基本一致 |
+```bat
+build.bat
+```
 
-数据自动保存到：
+需要项目根目录存在 **`Adventure.spec`**（PyInstaller 配置）。产物一般在 `dist\Adventure\Adventure.exe`。
+
+---
+
+## 使用说明
+
+| 操作 | 说明 |
+|------|------|
+| 左键拖动 | 移动悬浮窗 |
+| 右键 | 置顶 / 全桌面 / 开机自启 / 退出 |
+| 任务管理 | 创建、暂停、恢复、完成、删除任务 |
+| 奖励背包 | 资产、统计、开奖历史、进入小游戏 |
+| 托盘单击 | 重新显示悬浮窗 |
+
+---
+
+## 数据存储
+
+路径：
 
 ```
 %APPDATA%\Adventure\data.json
 ```
 
-可手动备份 / 调整其中的 `settings` 字段：
+小游戏会话（临时）：
+
+```
+%APPDATA%\Adventure\game_sessions\
+```
+
+主要字段：
+
+| 字段 | 含义 |
+|------|------|
+| `inventory` | 已领取的金币、钻石 |
+| `tasks[]` | 任务列表及每条任务的 `pending_rewards` |
+| `total_operations` | 全局操作总数 |
+| `last_roll_at` | 上次开奖检查点（操作数） |
+| `since_roll` | 自上次开奖以来掉落到当前任务的累计奖励 |
+| `roll_history[]` | 开奖历史（最多约 100 条） |
+| `settings` | 窗口行为、开奖参数、`pet_best_round` 等 |
+
+`settings` 示例（默认值以 `src/models.py` 为准）：
 
 ```json
 {
   "roll_interval": 10,
   "roll_chance": 0.35,
-  "gold_min": 1,
-  "gold_max": 10,
-  "diamond_chance": 0.08
+  "gold_min": 0.1,
+  "gold_max": 1.0,
+  "diamond_chance": 0.08,
+  "diamond_min": 0.01,
+  "diamond_max": 0.1
 }
 ```
+
+程序约每 15 秒自动保存；退出时也会保存。损坏的 `data.json` 会被备份为 `data.broken.json` 并重建空档。
 
 ---
 
@@ -121,32 +150,52 @@ python run.py
 
 ```
 Adventure/
-├── README.md
+├── run.py                 # 主程序 / --game 子进程入口
+├── run.bat                # 一键启动
+├── install.bat            # 一键安装 venv + 依赖
+├── fix_game.bat           # 仅修复 pygame-ce
+├── build.bat              # PyInstaller 打包
 ├── requirements.txt
-├── install.bat            # Win10 一键安装：创建 venv + 装依赖
-├── run.bat                # Win10 一键启动 (pythonw, 无黑框)
-├── build.bat              # PyInstaller 打包为 .exe
-├── run.py                 # 跨平台开发入口
 ├── games/
-│   └── pet_arena.py       # pygame 小动物竞技场
+│   ├── pet_arena.py       # 小动物竞技场
+│   └── pixel_tactics.py   # 像素格子战场
 └── src/
-    ├── __init__.py
-    ├── main.py            # Qt 应用入口、信号桥接
-    ├── widget.py          # 悬浮主小部件
-    ├── task_dialog.py     # 任务管理对话框
-    ├── inventory_dialog.py# 奖励背包对话框
-    ├── task_manager.py    # 任务 CRUD 与状态机
+    ├── main.py            # Qt 应用、托盘、操作事件管线
+    ├── widget.py          # 悬浮窗
+    ├── task_dialog.py     # 任务管理
+    ├── inventory_dialog.py# 背包与开奖历史
+    ├── ui_task_stats.py   # 任务统计条组件
+    ├── ui_text.py         # 金额与历史文案格式化
+    ├── task_manager.py    # 任务 CRUD
     ├── reward_system.py   # 开奖逻辑
-    ├── input_monitor.py   # pynput 全局键鼠监听
-    ├── storage.py         # JSON 持久化 (原子写入)
-    ├── models.py          # 数据模型 (dataclass)
-    ├── game_launcher.py   # 启动小游戏子进程并结算
-    ├── game_protocol.py   # 主程序与小游戏 JSON 通信
-    └── win_utils.py       # Windows 专属：固定虚拟桌面 / 开机启动
+    ├── input_monitor.py   # pynput 全局监听
+    ├── op_tracker.py      # 近 1 分钟操作计数（仅内存）
+    ├── models.py          # 数据模型
+    ├── storage.py         # JSON 持久化
+    ├── game_launcher.py   # 启动游戏子进程
+    ├── game_protocol.py   # 主程序 ↔ 游戏 JSON 协议
+    └── win_utils.py         # 置顶、虚拟桌面、开机自启
 ```
+
+可选脚本：`install.ps1`（与 `install.bat` 类似）。`run_game.bat` 仅作提示，正常从背包进入游戏即可。
 
 ---
 
-## 隐私说明
-- 全局监听仅统计**按键 / 点击次数**，不记录任何按键内容、坐标、应用名或上下文。
-- 所有数据存储在本地 `%APPDATA%\Adventure\` 下，不上传任何远端。
+## 性能说明
+
+- 平时只开悬浮窗时负载很低；全局监听在独立线程，UI 在主线程更新。
+- 若**开着「任务管理」窗口**同时快速打字，会因频繁重建任务卡片而略顿，关掉即可。
+- 小游戏在**独立子进程**中运行，不拖慢主窗口。
+
+---
+
+## 隐私
+
+- 只统计操作次数，**不记录**按键内容、鼠标坐标或前台应用名。
+- 数据仅保存在本机 `%APPDATA%\Adventure\`，不上传。
+
+---
+
+## 许可
+
+见 [LICENSE](LICENSE)。
