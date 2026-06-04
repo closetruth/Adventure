@@ -39,8 +39,39 @@ class Task:
     # 任务进行期间累计的操作数 (仅 active 时累加)
     operations: int = 0
 
+    # 仅「进行中」状态的累计时长（秒）；暂停、系统休眠不计
+    active_seconds: float = 0.0
+    active_since: Optional[float] = None  # 当前段起点（time.monotonic，不写入存档）
+
     # 待领取奖励：完成任务后会进入用户背包
     pending_rewards: List[Reward] = field(default_factory=list)
+
+    # 完成任务时领取的奖励合计（写入背包后保留记录）
+    completed_reward_gold: float = 0.0
+    completed_reward_diamond: float = 0.0
+
+    def _active_elapsed(self) -> float:
+        if self.active_since is None:
+            return 0.0
+        return max(0.0, time.monotonic() - self.active_since)
+
+    def flush_active_time(self) -> None:
+        """把当前进行中的一段时长并入 active_seconds，并停止计时。"""
+        if self.active_since is not None:
+            self.active_seconds += self._active_elapsed()
+            self.active_since = None
+
+    def start_active_clock(self) -> None:
+        """开始或恢复进行中计时。"""
+        if self.active_since is None:
+            self.active_since = time.monotonic()
+
+    def active_duration_seconds(self) -> float:
+        """进行中累计秒数（含当前这一段；暂停与休眠不计）。"""
+        total = self.active_seconds
+        if self.status == TaskStatus.ACTIVE and self.active_since is not None:
+            total += self._active_elapsed()
+        return total
 
     def pending_summary(self) -> Reward:
         total = Reward()
@@ -52,7 +83,7 @@ class Task:
     @classmethod
     def from_dict(cls, data: Dict) -> "Task":
         rewards = [Reward(**r) for r in data.get("pending_rewards", [])]
-        return cls(
+        task = cls(
             id=data.get("id", uuid.uuid4().hex[:12]),
             title=data.get("title", ""),
             note=data.get("note", ""),
@@ -60,12 +91,20 @@ class Task:
             created_at=data.get("created_at", time.time()),
             completed_at=data.get("completed_at"),
             operations=data.get("operations", 0),
+            active_seconds=float(data.get("active_seconds", 0)),
+            active_since=None,
             pending_rewards=rewards,
+            completed_reward_gold=float(data.get("completed_reward_gold", 0)),
+            completed_reward_diamond=float(data.get("completed_reward_diamond", 0)),
         )
+        if task.status == TaskStatus.ACTIVE:
+            task.start_active_clock()
+        return task
 
     def to_dict(self) -> Dict:
         d = asdict(self)
         d["status"] = self.status.value
+        d.pop("active_since", None)
         return d
 
 
@@ -143,6 +182,25 @@ class AppState:
             if t.status == TaskStatus.ACTIVE:
                 return t
         return None
+
+    def sync_active_timers_for_save(self) -> None:
+        """存档前结算当前进行中时段并重新起表（使用单调时钟，休眠期间不计）。"""
+        for t in self.tasks:
+            if t.status == TaskStatus.ACTIVE:
+                t.flush_active_time()
+                t.start_active_clock()
+
+    def pause_active_timers_for_suspend(self) -> None:
+        """系统休眠/应用挂起：停止进行中计时。"""
+        for t in self.tasks:
+            if t.status == TaskStatus.ACTIVE:
+                t.flush_active_time()
+
+    def resume_active_timers_after_suspend(self) -> None:
+        """从休眠恢复后继续计时。"""
+        for t in self.tasks:
+            if t.status == TaskStatus.ACTIVE:
+                t.start_active_clock()
 
     def to_dict(self) -> Dict:
         return {

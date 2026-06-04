@@ -8,6 +8,18 @@ if TYPE_CHECKING:
     from .models import RollHistoryEntry
 
 
+def format_duration(seconds: float) -> str:
+    """进行中累计时长（秒 → 可读字符串）。"""
+    seconds = int(max(0, seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h {m}m"
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
 def format_amount(value: float) -> str:
     """金额显示：最多 1 位小数，整数不带 .0。"""
     v = round(float(value), 1)

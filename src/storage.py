@@ -50,6 +50,7 @@ def load_state() -> AppState:
 def save_state(state: AppState) -> None:
     """原子写入：先写临时文件再 rename。"""
     path = get_data_file()
+    state.sync_active_timers_for_save()
     data = state.to_dict()
     tmp_fd, tmp_path = tempfile.mkstemp(
         prefix="adventure_", suffix=".json", dir=str(path.parent)
