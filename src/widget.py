@@ -23,7 +23,7 @@ from .models import AppState, Task, TaskStatus
 from .storage import save_state
 from .task_manager import TaskManager
 from .ui_task_stats import TaskRewardStrip
-from .ui_text import format_amount, format_roll_history_lines
+from .ui_text import format_amount, format_duration, format_roll_history_lines
 from .win_utils import (
     is_windows,
     pin_window_to_all_desktops,
@@ -340,7 +340,7 @@ class FloatingWidget(QWidget):
         else:
             self.task_title.setText(active.title)
             summary = active.pending_summary()
-            duration = _format_duration(time.time() - active.created_at)
+            duration = format_duration(active.active_duration_seconds())
             self.task_stats.show_active(
                 active.operations,
                 summary.gold,
@@ -365,7 +365,7 @@ class FloatingWidget(QWidget):
             return
 
         summary = active.pending_summary()
-        duration = _format_duration(time.time() - active.created_at)
+        duration = format_duration(active.active_duration_seconds())
         since = self.state.since_roll
         self.task_stats.show_active(
             active.operations,
@@ -382,14 +382,3 @@ class FloatingWidget(QWidget):
         super().showEvent(event)
         if self.state.settings.get("pin_all_desktops", True):
             pin_window_to_all_desktops(int(self.winId()))
-
-
-def _format_duration(seconds: float) -> str:
-    seconds = int(max(0, seconds))
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
-    if h > 0:
-        return f"{h}h {m}m"
-    if m > 0:
-        return f"{m}m {s}s"
-    return f"{s}s"

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from .models import AppState, Task, TaskStatus
 from .task_manager import TaskManager
 from .ui_task_stats import TASK_STATS_QSS, TaskRewardStrip
-from .ui_text import format_reward_gain
+from .ui_text import format_duration, format_reward_gain
 
 
 DIALOG_STYLESHEET = """
@@ -118,14 +118,32 @@ class TaskCard(QFrame):
             meta_done.setObjectName("CreatedMeta")
             v.addWidget(meta_done)
 
-        summary = self.task.pending_summary()
+        if self.task.status == TaskStatus.ACTIVE:
+            meta_active = QLabel(
+                f"进行中累计：{format_duration(self.task.active_duration_seconds())}"
+            )
+        else:
+            meta_active = QLabel(
+                f"进行中累计：{format_duration(self.task.active_seconds)}"
+            )
+        meta_active.setObjectName("CreatedMeta")
+        v.addWidget(meta_active)
+
         self.task_stats = TaskRewardStrip()
-        self.task_stats.show_active(
-            self.task.operations,
-            summary.gold,
-            summary.diamond,
-            show_runtime=False,
-        )
+        if self.task.status == TaskStatus.COMPLETED:
+            self.task_stats.show_completed(
+                self.task.operations,
+                self.task.completed_reward_gold,
+                self.task.completed_reward_diamond,
+            )
+        else:
+            summary = self.task.pending_summary()
+            self.task_stats.show_active(
+                self.task.operations,
+                summary.gold,
+                summary.diamond,
+                show_runtime=False,
+            )
         v.addWidget(self.task_stats)
 
         btn_row = QHBoxLayout()

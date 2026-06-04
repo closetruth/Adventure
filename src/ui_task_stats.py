@@ -117,6 +117,9 @@ class TaskRewardStrip(QWidget):
         self.op_chip["box"].show()
         self.gold_chip["box"].show()
         self.diam_chip["box"].show()
+        self.op_chip["cap"].setText("本任务操作")
+        self.gold_chip["cap"].setText("待领金币")
+        self.diam_chip["cap"].setText("待领钻石")
         self.op_chip["num"].setText(str(operations))
         self.gold_chip["num"].setText(format_amount(gold))
         self.diam_chip["num"].setText(format_amount(diamond))
@@ -133,10 +136,26 @@ class TaskRewardStrip(QWidget):
             self.since_roll_chip["box"].hide()
 
         if duration:
-            self.duration_lbl.setText(f"已进行 {duration}")
+            self.duration_lbl.setText(f"进行中 {duration}")
             self.duration_lbl.show()
         else:
             self.duration_lbl.hide()
+
+    def show_completed(self, operations: int, gold: float, diamond: float) -> None:
+        """已完成任务：显示操作数与完成时获得的奖励。"""
+        self.hint_lbl.hide()
+        self.rate_chip["box"].hide()
+        self.since_roll_chip["box"].hide()
+        self.duration_lbl.hide()
+        self.op_chip["box"].show()
+        self.gold_chip["box"].show()
+        self.diam_chip["box"].show()
+        self.op_chip["cap"].setText("本任务操作")
+        self.gold_chip["cap"].setText("获得金币")
+        self.diam_chip["cap"].setText("获得钻石")
+        self.op_chip["num"].setText(str(operations))
+        self.gold_chip["num"].setText(format_amount(gold))
+        self.diam_chip["num"].setText(format_amount(diamond))
 
     def show_hint(self, text: str) -> None:
         self.op_chip["box"].hide()

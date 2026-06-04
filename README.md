@@ -11,7 +11,7 @@
 - 创建任务（标题 + 备注）
 - 暂停 / 恢复 / 删除
 - 完成任务并领取该任务累计的待领奖励
-- 显示创建时间、完成时间、本任务操作数
+- 显示创建时间、完成时间、本任务操作数、**进行中累计时长**（暂停与系统休眠不计）
 - 同一时间只能有一个「进行中」任务
 
 ### 奖励
@@ -121,7 +121,7 @@ build.bat
 | 字段 | 含义 |
 |------|------|
 | `inventory` | 已领取的金币、钻石 |
-| `tasks[]` | 任务列表及每条任务的 `pending_rewards` |
+| `tasks[]` | 任务列表、`pending_rewards`、完成后 `completed_reward_gold` / `completed_reward_diamond` |
 | `total_operations` | 全局操作总数 |
 | `last_roll_at` | 上次开奖检查点（操作数） |
 | `since_roll` | 自上次开奖以来掉落到当前任务的累计奖励 |
