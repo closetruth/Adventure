@@ -31,8 +31,6 @@ class TaskManager:
         has_active = self.state.active_task() is not None
         status = TaskStatus.PAUSED if has_active else TaskStatus.ACTIVE
         task = Task(title=title, note=note, status=status)
-        if status == TaskStatus.ACTIVE:
-            task.start_active_clock()
         self.state.tasks.insert(0, task)
         return task
 
@@ -40,7 +38,6 @@ class TaskManager:
         t = self.get(task_id)
         if not t or t.status != TaskStatus.ACTIVE:
             return t
-        t.flush_active_time()
         t.status = TaskStatus.PAUSED
         return t
 
@@ -51,10 +48,8 @@ class TaskManager:
         # 先把当前 active 任务暂停
         current = self.state.active_task()
         if current and current.id != t.id:
-            current.flush_active_time()
             current.status = TaskStatus.PAUSED
         t.status = TaskStatus.ACTIVE
-        t.start_active_clock()
         return t
 
     def complete(self, task_id: str) -> Optional[Reward]:
@@ -62,8 +57,6 @@ class TaskManager:
         t = self.get(task_id)
         if not t or t.status == TaskStatus.COMPLETED:
             return None
-        if t.status == TaskStatus.ACTIVE:
-            t.flush_active_time()
         total = t.pending_summary()
         self.state.inventory.add(total)
         t.completed_reward_gold = total.gold

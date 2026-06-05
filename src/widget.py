@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .active_time import ActiveTimeTracker
 from .op_tracker import OpRateTracker
 from .models import AppState, Task, TaskStatus
 from .storage import save_state
@@ -106,6 +107,7 @@ class FloatingWidget(QWidget):
         self.setMinimumHeight(340)
 
         self._op_tracker = OpRateTracker(window_sec=60.0)
+        self._active_ticker = ActiveTimeTracker()
 
         self._build_ui()
         self._refresh()
@@ -353,6 +355,7 @@ class FloatingWidget(QWidget):
 
     def _refresh_runtime(self) -> None:
         """仅刷新与时间相关的字段，避免整窗口频繁重绘。"""
+        self._active_ticker.tick(self.state)
         ops_1min = self._op_tracker.count_recent()
         active = self.state.active_task()
         if active is None:

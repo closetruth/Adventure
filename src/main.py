@@ -73,8 +73,6 @@ class Application(QObject):
         self.save_timer.timeout.connect(lambda: save_state(self.state))
         self.save_timer.start()
 
-        self.qt_app.applicationStateChanged.connect(self._on_application_state_changed)
-
         # 系统托盘
         self.tray = self._build_tray()
 
@@ -157,15 +155,6 @@ class Application(QObject):
         x = geo.right() - size.width() - 24
         y = geo.top() + 80
         self.widget.move(x, y)
-
-    # ---------- 休眠 / 恢复 ----------
-    def _on_application_state_changed(self, app_state: Qt.ApplicationState) -> None:
-        """系统休眠或应用挂起时不累计任务进行中时长。"""
-        if app_state == Qt.ApplicationState.ApplicationSuspended:
-            self.state.pause_active_timers_for_suspend()
-        elif app_state == Qt.ApplicationState.ApplicationActive:
-            self.state.resume_active_timers_after_suspend()
-            self.widget.refresh()
 
     # ---------- 事件处理 ----------
     def _on_operation(self) -> None:
