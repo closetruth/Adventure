@@ -2,16 +2,12 @@
 
 从主程序传入会话 JSON 路径，结束时写出结算 JSON（金币/钻石净变化）。
 
-操作：
-  标题：空格开始（消耗入场费）
+操作（鼠标为主，键盘仍可用）：
+  标题：点击「开始」或空格（消耗入场费）
   商店：
-    - Q/W/E : 购买商店 1/2/3 宠物
-    - A/S/D : 冻结/解冻商店 1/2/3
-    - 1~5   : 选择队伍槽位
-    - 左/右 : 移动所选宠物（调整站位）
-    - X     : 卖出所选宠物（+1 金币）
-    - R     : 刷新商店（-1 金币）
-    - 空格   : 开始战斗
+    - 点击商店宠物购买；点击「冻」冻结该格
+    - 点击队伍列表选位/换位（5 槽纵向，与原先一致）
+    - 按钮：刷新、卖出、开战
   战斗：自动回合制结算
   ESC：退出并结算
 """
@@ -44,6 +40,13 @@ ENTRY_FEE = 10
 ROUND_GOLD = 10
 MAX_TEAM = 5
 SHOP_SIZE = 3
+BATTLE_SLOTS = 5
+BATTLE_SLOT_SIZE = 56
+BATTLE_SLOT_GAP = 14
+BATTLE_ROW_Y = 200
+TEAM_LIST_X = 500
+TEAM_LIST_Y = 160
+TEAM_ROW_H = 52
 FONT_NAMES = ("microsoftyaheiui", "microsoftyahei", "simhei", "arial")
 
 COL_BG = (22, 24, 36)
@@ -147,6 +150,10 @@ class PetArenaGame:
         self.enemy_preview: List[Unit] = []
         self.battle_players: List[Unit] = []
         self.battle_enemies: List[Unit] = []
+        self.battle_player_board: List[Optional[Unit]] = [None] * BATTLE_SLOTS
+        self.battle_enemy_board: List[Optional[Unit]] = [None] * BATTLE_SLOTS
+        self.battle_focus_p: int = 0
+        self.battle_focus_e: int = 0
         self.battle_events: List[dict] = []
         self.battle_event_idx = 0
         self.battle_event_cooldown = 0.0
@@ -155,6 +162,8 @@ class PetArenaGame:
         self.battle_log = ""
         self.over_msg = ""
         self.entry_paid = False
+        self._click_zones: List[Tuple[pygame.Rect, str, tuple]] = []
+        self._swap_pick: Optional[int] = None
 
         pygame.init()
         pygame.display.set_caption("Adventure - 小动物竞技场（AutoPet）")
@@ -171,6 +180,9 @@ class PetArenaGame:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        self._on_mouse_down(event.pos)
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         running = False
@@ -200,7 +212,7 @@ class PetArenaGame:
                 self._start_round_income()
                 self._roll_shop(initial=True)
                 self.enemy_preview = self._generate_enemy_team(self.round_no)
-                self.battle_log = "商店阶段：Q/W/E购买，空格战斗"
+                self.battle_log = "点击商店/队伍操作，点「开战」"
         elif self.phase == "shop":
             if key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
                 self.selected_slot = key - pygame.K_1
@@ -312,12 +324,118 @@ class PetArenaGame:
         self.battle_log = f"卖出 {unit.spec.name}，获得 {gain} 金币"
 
     def _move_selected(self, direction: int) -> None:
-        src = self.selected_slot
-        dst = src + direction
-        if dst < 0 or dst >= MAX_TEAM:
+        dst = self.selected_slot + direction
+        if 0 <= dst < MAX_TEAM:
+            self._swap_team_slots(self.selected_slot, dst)
+
+    def _swap_team_slots(self, a: int, b: int) -> None:
+        if a == b or a < 0 or b < 0 or a >= MAX_TEAM or b >= MAX_TEAM:
             return
-        self.team[src], self.team[dst] = self.team[dst], self.team[src]
-        self.selected_slot = dst
+        self.team[a], self.team[b] = self.team[b], self.team[a]
+        self.selected_slot = b
+
+    def _team_slot_rect(self, index: int) -> pygame.Rect:
+        return pygame.Rect(TEAM_LIST_X, TEAM_LIST_Y + 40 + index * TEAM_ROW_H, 420, TEAM_ROW_H - 6)
+
+    def _shop_card_rect(self, index: int) -> pygame.Rect:
+        return pygame.Rect(40, 160 + index * 72, 420, 60)
+
+    def _shop_freeze_rect(self, index: int) -> pygame.Rect:
+        r = self._shop_card_rect(index)
+        return pygame.Rect(r.right - 44, r.y + 12, 36, 36)
+
+    def _battle_slot_center(self, side: str, index: int) -> Tuple[int, int]:
+        span = BATTLE_SLOTS * (BATTLE_SLOT_SIZE + BATTLE_SLOT_GAP) - BATTLE_SLOT_GAP
+        if side == "e":
+            x0 = (W // 2 - span - 40) // 2
+        else:
+            x0 = W // 2 + 40 + (W // 2 - span - 40) // 2
+        cx = x0 + index * (BATTLE_SLOT_SIZE + BATTLE_SLOT_GAP) + BATTLE_SLOT_SIZE // 2
+        cy = BATTLE_ROW_Y + BATTLE_SLOT_SIZE // 2
+        return cx, cy
+
+    @staticmethod
+    def _leftmost_alive(board: List[Optional[Unit]]) -> Tuple[int, Optional[Unit]]:
+        for i, u in enumerate(board):
+            if u is not None and u.hp > 0:
+                return i, u
+        return -1, None
+
+    def _register_click(self, rect: pygame.Rect, action: str, *args) -> None:
+        self._click_zones.append((rect, action, args))
+
+    def _on_mouse_down(self, pos: Tuple[int, int]) -> None:
+        for rect, action, args in self._click_zones:
+            if rect.collidepoint(pos):
+                handler = getattr(self, f"_click_{action}", None)
+                if handler:
+                    handler(*args)
+                return
+
+    def _click_start_game(self) -> None:
+        if self.phase != "title":
+            return
+        if self.gold < ENTRY_FEE:
+            self.battle_log = f"金币不足，需要 {ENTRY_FEE} 入场"
+            return
+        self.gold -= ENTRY_FEE
+        self.entry_paid = True
+        self.phase = "shop"
+        self.round_no = 1
+        self._start_round_income()
+        self._roll_shop(initial=True)
+        self.enemy_preview = self._generate_enemy_team(self.round_no)
+        self.battle_log = "点击商店/队伍操作，点「开战」"
+
+    def _click_select_slot(self, index: int) -> None:
+        if self.phase != "shop" or index < 0 or index >= MAX_TEAM:
+            return
+        if self._swap_pick is not None and self._swap_pick != index:
+            self._swap_team_slots(self._swap_pick, index)
+            self._swap_pick = None
+            self.selected_slot = index
+            self.battle_log = "已交换两格位置"
+            return
+        self._swap_pick = index
+        self.selected_slot = index
+        self.battle_log = f"选中第 {index + 1} 格，再点另一格可换位"
+
+    def _click_buy_shop(self, shop_idx: int) -> None:
+        if self.phase == "shop":
+            self._buy_from_shop(shop_idx)
+
+    def _click_freeze_shop(self, shop_idx: int) -> None:
+        if self.phase == "shop":
+            self._toggle_freeze(shop_idx)
+
+    def _click_refresh(self) -> None:
+        if self.phase == "shop":
+            self._roll_shop(initial=False)
+
+    def _click_sell(self) -> None:
+        if self.phase == "shop":
+            self._sell_selected()
+
+    def _click_battle(self) -> None:
+        if self.phase != "shop":
+            return
+        if not any(self.team):
+            self.battle_log = "至少上阵一只宠物"
+            return
+        self._start_battle_animation()
+
+    def _click_continue(self) -> None:
+        if self.phase == "battle_res":
+            if self.losses >= 5:
+                self.phase = "over"
+                self.over_msg = f"结束：胜 {self.wins} 负 {self.losses}"
+            else:
+                self.phase = "shop"
+                self.round_no += 1
+                self._start_round_income()
+                self._roll_shop(initial=True)
+                self.enemy_preview = self._generate_enemy_team(self.round_no)
+                self.battle_log = f"第 {self.round_no} 回合：继续组队"
 
     def _start_round_income(self) -> None:
         self.gold += ROUND_GOLD
@@ -341,54 +459,73 @@ class PetArenaGame:
         return out
 
     def _start_battle_animation(self) -> None:
-        self.battle_players = [u.copy_for_battle() for u in self.team if u is not None]
-        self.battle_enemies = [u.copy_for_battle() for u in self.enemy_preview]
+        self.battle_player_board = [None] * BATTLE_SLOTS
+        self.battle_enemy_board = [None] * BATTLE_SLOTS
+        for i in range(BATTLE_SLOTS):
+            if self.team[i] is not None:
+                self.battle_player_board[i] = self.team[i].copy_for_battle()
+        for i, u in enumerate(self.enemy_preview[:BATTLE_SLOTS]):
+            self.battle_enemy_board[i] = u.copy_for_battle()
+        self.battle_players = [u for u in self.battle_player_board if u is not None]
+        self.battle_enemies = [u for u in self.battle_enemy_board if u is not None]
         self.battle_events = self._build_battle_events()
+        pi, _ = self._leftmost_alive(self.battle_player_board)
+        ei, _ = self._leftmost_alive(self.battle_enemy_board)
+        self.battle_focus_p = max(0, pi)
+        self.battle_focus_e = max(0, ei)
         self.battle_event_idx = 0
         self.battle_event_cooldown = 0.25
         self.battle_result_lines = [f"第 {self.round_no} 回合自动战斗："]
         self.phase = "battle"
 
     def _build_battle_events(self) -> List[dict]:
-        player = [u.copy_for_battle() for u in self.team if u is not None]
-        enemy = [u.copy_for_battle() for u in self.enemy_preview]
+        p_board = [u.copy_for_battle() if u else None for u in self.battle_player_board]
+        e_board = [u.copy_for_battle() if u else None for u in self.battle_enemy_board]
         events: List[dict] = []
         turns = 0
-        while player and enemy and turns < 60:
+        while turns < 60:
+            pi, p = self._leftmost_alive(p_board)
+            ei, e = self._leftmost_alive(e_board)
+            if p is None or e is None:
+                break
             turns += 1
-            p = player[0]
-            e = enemy[0]
             e.hp -= p.atk
             events.append({
                 "type": "hit",
                 "attacker_side": "p",
-                "attacker_name": p.spec.name,
+                "attacker_slot": pi,
                 "target_side": "e",
+                "target_slot": ei,
+                "attacker_name": p.spec.name,
                 "target_name": e.spec.name,
                 "damage": p.atk,
                 "target_hp": max(0, e.hp),
                 "target_dead": e.hp <= 0,
             })
             if e.hp <= 0:
-                enemy.pop(0)
+                e_board[ei] = None
                 continue
             p.hp -= e.atk
             events.append({
                 "type": "hit",
                 "attacker_side": "e",
-                "attacker_name": e.spec.name,
+                "attacker_slot": ei,
                 "target_side": "p",
+                "target_slot": pi,
+                "attacker_name": e.spec.name,
                 "target_name": p.spec.name,
                 "damage": e.atk,
                 "target_hp": max(0, p.hp),
                 "target_dead": p.hp <= 0,
             })
             if p.hp <= 0:
-                player.pop(0)
+                p_board[pi] = None
+        _, p_alive = self._leftmost_alive(p_board)
+        _, e_alive = self._leftmost_alive(e_board)
         events.append({
             "type": "result",
-            "player_alive": bool(player),
-            "enemy_alive": bool(enemy),
+            "player_alive": p_alive is not None,
+            "enemy_alive": e_alive is not None,
         })
         return events
 
@@ -405,20 +542,24 @@ class PetArenaGame:
         self.battle_event_idx += 1
         if ev["type"] == "hit":
             target_side = ev["target_side"]
-            if target_side == "p" and self.battle_players:
-                t = self.battle_players[0]
-                t.hp = ev["target_hp"]
-                self.hit_flash["p"] = 1.0
-                self._spawn_damage_text("p", ev["damage"])
+            if target_side == "p":
+                slot = ev["target_slot"]
+                board = self.battle_player_board
+                self.battle_focus_p = ev.get("attacker_slot", self.battle_focus_p)
+                self.battle_focus_e = slot
+            else:
+                slot = ev["target_slot"]
+                board = self.battle_enemy_board
+                self.battle_focus_p = slot
+                self.battle_focus_e = ev.get("attacker_slot", self.battle_focus_e)
+            if 0 <= slot < BATTLE_SLOTS and board[slot] is not None:
+                board[slot].hp = ev["target_hp"]
+                self.hit_flash["p" if target_side == "p" else "e"] = 1.0
+                self._spawn_damage_text(target_side, ev["damage"], slot)
                 if ev["target_dead"]:
-                    self.battle_players.pop(0)
-            elif target_side == "e" and self.battle_enemies:
-                t = self.battle_enemies[0]
-                t.hp = ev["target_hp"]
-                self.hit_flash["e"] = 1.0
-                self._spawn_damage_text("e", ev["damage"])
-                if ev["target_dead"]:
-                    self.battle_enemies.pop(0)
+                    board[slot] = None
+            self.battle_players = [u for u in self.battle_player_board if u is not None]
+            self.battle_enemies = [u for u in self.battle_enemy_board if u is not None]
             self.battle_result_lines.append(
                 f"{ev['attacker_name']} 攻击 {ev['target_name']} -{ev['damage']}"
             )
@@ -449,9 +590,8 @@ class PetArenaGame:
                 self.over_msg = f"战绩：{self.wins} 胜 {self.losses} 负"
             self.battle_event_cooldown = 0.2
 
-    def _spawn_damage_text(self, side: str, dmg: int) -> None:
-        x = 260 if side == "p" else 700
-        y = 255
+    def _spawn_damage_text(self, side: str, dmg: int, slot: int = 0) -> None:
+        x, y = self._battle_slot_center(side, slot)
         self.float_texts.append({"x": x, "y": y, "ttl": 0.9, "text": f"-{dmg}"})
 
     def _update_float_texts(self, dt: float) -> None:
@@ -464,22 +604,23 @@ class PetArenaGame:
         self.float_texts = alive
 
     def _draw(self) -> None:
+        self._click_zones = []
         self.screen.fill(COL_BG)
         self._draw_header()
 
         if self.phase == "title":
-            self._draw_center([
-                "小动物竞技场",
-                "",
-                f"入场费 {ENTRY_FEE} 金币",
-                "空格开始  |  ESC 退出",
-            ])
+            self._draw_title()
         elif self.phase == "shop":
             self._draw_shop()
         elif self.phase == "battle":
             self._draw_battle_animated()
         elif self.phase == "battle_res":
             self._draw_battle_result()
+            btn = pygame.Rect(W // 2 - 120, H // 2 + 40, 240, 48)
+            pygame.draw.rect(self.screen, COL_ACCENT, btn, border_radius=10)
+            lab = self.font.render("下一回合", True, COL_TEXT)
+            self.screen.blit(lab, (btn.centerx - lab.get_width() // 2, btn.centery - 12))
+            self._register_click(btn, "continue")
         elif self.phase == "over":
             self._draw_center([self.over_msg, "", "正在结算..."])
 
@@ -510,48 +651,80 @@ class PetArenaGame:
             self.screen.blit(surf, (W // 2 - surf.get_width() // 2, y))
             y += 44
 
+    def _draw_title(self) -> None:
+        self._draw_center([
+            "小动物竞技场",
+            "",
+            f"入场费 {ENTRY_FEE} 金币",
+        ])
+        btn = pygame.Rect(W // 2 - 100, H // 2 + 20, 200, 52)
+        pygame.draw.rect(self.screen, COL_ACCENT, btn, border_radius=12)
+        t = self.font_lg.render("开始游戏", True, COL_TEXT)
+        self.screen.blit(t, (btn.centerx - t.get_width() // 2, btn.centery - 16))
+        self._title_start_rect = btn
+        self._register_click(btn, "start_game")
+        hint = self.font_sm.render("或按空格开始  ·  ESC 退出", True, COL_MUTED)
+        self.screen.blit(hint, (W // 2 - hint.get_width() // 2, btn.bottom + 16))
+
     def _draw_shop(self) -> None:
         title = self.font_lg.render("商店阶段（AutoPet）", True, COL_TEXT)
         self.screen.blit(title, (40, 72))
         hint = self.font_sm.render(
-            "Q/W/E购买  A/S/D冻结  1~5选槽位  左右换位  X卖出  R刷新  空格战斗",
+            "鼠标：点商店行购买/冻结 · 点队伍行选位换位 · 左下按钮",
             True,
             COL_MUTED,
         )
         self.screen.blit(hint, (40, 118))
 
         for i, slot in enumerate(self.shop):
-            y = 160 + i * 72
+            card = self._shop_card_rect(i)
             bg = COL_PANEL if not slot.frozen else (54, 62, 95)
-            pygame.draw.rect(self.screen, bg, (40, y, 420, 60), border_radius=8)
-            if slot.spec is None:
+            pygame.draw.rect(self.screen, bg, card, border_radius=8)
+            buy_rect = pygame.Rect(card.x, card.y, card.w - 48, card.h)
+            if slot.spec is not None:
+                self._register_click(buy_rect, "buy_shop", i)
+                spec = slot.spec
+                pygame.draw.circle(self.screen, spec.color, (card.x + 28, card.centery), 18)
+                name = self.font.render(f"[{i+1}] {spec.name}  -{spec.cost} 金", True, COL_TEXT)
+                stat = self.font_sm.render(f"生命 {spec.hp}  攻击 {spec.atk}", True, COL_MUTED)
+                self.screen.blit(name, (card.x + 52, card.y + 8))
+                self.screen.blit(stat, (card.x + 52, card.y + 34))
+            else:
                 txt = self.font.render(f"[{i+1}] (已售空)", True, COL_MUTED)
-                self.screen.blit(txt, (52, y + 18))
-                continue
-            spec = slot.spec
-            name = self.font.render(f"[{i+1}] {spec.name}  -{spec.cost} 金", True, COL_TEXT)
-            stat = self.font_sm.render(f"生命 {spec.hp}  攻击 {spec.atk}", True, COL_MUTED)
-            frz = self.font_sm.render(
-                "冻结" if slot.frozen else "可刷新",
-                True,
-                COL_WARN if slot.frozen else COL_ACCENT,
-            )
-            pygame.draw.circle(self.screen, spec.color, (438, y + 30), 18)
-            self.screen.blit(name, (52, y + 8))
-            self.screen.blit(stat, (52, y + 34))
-            self.screen.blit(frz, (340, y + 20))
+                self.screen.blit(txt, (card.x + 52, card.y + 18))
+            frz = self._shop_freeze_rect(i)
+            pygame.draw.rect(self.screen, (60, 66, 90), frz, border_radius=6)
+            frz_txt = self.font_sm.render("冻", True, COL_WARN if slot.frozen else COL_MUTED)
+            self.screen.blit(frz_txt, (frz.centerx - 8, frz.centery - 10))
+            if slot.spec is not None:
+                self._register_click(frz, "freeze_shop", i)
 
-        self._draw_team_preview(500, 160)
-        self._draw_enemy_preview(500, 470)
+        for label, action, x, y in (
+            ("刷新(-1)", "refresh", 40, 390),
+            ("卖出", "sell", 140, 390),
+            ("开战", "battle", 240, 390),
+        ):
+            rect = pygame.Rect(x, y, 88, 34)
+            col = COL_ACCENT if action == "battle" else (48, 52, 78)
+            pygame.draw.rect(self.screen, col, rect, border_radius=8)
+            t = self.font_sm.render(label, True, COL_TEXT)
+            self.screen.blit(t, (rect.centerx - t.get_width() // 2, rect.centery - 10))
+            self._register_click(rect, action)
+
+        self._draw_team_preview(TEAM_LIST_X, TEAM_LIST_Y)
+        self._draw_enemy_preview(TEAM_LIST_X, 470)
 
     def _draw_team_preview(self, x: int, y: int) -> None:
-        lab = self.font.render("我的队伍（前排在左）", True, COL_TEXT)
+        lab = self.font.render("我的队伍（槽位 1~5 即战斗从左到右）", True, COL_TEXT)
         self.screen.blit(lab, (x, y))
-        for i, f in enumerate(self.team):
-            row = y + 40 + i * 52
-            pygame.draw.rect(self.screen, COL_PANEL, (x, row, 420, 42), border_radius=6)
+        for i in range(MAX_TEAM):
+            row = y + 40 + i * TEAM_ROW_H
+            rect = pygame.Rect(x, row, 420, TEAM_ROW_H - 6)
+            pygame.draw.rect(self.screen, COL_PANEL, rect, border_radius=6)
             if i == self.selected_slot:
-                pygame.draw.rect(self.screen, COL_ACCENT, (x - 4, row - 2, 428, 46), 2, border_radius=8)
+                pygame.draw.rect(self.screen, COL_ACCENT, rect.inflate(6, 4), 2, border_radius=8)
+            self._register_click(rect, "select_slot", i)
+            f = self.team[i]
             if f is None:
                 t = self.font_sm.render(f"[{i+1}] 空槽", True, COL_MUTED)
                 self.screen.blit(t, (x + 12, row + 12))
@@ -565,65 +738,77 @@ class PetArenaGame:
             self.screen.blit(t, (x + 48, row + 10))
 
     def _draw_enemy_preview(self, x: int, y: int) -> None:
-        lab = self.font_sm.render("本回合敌方预览（强度估计）", True, COL_MUTED)
+        lab = self.font_sm.render("敌方预览（战斗时对应 5 格）", True, COL_MUTED)
         self.screen.blit(lab, (x, y))
-        for i, u in enumerate(self.enemy_preview[:5]):
-            text = self.font_sm.render(
-                f"{i+1}. {u.spec.name} Lv{u.level} 攻{u.atk} 血{u.hp}",
-                True,
-                COL_ENEMY,
+        padded: List[Optional[Unit]] = [None] * BATTLE_SLOTS
+        for i, u in enumerate(self.enemy_preview[:BATTLE_SLOTS]):
+            padded[i] = u
+        ey = y + 24
+        for i in range(BATTLE_SLOTS):
+            sx = x + i * (BATTLE_SLOT_SIZE + BATTLE_SLOT_GAP)
+            rect = pygame.Rect(sx, ey, BATTLE_SLOT_SIZE, BATTLE_SLOT_SIZE)
+            pygame.draw.rect(self.screen, (42, 36, 48), rect, border_radius=6)
+            u = padded[i]
+            if u is None:
+                continue
+            pygame.draw.circle(self.screen, COL_ENEMY, rect.center, 18)
+            t = self.font_sm.render(u.spec.name[:2], True, COL_TEXT)
+            self.screen.blit(t, (rect.centerx - 8, rect.centery - 8))
+
+    def _draw_battle_lane(self, side: str, board: List[Optional[Unit]], focus: int) -> None:
+        for i in range(BATTLE_SLOTS):
+            cx, cy = self._battle_slot_center(side, i)
+            rect = pygame.Rect(
+                cx - BATTLE_SLOT_SIZE // 2,
+                cy - BATTLE_SLOT_SIZE // 2,
+                BATTLE_SLOT_SIZE,
+                BATTLE_SLOT_SIZE,
             )
-            self.screen.blit(text, (x, y + 24 + i * 20))
+            u = board[i] if i < len(board) else None
+            alive = u is not None and u.hp > 0
+            bg = COL_PANEL
+            if alive and i == focus:
+                if side == "p" and self.hit_flash["p"] > 0:
+                    bg = (42, 80, 46)
+                elif side == "e" and self.hit_flash["e"] > 0:
+                    bg = (92, 44, 44)
+                pygame.draw.rect(self.screen, COL_ACCENT, rect.inflate(4, 4), 2, border_radius=8)
+            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
+            if not alive:
+                continue
+            color = u.spec.color if side == "p" else COL_ENEMY
+            pygame.draw.circle(self.screen, color, rect.center, 22)
+            bar_w = int((BATTLE_SLOT_SIZE - 8) * max(0.0, u.hp / max(1, u.max_hp)))
+            pygame.draw.rect(
+                self.screen,
+                (70, 76, 96),
+                (rect.x + 4, rect.bottom - 8, BATTLE_SLOT_SIZE - 8, 4),
+                border_radius=2,
+            )
+            if bar_w > 0:
+                pygame.draw.rect(
+                    self.screen,
+                    (120, 220, 140) if side == "p" else (220, 100, 100),
+                    (rect.x + 4, rect.bottom - 8, bar_w, 4),
+                    border_radius=2,
+                )
+            lv = self.font_sm.render(f"L{u.level}", True, COL_TEXT)
+            self.screen.blit(lv, (rect.x + 2, rect.y + 2))
 
     def _draw_battle_animated(self) -> None:
-        title = self.font_lg.render("自动战斗中...", True, COL_TEXT)
-        self.screen.blit(title, (330, 84))
+        title = self.font_lg.render("自动战斗中", True, COL_TEXT)
+        self.screen.blit(title, (W // 2 - title.get_width() // 2, 72))
 
-        p_x, e_x = 250, 710
-        y = 250
-        p_bg = (42, 80, 46) if self.hit_flash["p"] > 0 else COL_PANEL
-        e_bg = (92, 44, 44) if self.hit_flash["e"] > 0 else COL_PANEL
-        pygame.draw.rect(self.screen, p_bg, (p_x - 150, y - 70, 250, 180), border_radius=14)
-        pygame.draw.rect(self.screen, e_bg, (e_x - 100, y - 70, 250, 180), border_radius=14)
+        elab = self.font_sm.render("敌方", True, COL_ENEMY)
+        plab = self.font_sm.render("我方", True, COL_TEXT)
+        self.screen.blit(elab, (60, BATTLE_ROW_Y - 28))
+        self.screen.blit(plab, (W - 60 - plab.get_width(), BATTLE_ROW_Y - 28))
 
-        if self.battle_players:
-            p = self.battle_players[0]
-            pygame.draw.circle(self.screen, p.spec.color, (p_x - 20, y), 36)
-            t = self.font.render(f"{p.spec.name} Lv{p.level}", True, COL_TEXT)
-            hp = self.font_sm.render(f"HP {max(0, p.hp)}/{p.max_hp}  ATK {p.atk}", True, COL_MUTED)
-            self.screen.blit(t, (p_x + 30, y - 30))
-            self.screen.blit(hp, (p_x + 30, y + 4))
-        else:
-            self.screen.blit(self.font.render("我方全灭", True, COL_MUTED), (p_x - 70, y - 10))
+        vs = self.font_lg.render("VS", True, COL_ACCENT)
+        self.screen.blit(vs, (W // 2 - vs.get_width() // 2, BATTLE_ROW_Y + 12))
 
-        if self.battle_enemies:
-            e = self.battle_enemies[0]
-            pygame.draw.circle(self.screen, COL_ENEMY, (e_x + 20, y), 36)
-            t = self.font.render(f"{e.spec.name} Lv{e.level}", True, COL_TEXT)
-            hp = self.font_sm.render(f"HP {max(0, e.hp)}/{e.max_hp}  ATK {e.atk}", True, COL_MUTED)
-            self.screen.blit(t, (e_x - 180, y - 30))
-            self.screen.blit(hp, (e_x - 180, y + 4))
-        else:
-            self.screen.blit(self.font.render("敌方全灭", True, COL_MUTED), (e_x - 70, y - 10))
-
-        # 显示双方全部宠物（列表）
-        self.screen.blit(self.font_sm.render("我方全部宠物", True, COL_TEXT), (90, 430))
-        for i, u in enumerate(self.battle_players[:5]):
-            line = self.font_sm.render(
-                f"{i+1}. {u.spec.name} Lv{u.level}  HP {max(0, u.hp)}/{u.max_hp}  攻 {u.atk}",
-                True,
-                COL_MUTED,
-            )
-            self.screen.blit(line, (90, 455 + i * 22))
-
-        self.screen.blit(self.font_sm.render("敌方全部宠物", True, COL_TEXT), (560, 430))
-        for i, u in enumerate(self.battle_enemies[:5]):
-            line = self.font_sm.render(
-                f"{i+1}. {u.spec.name} Lv{u.level}  HP {max(0, u.hp)}/{u.max_hp}  攻 {u.atk}",
-                True,
-                COL_MUTED,
-            )
-            self.screen.blit(line, (560, 455 + i * 22))
+        self._draw_battle_lane("e", self.battle_enemy_board, self.battle_focus_e)
+        self._draw_battle_lane("p", self.battle_player_board, self.battle_focus_p)
 
         for t in self.float_texts:
             alpha = max(0, min(255, int(255 * (t["ttl"] / 0.9))))
@@ -631,10 +816,10 @@ class PetArenaGame:
             surf.set_alpha(alpha)
             self.screen.blit(surf, (int(t["x"]), int(t["y"])))
 
-        y_log = 560
-        for line in self.battle_result_lines[-4:]:
-            self.screen.blit(self.font_sm.render(line, True, COL_MUTED), (120, y_log))
-            y_log += 24
+        y_log = 520
+        for line in self.battle_result_lines[-5:]:
+            self.screen.blit(self.font_sm.render(line, True, COL_MUTED), (80, y_log))
+            y_log += 22
 
     def _draw_battle_result(self) -> None:
         self._draw_center([

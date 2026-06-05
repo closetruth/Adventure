@@ -96,8 +96,8 @@ class InventoryDialog(QDialog):
         gl.setSpacing(6)
         gl.addWidget(QLabel("小动物竞技场（AutoPet）"))
         sub = QLabel(
-            "AutoPet 风格：Q/W/E 购买，A/S/D 冻结，1~5 选槽位，左右换位，X 卖出，R 刷新。"
-            "空格开战，入场费 10 金币。"
+            "AutoPet 风格：鼠标点商店/队伍操作，战斗时 5 vs 5 对位；"
+            "点「刷新/卖出/开战」。入场费 10 金币。"
         )
         sub.setObjectName("StatLine")
         sub.setWordWrap(True)
