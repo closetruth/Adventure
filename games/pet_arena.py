@@ -41,9 +41,10 @@ ROUND_GOLD = 10
 MAX_TEAM = 5
 SHOP_SIZE = 3
 BATTLE_SLOTS = 5
-BATTLE_SLOT_SIZE = 56
-BATTLE_SLOT_GAP = 14
-BATTLE_ROW_Y = 200
+BATTLE_SLOT_W = 82
+BATTLE_SLOT_H = 58
+BATTLE_SLOT_GAP = 10
+BATTLE_ROW_Y = 188
 TEAM_LIST_X = 500
 TEAM_LIST_Y = 160
 TEAM_ROW_H = 52
@@ -344,15 +345,25 @@ class PetArenaGame:
         r = self._shop_card_rect(index)
         return pygame.Rect(r.right - 44, r.y + 12, 36, 36)
 
-    def _battle_slot_center(self, side: str, index: int) -> Tuple[int, int]:
-        span = BATTLE_SLOTS * (BATTLE_SLOT_SIZE + BATTLE_SLOT_GAP) - BATTLE_SLOT_GAP
+    def _battle_visual_col(self, side: str, slot_index: int) -> int:
+        """敌方棋盘视觉顺序与对战顺序相反：靠 VS 的右侧格先出战。"""
         if side == "e":
-            x0 = (W // 2 - span - 40) // 2
+            return BATTLE_SLOTS - 1 - slot_index
+        return slot_index
+
+    def _battle_slot_rect(self, side: str, slot_index: int) -> pygame.Rect:
+        span = BATTLE_SLOTS * (BATTLE_SLOT_W + BATTLE_SLOT_GAP) - BATTLE_SLOT_GAP
+        if side == "e":
+            x0 = (W // 2 - span - 36) // 2
         else:
-            x0 = W // 2 + 40 + (W // 2 - span - 40) // 2
-        cx = x0 + index * (BATTLE_SLOT_SIZE + BATTLE_SLOT_GAP) + BATTLE_SLOT_SIZE // 2
-        cy = BATTLE_ROW_Y + BATTLE_SLOT_SIZE // 2
-        return cx, cy
+            x0 = W // 2 + 36 + (W // 2 - span - 36) // 2
+        col = self._battle_visual_col(side, slot_index)
+        x = x0 + col * (BATTLE_SLOT_W + BATTLE_SLOT_GAP)
+        return pygame.Rect(x, BATTLE_ROW_Y, BATTLE_SLOT_W, BATTLE_SLOT_H)
+
+    def _battle_slot_center(self, side: str, slot_index: int) -> Tuple[int, int]:
+        r = self._battle_slot_rect(side, slot_index)
+        return r.centerx, r.centery
 
     @staticmethod
     def _leftmost_alive(board: List[Optional[Unit]]) -> Tuple[int, Optional[Unit]]:
@@ -500,6 +511,7 @@ class PetArenaGame:
                 "target_name": e.spec.name,
                 "damage": p.atk,
                 "target_hp": max(0, e.hp),
+                "target_max_hp": e.max_hp,
                 "target_dead": e.hp <= 0,
             })
             if e.hp <= 0:
@@ -516,6 +528,7 @@ class PetArenaGame:
                 "target_name": p.spec.name,
                 "damage": e.atk,
                 "target_hp": max(0, p.hp),
+                "target_max_hp": p.max_hp,
                 "target_dead": p.hp <= 0,
             })
             if p.hp <= 0:
@@ -545,13 +558,13 @@ class PetArenaGame:
             if target_side == "p":
                 slot = ev["target_slot"]
                 board = self.battle_player_board
-                self.battle_focus_p = ev.get("attacker_slot", self.battle_focus_p)
-                self.battle_focus_e = slot
+                self.battle_focus_e = ev["attacker_slot"]
+                self.battle_focus_p = slot
             else:
                 slot = ev["target_slot"]
                 board = self.battle_enemy_board
-                self.battle_focus_p = slot
-                self.battle_focus_e = ev.get("attacker_slot", self.battle_focus_e)
+                self.battle_focus_p = ev["attacker_slot"]
+                self.battle_focus_e = slot
             if 0 <= slot < BATTLE_SLOTS and board[slot] is not None:
                 board[slot].hp = ev["target_hp"]
                 self.hit_flash["p" if target_side == "p" else "e"] = 1.0
@@ -561,7 +574,8 @@ class PetArenaGame:
             self.battle_players = [u for u in self.battle_player_board if u is not None]
             self.battle_enemies = [u for u in self.battle_enemy_board if u is not None]
             self.battle_result_lines.append(
-                f"{ev['attacker_name']} 攻击 {ev['target_name']} -{ev['damage']}"
+                f"{ev['attacker_name']} → {ev['target_name']} -{ev['damage']}  "
+                f"血 {ev['target_hp']}/{ev['target_max_hp']}"
             )
             self.battle_result_lines = self.battle_result_lines[-10:]
             self.battle_event_cooldown = 0.45
@@ -684,11 +698,10 @@ class PetArenaGame:
             if slot.spec is not None:
                 self._register_click(buy_rect, "buy_shop", i)
                 spec = slot.spec
-                pygame.draw.circle(self.screen, spec.color, (card.x + 28, card.centery), 18)
                 name = self.font.render(f"[{i+1}] {spec.name}  -{spec.cost} 金", True, COL_TEXT)
                 stat = self.font_sm.render(f"生命 {spec.hp}  攻击 {spec.atk}", True, COL_MUTED)
-                self.screen.blit(name, (card.x + 52, card.y + 8))
-                self.screen.blit(stat, (card.x + 52, card.y + 34))
+                self.screen.blit(name, (card.x + 12, card.y + 8))
+                self.screen.blit(stat, (card.x + 12, card.y + 34))
             else:
                 txt = self.font.render(f"[{i+1}] (已售空)", True, COL_MUTED)
                 self.screen.blit(txt, (card.x + 52, card.y + 18))
@@ -729,41 +742,36 @@ class PetArenaGame:
                 t = self.font_sm.render(f"[{i+1}] 空槽", True, COL_MUTED)
                 self.screen.blit(t, (x + 12, row + 12))
                 continue
-            pygame.draw.circle(self.screen, f.spec.color, (x + 24, row + 21), 16)
             t = self.font_sm.render(
                 f"[{i+1}] {f.spec.name} Lv{f.level}  攻{f.atk}  血{f.hp}/{f.max_hp}",
                 True,
                 COL_TEXT,
             )
-            self.screen.blit(t, (x + 48, row + 10))
+            self.screen.blit(t, (x + 12, row + 10))
 
     def _draw_enemy_preview(self, x: int, y: int) -> None:
-        lab = self.font_sm.render("敌方预览（战斗时对应 5 格）", True, COL_MUTED)
+        lab = self.font_sm.render("敌方预览（靠右先出战）", True, COL_MUTED)
         self.screen.blit(lab, (x, y))
         padded: List[Optional[Unit]] = [None] * BATTLE_SLOTS
         for i, u in enumerate(self.enemy_preview[:BATTLE_SLOTS]):
             padded[i] = u
         ey = y + 24
         for i in range(BATTLE_SLOTS):
-            sx = x + i * (BATTLE_SLOT_SIZE + BATTLE_SLOT_GAP)
-            rect = pygame.Rect(sx, ey, BATTLE_SLOT_SIZE, BATTLE_SLOT_SIZE)
+            col = self._battle_visual_col("e", i)
+            sx = x + col * (BATTLE_SLOT_W + BATTLE_SLOT_GAP)
+            rect = pygame.Rect(sx, ey, BATTLE_SLOT_W, BATTLE_SLOT_H - 8)
             pygame.draw.rect(self.screen, (42, 36, 48), rect, border_radius=6)
             u = padded[i]
             if u is None:
                 continue
-            pygame.draw.circle(self.screen, COL_ENEMY, rect.center, 18)
-            t = self.font_sm.render(u.spec.name[:2], True, COL_TEXT)
-            self.screen.blit(t, (rect.centerx - 8, rect.centery - 8))
+            name = self.font_sm.render(u.spec.name, True, COL_ENEMY)
+            hp = self.font_sm.render(f"{u.hp}/{u.max_hp}", True, COL_MUTED)
+            self.screen.blit(name, (rect.centerx - name.get_width() // 2, rect.y + 4))
+            self.screen.blit(hp, (rect.centerx - hp.get_width() // 2, rect.y + 24))
 
     def _draw_battle_lane(self, side: str, board: List[Optional[Unit]], focus: int) -> None:
         for i in range(BATTLE_SLOTS):
-            cx, cy = self._battle_slot_center(side, i)
-            rect = pygame.Rect(
-                cx - BATTLE_SLOT_SIZE // 2,
-                cy - BATTLE_SLOT_SIZE // 2,
-                BATTLE_SLOT_SIZE,
-                BATTLE_SLOT_SIZE,
-            )
+            rect = self._battle_slot_rect(side, i)
             u = board[i] if i < len(board) else None
             alive = u is not None and u.hp > 0
             bg = COL_PANEL
@@ -775,14 +783,24 @@ class PetArenaGame:
                 pygame.draw.rect(self.screen, COL_ACCENT, rect.inflate(4, 4), 2, border_radius=8)
             pygame.draw.rect(self.screen, bg, rect, border_radius=8)
             if not alive:
+                dash = self.font_sm.render("—", True, COL_MUTED)
+                self.screen.blit(dash, (rect.centerx - dash.get_width() // 2, rect.centery - 8))
                 continue
-            color = u.spec.color if side == "p" else COL_ENEMY
-            pygame.draw.circle(self.screen, color, rect.center, 22)
-            bar_w = int((BATTLE_SLOT_SIZE - 8) * max(0.0, u.hp / max(1, u.max_hp)))
+            name_col = COL_TEXT if side == "p" else COL_ENEMY
+            name = self.font_sm.render(u.spec.name, True, name_col)
+            hp_txt = self.font_sm.render(f"{u.hp}/{u.max_hp}", True, COL_TEXT)
+            atk_txt = self.font_sm.render(f"攻{u.atk}", True, COL_MUTED)
+            self.screen.blit(name, (rect.centerx - name.get_width() // 2, rect.y + 4))
+            self.screen.blit(hp_txt, (rect.centerx - hp_txt.get_width() // 2, rect.y + 22))
+            self.screen.blit(atk_txt, (rect.right - atk_txt.get_width() - 4, rect.y + 4))
+            if u.level > 1:
+                lv = self.font_sm.render(f"L{u.level}", True, COL_GOLD)
+                self.screen.blit(lv, (rect.x + 4, rect.y + 4))
+            bar_w = int((rect.w - 8) * max(0.0, u.hp / max(1, u.max_hp)))
             pygame.draw.rect(
                 self.screen,
                 (70, 76, 96),
-                (rect.x + 4, rect.bottom - 8, BATTLE_SLOT_SIZE - 8, 4),
+                (rect.x + 4, rect.bottom - 8, rect.w - 8, 4),
                 border_radius=2,
             )
             if bar_w > 0:
@@ -792,8 +810,6 @@ class PetArenaGame:
                     (rect.x + 4, rect.bottom - 8, bar_w, 4),
                     border_radius=2,
                 )
-            lv = self.font_sm.render(f"L{u.level}", True, COL_TEXT)
-            self.screen.blit(lv, (rect.x + 2, rect.y + 2))
 
     def _draw_battle_animated(self) -> None:
         title = self.font_lg.render("自动战斗中", True, COL_TEXT)
