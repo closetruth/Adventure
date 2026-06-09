@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from games.font_util import load_font  # noqa: E402
 from src.game_protocol import GameResult, GameSession  # noqa: E402
 
 # ---------- 配置 ----------
@@ -48,8 +49,6 @@ BATTLE_ROW_Y = 188
 TEAM_LIST_X = 500
 TEAM_LIST_Y = 160
 TEAM_ROW_H = 52
-FONT_NAMES = ("microsoftyaheiui", "microsoftyahei", "simhei", "arial")
-
 COL_BG = (22, 24, 36)
 COL_PANEL = (35, 38, 58)
 COL_TEXT = (240, 242, 250)
@@ -121,14 +120,6 @@ class Unit:
 class ShopSlot:
     spec: Optional[PetSpec] = None
     frozen: bool = False
-
-
-def load_font(size: int, bold: bool = False) -> pygame.font.Font:
-    for name in FONT_NAMES:
-        path = pygame.font.match_font(name, bold=bold)
-        if path:
-            return pygame.font.Font(path, size)
-    return pygame.font.SysFont(None, size, bold=bold)
 
 
 class PetArenaGame:

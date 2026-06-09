@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from games.font_util import load_font  # noqa: E402
 from src.game_protocol import GameResult, GameSession  # noqa: E402
 
 W, H = 980, 700
@@ -73,15 +74,6 @@ class Unit:
 
     def alive(self) -> bool:
         return self.hp > 0
-
-
-def load_font(size: int, bold: bool = False) -> pygame.font.Font:
-    names = ("microsoftyaheiui", "microsoftyahei", "simhei", "arial")
-    for n in names:
-        p = pygame.font.match_font(n, bold=bold)
-        if p:
-            return pygame.font.Font(p, size)
-    return pygame.font.SysFont(None, size, bold=bold)
 
 
 class PixelTactics:
