@@ -21,16 +21,25 @@ from PySide6.QtGui import (
     QPainter,
     QPixmap,
 )
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QMenu,
+    QSystemTrayIcon,
+    QTextEdit,
+)
 
 from .game_launcher import launch_pet_arena, launch_pixel_tactics
 from .input_monitor import InputMonitor
 from .inventory_dialog import InventoryDialog
-from .models import AppState
+from .models import AppState, Reward
 from .reward_system import maybe_roll
 from .storage import load_state, save_state
 from .task_dialog import TaskDialog
 from .task_manager import TaskManager
+from .ui_text import format_reward_gain
 from .widget import FloatingWidget
 
 
@@ -54,6 +63,8 @@ class Application(QObject):
         self.widget.request_task_dialog.connect(self.show_task_dialog)
         self.widget.request_inventory_dialog.connect(self.show_inventory)
         self.widget.request_quit.connect(self.quit)
+        self.widget.subtask_claimed.connect(self._on_subtask_claimed)
+        self.widget.state_changed.connect(self._on_widget_state_changed)
 
         # 桥接全局输入事件
         self.bridge = OpBridge()
@@ -80,6 +91,13 @@ class Application(QObject):
         self._task_dialog = None
         self._inv_dialog = None
 
+        # 合并高频按键触发的 UI 刷新，避免每键整窗重绘
+        self._roll_changed = False
+        self._ui_flush_timer = QTimer(self)
+        self._ui_flush_timer.setSingleShot(True)
+        self._ui_flush_timer.setInterval(100)
+        self._ui_flush_timer.timeout.connect(self._flush_ui)
+
         # 让 Ctrl+C 在终端启动时也能干净退出
         try:
             signal.signal(signal.SIGINT, lambda *_: self.quit())
@@ -93,14 +111,14 @@ class Application(QObject):
     def _build_tray(self) -> QSystemTrayIcon:
         icon = self._make_icon()
         tray = QSystemTrayIcon(icon, parent=self)
-        tray.setToolTip("Adventure - 任务与奖励小部件")
+        tray.setToolTip("Adventure - 目标与奖励小部件")
         menu = QMenu()
 
         act_show = QAction("显示悬浮窗", menu)
         act_show.triggered.connect(self._show_widget)
         menu.addAction(act_show)
 
-        act_tasks = QAction("任务管理", menu)
+        act_tasks = QAction("目标管理", menu)
         act_tasks.triggered.connect(self.show_task_dialog)
         menu.addAction(act_tasks)
 
@@ -157,24 +175,65 @@ class Application(QObject):
         self.widget.move(x, y)
 
     # ---------- 事件处理 ----------
+    @staticmethod
+    def _typing_in_app() -> bool:
+        """焦点在应用内文本框时，不计操作、不刷新（避免子任务输入卡顿）。"""
+        w = QApplication.focusWidget()
+        if w is None:
+            return False
+        return isinstance(w, (QLineEdit, QTextEdit, QPlainTextEdit))
+
+    def _schedule_ui_flush(self, *, roll_changed: bool = False) -> None:
+        if roll_changed:
+            self._roll_changed = True
+        self._ui_flush_timer.start()
+
+    def _flush_ui(self) -> None:
+        roll_changed = self._roll_changed
+        self._roll_changed = False
+        self.widget.refresh_light(roll_changed=roll_changed)
+        if self._task_dialog is not None and self._task_dialog.isVisible():
+            self._task_dialog.refresh_stats()
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+
+    def _notify_subtask_claim(self, reward: Reward, *, title: str = "") -> None:
+        prefix = f"「{title}」" if title else "子目标"
+        text = f"{prefix}已领取 {format_reward_gain(reward.gold, reward.diamond)}"
+        if self.tray.isVisible():
+            self.tray.showMessage("Adventure", text, QSystemTrayIcon.MessageIcon.Information, 2500)
+
     def _on_operation(self) -> None:
+        if self._typing_in_app():
+            return
         self.state.total_operations += 1
         reward = maybe_roll(self.state)
         self.manager.record_operation(reward)
         self.widget.note_operation()
-        # 即时刷新（保持成本低）
+        self._schedule_ui_flush(roll_changed=reward is not None)
+
+    # ---------- 子窗口 ----------
+    def _on_subtask_claimed(self, title: str, reward: Reward) -> None:
+        self._notify_subtask_claim(reward, title=title)
+        QMessageBox.information(
+            self.widget,
+            "领取成功",
+            f"「{title}」\n获得 {format_reward_gain(reward.gold, reward.diamond)}",
+        )
+
+    def _on_widget_state_changed(self) -> None:
+        save_state(self.state)
         self.widget.refresh()
         if self._task_dialog is not None and self._task_dialog.isVisible():
-            # 任务列表里只是计数变了不必每次都重排，但小数据量下也无所谓
             self._task_dialog.refresh()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()
 
-    # ---------- 子窗口 ----------
     def show_task_dialog(self) -> None:
         if self._task_dialog is None:
             self._task_dialog = TaskDialog(self.state, self.manager, parent=self.widget)
             self._task_dialog.state_changed.connect(self.widget.refresh)
+            self._task_dialog.subtask_claimed.connect(self._on_subtask_claimed)
         self._task_dialog.refresh()
         self._task_dialog.show()
         self._task_dialog.raise_()

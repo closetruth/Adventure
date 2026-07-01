@@ -175,8 +175,8 @@ class InventoryDialog(QDialog):
         self.lbl_ops.setText(f"全局操作数：{s.total_operations}")
         active = [t for t in s.tasks if t.status == TaskStatus.ACTIVE]
         done = [t for t in s.tasks if t.status == TaskStatus.COMPLETED]
-        self.lbl_tasks_active.setText(f"进行中任务：{len(active)}")
-        self.lbl_tasks_done.setText(f"已完成任务：{len(done)}")
+        self.lbl_tasks_active.setText(f"进行中目标：{len(active)}")
+        self.lbl_tasks_done.setText(f"已完成目标：{len(done)}")
         pending_g = pending_d = 0
         for t in s.tasks:
             if t.status != TaskStatus.COMPLETED:

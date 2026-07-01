@@ -5,7 +5,9 @@ import time
 from typing import TYPE_CHECKING, Iterable, List
 
 if TYPE_CHECKING:
-    from .models import RollHistoryEntry
+    from .models import RollHistoryEntry, Subtask, Task
+else:
+    from .models import Subtask, Task
 
 
 def format_duration(seconds: float) -> str:
@@ -18,6 +20,312 @@ def format_duration(seconds: float) -> str:
     if m > 0:
         return f"{m}m {s}s"
     return f"{s}s"
+
+
+def format_duration_compact(seconds: float, target_seconds: float) -> str:
+    """悬浮窗子目标行：短时长，如 3/10m。"""
+    sec = int(max(0, seconds))
+    tgt = int(max(1, target_seconds))
+    m_sec = sec // 60
+    m_tgt = max(1, (tgt + 59) // 60)
+    return f"{m_sec}/{m_tgt}m"
+
+
+def _html_escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+# 子目标区：深色底 + 彩色数据（避免一片白）
+_COLOR_OPS = "#6ee7a0"
+_COLOR_GOLD = "#f5c842"
+_COLOR_DIAM = "#5ec8f2"
+_COLOR_TIME = "#8b93a8"
+_COLOR_TEXT = "#c8ceda"
+_COLOR_MUTED = "#6e7588"
+_COLOR_CURRENT = "#7eb4ff"
+_COLOR_MARKER = "#5a6175"
+_COLOR_WARN = "#e6a830"
+_COLOR_CLAIM = "#f0c040"
+_SUBGOAL_FONT = (
+    "font-size:13px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
+)
+_SUBGOAL_HINT_FONT = (
+    "font-size:12px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
+)
+_GOAL_COMPACT_FONT = (
+    "font-size:13px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
+)
+_WIDGET_STAT_FONT = (
+    "font-size:11px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
+)
+_WIDGET_HIST_FONT = (
+    "font-size:10px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
+)
+_WIDGET_SUB_FONT = (
+    "font-size:12px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
+)
+
+
+def _muted_sep() -> str:
+    return f'<span style="color:{_COLOR_MUTED}"> · </span>'
+
+
+def format_global_summary_html(
+    total_ops: int,
+    gold: float,
+    diamond: float,
+    *,
+    ops_1min: int | None = None,
+) -> str:
+    """悬浮窗顶栏：总操作 / 背包金币 / 钻石（RichText）。"""
+    parts: list[str] = []
+    if ops_1min is not None:
+        parts.append(
+            f'<span style="color:{_COLOR_MUTED}">近1分 </span>'
+            f'<span style="color:{_COLOR_OPS};font-weight:700">{ops_1min}</span>'
+        )
+    parts.extend([
+        f'<span style="color:{_COLOR_MUTED}">总操作 </span>'
+        f'<span style="color:{_COLOR_OPS};font-weight:700">{total_ops:,}</span>',
+        f'<span style="color:{_COLOR_MUTED}">金币 </span>'
+        f'<span style="color:{_COLOR_GOLD};font-weight:700">{format_amount(gold)}</span>',
+        f'<span style="color:{_COLOR_MUTED}">钻石 </span>'
+        f'<span style="color:{_COLOR_DIAM if diamond else _COLOR_MUTED};font-weight:700">'
+        f"{format_amount(diamond)}</span>",
+    ])
+    return f'<span style="{_WIDGET_STAT_FONT}">' + _muted_sep().join(parts) + "</span>"
+
+
+def format_roll_history_line_html(
+    entry: "RollHistoryEntry",
+    *,
+    compact: bool = True,
+) -> str:
+    """单条开奖历史（RichText）。"""
+    op = f'<span style="color:{_COLOR_MUTED}">#{entry.op_at}</span>'
+    if not entry.hit:
+        miss = "-" if compact else "未中奖"
+        return f'{op} <span style="color:{_COLOR_MUTED}">{miss}</span>'
+    reward_parts: list[str] = []
+    if entry.gold:
+        suffix = "金" if compact else " 金币"
+        reward_parts.append(
+            f'<span style="color:{_COLOR_GOLD};font-weight:700">'
+            f"+{format_amount(entry.gold)}{suffix}</span>"
+        )
+    if entry.diamond:
+        suffix = "钻" if compact else " 钻石"
+        reward_parts.append(
+            f'<span style="color:{_COLOR_DIAM};font-weight:700">'
+            f"+{format_amount(entry.diamond)}{suffix}</span>"
+        )
+    gap = " " if compact else f' <span style="color:{_COLOR_MUTED}">·</span> '
+    return f"{op} {gap.join(reward_parts)}"
+
+
+def format_roll_history_lines_html(
+    entries: Iterable["RollHistoryEntry"],
+    *,
+    limit: int | None = None,
+    compact: bool = True,
+) -> str:
+    """悬浮窗开奖历史多行 HTML。"""
+    items = list(entries)
+    if limit is not None:
+        items = items[:limit]
+    if not items:
+        return (
+            f'<span style="{_WIDGET_HIST_FONT}color:{_COLOR_MUTED}">'
+            f"暂无开奖记录</span>"
+        )
+    lines = [
+        format_roll_history_line_html(e, compact=compact) for e in items
+    ]
+    return f'<span style="{_WIDGET_HIST_FONT}">' + "<br/>".join(lines) + "</span>"
+
+
+def format_widget_runtime_html(
+    ops_1min: int,
+    since_gold: float,
+    since_diamond: float,
+    duration: str = "",
+) -> str:
+    """悬浮窗目标区副行：近1分 / 上次获得 / 进行中。"""
+    parts: list[str] = [
+        f'<span style="color:{_COLOR_MUTED}">近1分 </span>'
+        f'<span style="color:{_COLOR_OPS};font-weight:700">{ops_1min}</span>',
+    ]
+    since_parts: list[str] = []
+    if since_gold:
+        since_parts.append(
+            f'<span style="color:{_COLOR_GOLD};font-weight:700">'
+            f"金币 {format_amount(since_gold)}</span>"
+        )
+    if since_diamond:
+        since_parts.append(
+            f'<span style="color:{_COLOR_DIAM};font-weight:700">'
+            f"钻石 {format_amount(since_diamond)}</span>"
+        )
+    if since_parts:
+        since_body = f'<span style="color:{_COLOR_MUTED}"> · </span>'.join(since_parts)
+        parts.append(
+            f'<span style="color:{_COLOR_MUTED}">上次 </span>{since_body}'
+        )
+    else:
+        parts.append(
+            f'<span style="color:{_COLOR_MUTED}">上次 </span>'
+            f'<span style="color:{_COLOR_MUTED}">未获得</span>'
+        )
+    if duration:
+        parts.append(
+            f'<span style="color:{_COLOR_MUTED}">进行中 </span>'
+            f'<span style="color:{_COLOR_TIME};font-weight:700">'
+            f"{_html_escape(duration)}</span>"
+        )
+    return f'<span style="{_WIDGET_SUB_FONT}">' + _muted_sep().join(parts) + "</span>"
+
+
+def format_timestamp_short(ts: float | None) -> str:
+    """短日期时间，用于子目标行。"""
+    if ts is None:
+        return ""
+    return time.strftime("%m-%d %H:%M", time.localtime(ts))
+
+
+def _format_subgoal_dates_html(sub: Subtask) -> str:
+    parts: list[str] = []
+    created = format_timestamp_short(sub.created_at)
+    if created:
+        parts.append(f"创 {created}")
+    completed = format_timestamp_short(sub.completed_at)
+    if completed:
+        parts.append(f"完 {completed}")
+    if not parts:
+        return ""
+    joined = " · ".join(parts)
+    return (
+        f'<br/><span style="color:{_COLOR_MUTED};font-size:11px;">'
+        f"&nbsp;&nbsp;{joined}</span>"
+    )
+
+
+def format_subgoal_line_html(sub: Subtask, *, is_current: bool) -> str:
+    """悬浮窗子目标行（RichText HTML）。"""
+    if sub.done:
+        marker = "●" if sub.is_claimable() else "✓"
+    elif is_current:
+        marker = "●"
+    else:
+        marker = "○"
+
+    title = _html_escape(sub.title)
+    title_weight = "font-weight:600;" if is_current and not sub.done else "font-weight:500;"
+    if sub.is_claimable():
+        title_color = _COLOR_CLAIM
+        title_weight = "font-weight:700;"
+    elif is_current and not sub.done:
+        title_color = _COLOR_CURRENT
+    else:
+        title_color = _COLOR_TEXT
+
+    if (
+        not sub.done
+        and sub.active_seconds <= 0
+        and not is_current
+        and sub.operations <= 0
+    ):
+        inner = (
+            f'<span style="color:{_COLOR_MUTED}">{marker}</span> '
+            f'<span style="color:{_COLOR_MUTED};font-weight:500;">{title}</span>  '
+            f'<span style="color:{_COLOR_MUTED}">未开始</span>'
+            f"{_format_subgoal_dates_html(sub)}"
+        )
+        return f'<span style="{_SUBGOAL_FONT}">{inner}</span>'
+
+    stats: list[str] = [
+        f'<span style="color:{_COLOR_OPS};font-weight:700">操作{sub.operations}</span>',
+        f'<span style="color:{_COLOR_GOLD};font-weight:700">金{format_amount(sub.earned_gold)}</span>',
+    ]
+    if sub.earned_diamond:
+        stats.append(
+            f'<span style="color:{_COLOR_DIAM};font-weight:700">'
+            f"钻{format_amount(sub.earned_diamond)}</span>"
+        )
+    else:
+        stats.append(
+            f'<span style="color:{_COLOR_MUTED};font-weight:600">钻0</span>'
+        )
+    stat_html = "  ".join(stats)
+
+    time_suffix = ""
+    if is_current and not sub.done:
+        compact = format_duration_compact(sub.active_seconds, sub.target_seconds)
+        time_suffix = f'  <span style="color:{_COLOR_TIME}">({compact})</span>'
+
+    marker_color = _COLOR_CURRENT if is_current and not sub.done else (
+        _COLOR_CLAIM if sub.is_claimable() else _COLOR_MARKER
+    )
+    inner = (
+        f'<span style="color:{marker_color};font-weight:700">{marker}</span> '
+        f'<span style="color:{title_color};{title_weight}">{title}</span>'
+        f'<br/>'
+        f'<span style="color:{_COLOR_MUTED};font-size:11px;">&nbsp;&nbsp;</span>'
+        f"{stat_html}{time_suffix}"
+        f"{_format_subgoal_dates_html(sub)}"
+    )
+    return f'<span style="{_SUBGOAL_FONT}">{inner}</span>'
+
+
+def format_subgoals_focus_hint_html(active: Task) -> str:
+    """有未完成子目标但未聚焦时的提示。"""
+    if not active.subtasks:
+        return ""
+    if active.current_subtask() is not None:
+        return ""
+    if all(s.done for s in active.subtasks):
+        return ""
+    return (
+        f'<span style="{_SUBGOAL_HINT_FONT}color:{_COLOR_WARN};font-weight:600">'
+        f"未聚焦子目标，奖励暂停累计</span>"
+    )
+
+
+def format_subgoals_list_html(active: Task) -> str:
+    """悬浮窗：全部子目标 HTML 列表。"""
+    if not active.subtasks:
+        return (
+            f'<span style="{_SUBGOAL_HINT_FONT}color:{_COLOR_MUTED}">'
+            f"添加子目标后开始累计奖励</span>"
+        )
+
+    current = active.current_subtask()
+    current_id = current.id if current is not None else None
+    lines = [
+        format_subgoal_line_html(sub, is_current=sub.id == current_id)
+        for sub in active.subtasks
+    ]
+    if active.has_unclaimed_subtasks():
+        lines.append(
+            f'<span style="{_SUBGOAL_HINT_FONT}color:{_COLOR_CLAIM};font-weight:700">'
+            f"有子目标奖励待领取</span>"
+        )
+    return "<br>".join(lines)
+
+
+def format_goal_compact_html(operations: int, gold: float, diamond: float) -> str:
+    """悬浮窗父目标紧凑统计一行。"""
+    parts = [
+        f'<span style="color:{_COLOR_OPS};font-weight:700">操作 {operations}</span>',
+        f'<span style="color:{_COLOR_GOLD};font-weight:700">金 {format_amount(gold)}</span>',
+        f'<span style="color:{_COLOR_DIAM if diamond else _COLOR_MUTED};font-weight:700">'
+        f"钻 {format_amount(diamond)}</span>",
+    ]
+    sep = f'<span style="color:{_COLOR_MUTED}"> · </span>'
+    return f'<span style="{_GOAL_COMPACT_FONT}">' + sep.join(parts) + "</span>"
 
 
 def format_amount(value: float) -> str:
@@ -64,11 +372,23 @@ def format_since_roll(gold: float, diamond: float) -> str:
     return " · ".join(parts)
 
 
-def format_roll_history_line(entry: "RollHistoryEntry", *, include_time: bool = False) -> str:
+def format_roll_history_line(
+    entry: "RollHistoryEntry",
+    *,
+    include_time: bool = False,
+    compact: bool = False,
+) -> str:
     """单条开奖历史。"""
     op = f"#{entry.op_at}"
     if not entry.hit:
-        text = f"{op}  未中奖"
+        text = f"{op} -" if compact else f"{op}  未中奖"
+    elif compact:
+        parts = []
+        if entry.gold:
+            parts.append(f"+{format_amount(entry.gold)}金")
+        if entry.diamond:
+            parts.append(f"+{format_amount(entry.diamond)}钻")
+        text = f"{op} {' '.join(parts)}"
     else:
         parts = []
         if entry.gold:
@@ -87,10 +407,14 @@ def format_roll_history_lines(
     *,
     limit: int | None = None,
     include_time: bool = False,
+    compact: bool = False,
 ) -> List[str]:
     items = list(entries)
     if limit is not None:
         items = items[:limit]
     if not items:
         return ["暂无开奖记录"]
-    return [format_roll_history_line(e, include_time=include_time) for e in items]
+    return [
+        format_roll_history_line(e, include_time=include_time, compact=compact)
+        for e in items
+    ]

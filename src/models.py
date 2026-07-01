@@ -27,17 +27,78 @@ class Reward:
 
 
 @dataclass
+class Subtask:
+    """目标下的子项：时长达标后完成，点击领取才进背包。"""
+    id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    title: str = ""
+    target_seconds: float = 600.0
+    active_seconds: float = 0.0
+    operations: int = 0
+    earned_gold: float = 0.0
+    earned_diamond: float = 0.0
+    pending_rewards: List[Reward] = field(default_factory=list)
+    done: bool = False
+    rewards_claimed: bool = False
+    created_at: Optional[float] = field(default_factory=time.time)
+    completed_at: Optional[float] = None
+
+    def pending_summary(self) -> Reward:
+        total = Reward()
+        for r in self.pending_rewards:
+            total.gold += r.gold
+            total.diamond += r.diamond
+        return total
+
+    def is_claimable(self) -> bool:
+        return self.done and not self.rewards_claimed
+
+    def time_target_met(self) -> bool:
+        return self.active_seconds >= self.target_seconds
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "Subtask":
+        pending = [Reward(**r) for r in data.get("pending_rewards", [])]
+        if "target_seconds" in data:
+            target_seconds = float(data["target_seconds"])
+        elif "target_ops" in data:
+            target_seconds = max(60.0, float(data["target_ops"]) * 60.0)
+        else:
+            target_seconds = 600.0
+        return cls(
+            id=data.get("id", uuid.uuid4().hex[:8]),
+            title=data.get("title", ""),
+            target_seconds=max(1.0, target_seconds),
+            active_seconds=float(data.get("active_seconds", 0)),
+            operations=int(data.get("operations", 0)),
+            earned_gold=float(data.get("earned_gold", 0)),
+            earned_diamond=float(data.get("earned_diamond", 0)),
+            pending_rewards=pending,
+            done=bool(data.get("done", False)),
+            rewards_claimed=bool(data.get("rewards_claimed", False)),
+            created_at=data.get("created_at"),
+            completed_at=data.get("completed_at"),
+        )
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+@dataclass
 class Task:
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     title: str = ""
     note: str = ""
     status: TaskStatus = TaskStatus.ACTIVE
+    subtasks: List[Subtask] = field(default_factory=list)
+    current_subtask_id: Optional[str] = None
 
     created_at: float = field(default_factory=time.time)
     completed_at: Optional[float] = None
 
     # 任务进行期间累计的操作数 (仅 active 时累加)
     operations: int = 0
+    earned_gold: float = 0.0
+    earned_diamond: float = 0.0
 
     # 仅「进行中」状态的累计时长（秒）；悬浮窗定时器每 1s 触发时 +1
     active_seconds: float = 0.0
@@ -60,17 +121,49 @@ class Task:
             total.diamond += r.diamond
         return total
 
+    def subtask_progress(self) -> tuple[int, int]:
+        """返回 (已完成数, 总数)。"""
+        total = len(self.subtasks)
+        done = sum(1 for s in self.subtasks if s.done)
+        return done, total
+
+    def current_subtask(self) -> Optional[Subtask]:
+        """当前聚焦的子目标（仅 current_subtask_id 指向的未完成项）。"""
+        if not self.current_subtask_id:
+            return None
+        for s in self.subtasks:
+            if s.id == self.current_subtask_id and not s.done:
+                return s
+        return None
+
+    def has_unclaimed_subtasks(self) -> bool:
+        return any(s.is_claimable() for s in self.subtasks)
+
+    def current_subtask_pending(self) -> Reward:
+        sub = self.current_subtask()
+        if sub is None:
+            return Reward()
+        return sub.pending_summary()
+
+    def can_complete_sub(self, sub: Subtask) -> bool:
+        return sub.time_target_met()
+
     @classmethod
     def from_dict(cls, data: Dict) -> "Task":
         rewards = [Reward(**r) for r in data.get("pending_rewards", [])]
+        subtasks = [Subtask.from_dict(s) for s in data.get("subtasks", [])]
         task = cls(
             id=data.get("id", uuid.uuid4().hex[:12]),
             title=data.get("title", ""),
             note=data.get("note", ""),
             status=TaskStatus(data.get("status", "active")),
+            subtasks=subtasks,
+            current_subtask_id=data.get("current_subtask_id"),
             created_at=data.get("created_at", time.time()),
             completed_at=data.get("completed_at"),
             operations=data.get("operations", 0),
+            earned_gold=float(data.get("earned_gold", 0)),
+            earned_diamond=float(data.get("earned_diamond", 0)),
             active_seconds=float(data.get("active_seconds", 0)),
             pending_rewards=rewards,
             completed_reward_gold=float(data.get("completed_reward_gold", 0)),
@@ -150,6 +243,8 @@ class AppState:
         "diamond_min": 0.01,
         "diamond_max": 0.1,
         "pet_best_round": 0,
+        "subtask_default_target_minutes": 10,
+        "subtask_completion_bonus_gold": 0.5,
     })
 
     def active_task(self) -> Optional[Task]:
