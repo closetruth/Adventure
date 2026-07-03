@@ -127,6 +127,22 @@ class Task:
         done = sum(1 for s in self.subtasks if s.done)
         return done, total
 
+    def earned_totals(self) -> tuple[float, float]:
+        """展示用累计奖励：有子目标时为各子目标之和，否则用父目标字段。"""
+        if self.subtasks:
+            gold = sum(s.earned_gold for s in self.subtasks)
+            diamond = sum(s.earned_diamond for s in self.subtasks)
+            return gold, diamond
+        return self.earned_gold, self.earned_diamond
+
+    def sync_earned_from_subtasks(self) -> None:
+        """将父目标 earned_* 与子目标合计对齐（有子目标时）。"""
+        if not self.subtasks:
+            return
+        gold, diamond = self.earned_totals()
+        self.earned_gold = gold
+        self.earned_diamond = diamond
+
     def current_subtask(self) -> Optional[Subtask]:
         """当前聚焦的子目标（仅 current_subtask_id 指向的未完成项）。"""
         if not self.current_subtask_id:

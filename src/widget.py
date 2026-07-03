@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +53,10 @@ QWidget#WidgetRoot {
 QLabel { color: #f5f5f7; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"; }
 QLabel#Title { font-size: 15px; font-weight: 700; }
 QLabel#Subtle { color: #b8bcc8; font-size: 12px; }
+QLabel#SectionTitle {
+    font-size: 12px; font-weight: 700; color: #8b93a8;
+    padding-bottom: 2px;
+}
 QLabel#GlobalSummary { color: #7a8090; font-size: 11px; font-weight: 500; }
 QLabel#RollHistCap { color: #7a8090; font-size: 10px; }
 QLabel#RollHist { color: #8b90a8; font-size: 9px; line-height: 1.25; }
@@ -83,6 +88,16 @@ QLineEdit#SubGoalInput {
     padding: 5px 8px;
     font-size: 12px;
 }
+QSpinBox#SubtaskMinSpin {
+    background-color: #1a1b24;
+    color: #d8dce8;
+    border: 1px solid #3a3d4a;
+    border-radius: 6px;
+    padding: 3px 4px;
+    font-size: 11px;
+    min-height: 22px;
+}
+QSpinBox#SubtaskMinSpin:focus { border-color: #4a6ad0; }
 QPushButton#SubClaimBtn {
     background-color: #3a5cff;
     border-color: #3a5cff;
@@ -113,6 +128,20 @@ QPushButton#SubActionBtn {
     border-radius: 5px;
 }
 QPushButton#SubActionBtn:hover { background-color: #303448; border-color: #5a6a90; }
+QPushButton#GoalPauseBtn, QPushButton#GoalResumeBtn {
+    background-color: #252833;
+    border: 1px solid #404558;
+    color: #a8c4ff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    min-height: 22px;
+    border-radius: 5px;
+}
+QPushButton#GoalPauseBtn:hover, QPushButton#GoalResumeBtn:hover {
+    background-color: #303448;
+    border-color: #5a6a90;
+}
 QPushButton#SubDelBtn {
     font-size: 11px;
     padding: 3px 8px;
@@ -245,13 +274,20 @@ class FloatingWidget(QWidget):
         top.addWidget(self.close_btn)
         v.addLayout(top)
 
+        # --- 全局区 ---
+        self.global_section = QWidget()
+        self.global_section.setObjectName("GlobalSection")
+        global_lay = QVBoxLayout(self.global_section)
+        global_lay.setContentsMargins(0, 0, 0, 0)
+        global_lay.setSpacing(6)
+        global_lay.addWidget(self._make_section_title("全局"))
+
         self.global_summary = QLabel("")
         self.global_summary.setObjectName("GlobalSummary")
         self.global_summary.setAlignment(Qt.AlignCenter)
         self.global_summary.setTextFormat(Qt.RichText)
-        v.addWidget(self.global_summary)
+        global_lay.addWidget(self.global_summary)
 
-        # 开奖进度
         bar_row = QVBoxLayout()
         bar_row.setSpacing(3)
         cap = QLabel("距下次开奖")
@@ -262,7 +298,7 @@ class FloatingWidget(QWidget):
         self.roll_bar.setTextVisible(True)
         bar_row.addWidget(cap)
         bar_row.addWidget(self.roll_bar)
-        v.addLayout(bar_row)
+        global_lay.addLayout(bar_row)
 
         hist_row = QVBoxLayout()
         hist_row.setSpacing(1)
@@ -275,23 +311,68 @@ class FloatingWidget(QWidget):
         self.roll_history_lbl.setTextFormat(Qt.RichText)
         hist_row.addWidget(hist_cap)
         hist_row.addWidget(self.roll_history_lbl)
-        v.addLayout(hist_row)
+        global_lay.addLayout(hist_row)
+        v.addWidget(self.global_section)
 
         divider = QFrame()
         divider.setObjectName("Divider")
         v.addWidget(divider)
 
-        # 当前目标
+        # --- 目标区 ---
+        self.goal_section = QWidget()
+        self.goal_section.setObjectName("GoalSection")
+        goal_lay = QVBoxLayout(self.goal_section)
+        goal_lay.setContentsMargins(0, 0, 0, 0)
+        goal_lay.setSpacing(6)
+        goal_lay.addWidget(self._make_section_title("当前目标"))
+
+        goal_head = QHBoxLayout()
+        goal_head.setSpacing(6)
         self.task_title = QLabel("暂无进行中的目标")
         self.task_title.setObjectName("TaskTitle")
         self.task_title.setWordWrap(True)
-        v.addWidget(self.task_title)
+        goal_head.addWidget(self.task_title, 1)
+        self.goal_pause_btn = QPushButton("暂停")
+        self.goal_pause_btn.setObjectName("GoalPauseBtn")
+        self.goal_pause_btn.setCursor(Qt.PointingHandCursor)
+        self.goal_pause_btn.clicked.connect(self._on_goal_pause)
+        self.goal_pause_btn.hide()
+        goal_head.addWidget(self.goal_pause_btn)
+        self.goal_resume_btn = QPushButton("恢复")
+        self.goal_resume_btn.setObjectName("GoalResumeBtn")
+        self.goal_resume_btn.setCursor(Qt.PointingHandCursor)
+        self.goal_resume_btn.clicked.connect(self._on_goal_resume)
+        self.goal_resume_btn.hide()
+        goal_head.addWidget(self.goal_resume_btn)
+        goal_lay.addLayout(goal_head)
+
+        self.task_stats = TaskRewardStrip()
+        goal_lay.addWidget(self.task_stats)
+
+        self.goal_add_btn = QPushButton("新建目标")
+        self.goal_add_btn.setObjectName("GoalAddBtn")
+        self.goal_add_btn.setCursor(Qt.PointingHandCursor)
+        self.goal_add_btn.clicked.connect(self._on_add_goal)
+        goal_lay.addWidget(self.goal_add_btn)
+        v.addWidget(self.goal_section)
+
+        divider2 = QFrame()
+        divider2.setObjectName("Divider")
+        v.addWidget(divider2)
+
+        # --- 子目标区 ---
+        self.subgoal_section = QWidget()
+        self.subgoal_section.setObjectName("SubGoalSection")
+        sub_lay = QVBoxLayout(self.subgoal_section)
+        sub_lay.setContentsMargins(0, 0, 0, 0)
+        sub_lay.setSpacing(6)
+        sub_lay.addWidget(self._make_section_title("子目标"))
 
         self.subgoals_hint = QLabel("")
         self.subgoals_hint.setObjectName("SubGoalHint")
         self.subgoals_hint.setWordWrap(True)
         self.subgoals_hint.hide()
-        v.addWidget(self.subgoals_hint)
+        sub_lay.addWidget(self.subgoals_hint)
 
         self.subgoal_pinned = QWidget()
         self.subgoal_pinned.setObjectName("SubGoalPinnedHost")
@@ -299,7 +380,7 @@ class FloatingWidget(QWidget):
         self.subgoal_pinned_layout.setContentsMargins(0, 0, 0, 0)
         self.subgoal_pinned_layout.setSpacing(0)
         self.subgoal_pinned.hide()
-        v.addWidget(self.subgoal_pinned)
+        sub_lay.addWidget(self.subgoal_pinned)
 
         self.subgoals_scroll = QScrollArea()
         self.subgoals_scroll.setObjectName("SubGoalScroll")
@@ -315,12 +396,12 @@ class FloatingWidget(QWidget):
         self.subgoals_layout.setContentsMargins(0, 0, 0, 0)
         self.subgoals_layout.setSpacing(8)
         self.subgoals_scroll.setWidget(self.subgoals_container)
-        v.addWidget(self.subgoals_scroll)
+        sub_lay.addWidget(self.subgoals_scroll)
 
         self.subgoals_empty = QLabel("添加子目标后开始累计奖励")
         self.subgoals_empty.setObjectName("SubGoalList")
         self.subgoals_empty.setWordWrap(True)
-        v.addWidget(self.subgoals_empty)
+        sub_lay.addWidget(self.subgoals_empty)
 
         self.subgoal_actions = QWidget()
         self.subgoal_actions.setObjectName("SubGoalActions")
@@ -335,6 +416,19 @@ class FloatingWidget(QWidget):
         self.subgoal_input.setPlaceholderText("添加子目标…")
         self.subgoal_input.returnPressed.connect(self._on_add_subgoal)
         add_sub_row.addWidget(self.subgoal_input, 1)
+        default_min = max(
+            1, int(self.state.settings.get("subtask_default_target_minutes", 10)),
+        )
+        self.subgoal_min_spin = QSpinBox()
+        self.subgoal_min_spin.setObjectName("SubtaskMinSpin")
+        self.subgoal_min_spin.setRange(1, 999)
+        self.subgoal_min_spin.setValue(default_min)
+        self.subgoal_min_spin.setPrefix("最少 ")
+        self.subgoal_min_spin.setSuffix(" 分")
+        self.subgoal_min_spin.setToolTip("新子目标需运行的最短时间（完成后可领取）")
+        self.subgoal_min_spin.setFixedWidth(96)
+        self.subgoal_min_spin.valueChanged.connect(self._on_subtask_min_changed)
+        add_sub_row.addWidget(self.subgoal_min_spin)
         self.sub_add_btn = QPushButton("添加")
         self.sub_add_btn.setObjectName("SubAddBtn")
         self.sub_add_btn.setCursor(Qt.PointingHandCursor)
@@ -344,15 +438,8 @@ class FloatingWidget(QWidget):
         self.add_sub_row.setLayout(add_sub_row)
         actions_layout.addWidget(self.add_sub_row)
 
-        self.goal_add_btn = QPushButton("新建目标")
-        self.goal_add_btn.setObjectName("GoalAddBtn")
-        self.goal_add_btn.setCursor(Qt.PointingHandCursor)
-        self.goal_add_btn.clicked.connect(self._on_add_goal)
-        actions_layout.addWidget(self.goal_add_btn)
-
-        v.addWidget(self.subgoal_actions)
-        self.task_stats = TaskRewardStrip()
-        v.addWidget(self.task_stats)
+        sub_lay.addWidget(self.subgoal_actions)
+        v.addWidget(self.subgoal_section)
 
         # 按钮
         btns = QHBoxLayout()
@@ -371,11 +458,17 @@ class FloatingWidget(QWidget):
         """记录一次全局操作（用于近1分钟计数）。"""
         self._op_tracker.record()
 
+    @staticmethod
+    def _make_section_title(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("SectionTitle")
+        return lbl
+
     # ---------- 拖动 ----------
     def _is_interactive_child(self, pos: QPoint) -> bool:
         w = self.childAt(pos)
         while w is not None and w is not self:
-            if isinstance(w, (QPushButton, QLineEdit, QScrollArea)):
+            if isinstance(w, (QPushButton, QLineEdit, QScrollArea, QSpinBox)):
                 return True
             w = w.parentWidget()
         return False
@@ -712,8 +805,42 @@ class FloatingWidget(QWidget):
 
     def _update_action_visibility(self, active: Task | None) -> None:
         has_active = active is not None and active.status == TaskStatus.ACTIVE
+        self.subgoal_section.setVisible(has_active)
         self.add_sub_row.setVisible(has_active)
-        self.goal_add_btn.setVisible(True)
+
+    def _update_goal_actions(
+        self,
+        active: Task | None,
+        paused: list[Task] | None = None,
+    ) -> None:
+        if active is not None and active.status == TaskStatus.ACTIVE:
+            self.goal_pause_btn.show()
+            self.goal_resume_btn.hide()
+            return
+        if paused is None:
+            paused = self.manager.by_status(TaskStatus.PAUSED)
+        if paused:
+            self.goal_pause_btn.hide()
+            self.goal_resume_btn.show()
+        else:
+            self.goal_pause_btn.hide()
+            self.goal_resume_btn.hide()
+
+    def _on_goal_pause(self) -> None:
+        active = self.state.active_task()
+        if active is None:
+            return
+        self.manager.pause(active.id)
+        self.state_changed.emit()
+        self.refresh()
+
+    def _on_goal_resume(self) -> None:
+        paused = self.manager.by_status(TaskStatus.PAUSED)
+        if not paused:
+            return
+        self.manager.resume(paused[0].id)
+        self.state_changed.emit()
+        self.refresh()
 
     def _on_sub_focus(self, subtask_id: str) -> None:
         active = self.state.active_task()
@@ -767,6 +894,10 @@ class FloatingWidget(QWidget):
         self.state_changed.emit()
         self.refresh()
 
+    def _on_subtask_min_changed(self, value: int) -> None:
+        self.state.settings["subtask_default_target_minutes"] = max(1, int(value))
+        save_state(self.state)
+
     def _on_add_subgoal(self) -> None:
         active = self.state.active_task()
         if active is None:
@@ -774,7 +905,9 @@ class FloatingWidget(QWidget):
         title = self.subgoal_input.text().strip()
         if not title:
             return
-        self.manager.add_subtask(active.id, title)
+        target_minutes = self.subgoal_min_spin.value()
+        self.state.settings["subtask_default_target_minutes"] = target_minutes
+        self.manager.add_subtask(active.id, title, target_minutes=target_minutes)
         self.subgoal_input.clear()
         self.state_changed.emit()
         self.refresh()
@@ -798,17 +931,27 @@ class FloatingWidget(QWidget):
         self,
         active: Task | None,
         *,
-        ops_1min: int,
         since_gold: float,
         since_diamond: float,
     ) -> None:
+        paused = self.manager.by_status(TaskStatus.PAUSED)
         if active is None:
-            paused = self.manager.by_status(TaskStatus.PAUSED)
             self._refresh_task_actions(None)
+            self._update_goal_actions(None, paused)
             if paused:
-                self._set_text(self.task_title, "无进行中目标")
-                self.task_stats.show_hint(
-                    f"已暂停 {len(paused)} 个目标，点击「目标管理」继续"
+                p = paused[0]
+                title = p.title
+                if p.subtasks:
+                    done, total = p.subtask_progress()
+                    title = f"{p.title}  ({done}/{total})"
+                self._set_text(self.task_title, f"{title} (已暂停)")
+                earned_gold, earned_diamond = p.earned_totals()
+                self.task_stats.show_active_compact(
+                    p.operations,
+                    earned_gold,
+                    earned_diamond,
+                    since_roll_gold=since_gold,
+                    since_roll_diamond=since_diamond,
                 )
             else:
                 self._set_text(self.task_title, "还没有目标")
@@ -817,24 +960,28 @@ class FloatingWidget(QWidget):
 
         self._set_text(self.task_title, self._format_task_title(active))
         self._refresh_task_actions(active)
+        self._update_goal_actions(active, paused)
         duration = format_duration(active.active_duration_seconds())
+        sub = active.current_subtask()
+        sub_duration = format_duration(sub.active_seconds) if sub is not None else ""
+        earned_gold, earned_diamond = active.earned_totals()
         self.task_stats.show_active_compact(
             active.operations,
-            active.earned_gold,
-            active.earned_diamond,
-            ops_1min=ops_1min,
+            earned_gold,
+            earned_diamond,
             since_roll_gold=since_gold,
             since_roll_diamond=since_diamond,
             duration=duration,
+            sub_duration=sub_duration,
         )
 
-    def _format_global_summary_html(self, ops_1min: int, active: Task | None) -> str:
+    def _format_global_summary_html(self, ops_1min: int) -> str:
         s = self.state
         return format_global_summary_html(
             s.total_operations,
             s.inventory.gold,
             s.inventory.diamond,
-            ops_1min=ops_1min if active is None else None,
+            ops_1min=ops_1min,
         )
 
     def refresh_light(self, *, roll_changed: bool = False) -> None:
@@ -845,7 +992,7 @@ class FloatingWidget(QWidget):
 
         self._set_html(
             self.global_summary,
-            self._format_global_summary_html(ops_1min, active),
+            self._format_global_summary_html(ops_1min),
         )
 
         interval = int(s.settings.get("roll_interval", 10))
@@ -869,7 +1016,6 @@ class FloatingWidget(QWidget):
 
         self._apply_task_section(
             active,
-            ops_1min=ops_1min,
             since_gold=s.since_roll.gold,
             since_diamond=s.since_roll.diamond,
         )
@@ -885,7 +1031,7 @@ class FloatingWidget(QWidget):
 
         self._set_html(
             self.global_summary,
-            self._format_global_summary_html(ops_1min, active),
+            self._format_global_summary_html(ops_1min),
         )
 
         interval = int(s.settings.get("roll_interval", 10))
@@ -904,7 +1050,6 @@ class FloatingWidget(QWidget):
 
         self._apply_task_section(
             active,
-            ops_1min=ops_1min,
             since_gold=s.since_roll.gold,
             since_diamond=s.since_roll.diamond,
         )
@@ -914,25 +1059,30 @@ class FloatingWidget(QWidget):
         self._active_ticker.tick(self.state, self.manager)
         ops_1min = self._op_tracker.count_recent()
         active = self.state.active_task()
+
+        self._set_html(
+            self.global_summary,
+            self._format_global_summary_html(ops_1min),
+        )
+
         if active is None:
-            self._set_html(
-                self.global_summary,
-                self._format_global_summary_html(ops_1min, active),
-            )
             return
 
         self._set_text(self.task_title, self._format_task_title(active))
         self._refresh_task_actions(active)
         duration = format_duration(active.active_duration_seconds())
+        sub = active.current_subtask()
+        sub_duration = format_duration(sub.active_seconds) if sub is not None else ""
+        earned_gold, earned_diamond = active.earned_totals()
         since = self.state.since_roll
         self.task_stats.show_active_compact(
             active.operations,
-            active.earned_gold,
-            active.earned_diamond,
-            ops_1min=ops_1min,
+            earned_gold,
+            earned_diamond,
             since_roll_gold=since.gold,
             since_roll_diamond=since.diamond,
             duration=duration,
+            sub_duration=sub_duration,
         )
 
     # ---------- 显示时初始化窗口属性 ----------

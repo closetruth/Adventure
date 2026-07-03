@@ -148,17 +148,33 @@ def format_roll_history_lines_html(
     return f'<span style="{_WIDGET_HIST_FONT}">' + "<br/>".join(lines) + "</span>"
 
 
+def format_subgoal_runtime_html(sub: Subtask) -> str:
+    """子目标运行时长（RichText）。"""
+    runtime = format_duration(sub.active_seconds)
+    if sub.done:
+        return (
+            f'<span style="color:{_COLOR_MUTED}">运行 </span>'
+            f'<span style="color:{_COLOR_TIME};font-weight:700">{runtime}</span>'
+        )
+    target = format_duration(sub.target_seconds)
+    runtime_color = _COLOR_OPS if sub.time_target_met() else _COLOR_TIME
+    return (
+        f'<span style="color:{_COLOR_MUTED}">运行 </span>'
+        f'<span style="color:{runtime_color};font-weight:700">{runtime}</span>'
+        f'<span style="color:{_COLOR_MUTED}"> / </span>'
+        f'<span style="color:{_COLOR_MUTED}">{target}</span>'
+    )
+
+
 def format_widget_runtime_html(
-    ops_1min: int,
     since_gold: float,
     since_diamond: float,
     duration: str = "",
+    *,
+    sub_duration: str = "",
 ) -> str:
-    """悬浮窗目标区副行：近1分 / 上次获得 / 进行中。"""
-    parts: list[str] = [
-        f'<span style="color:{_COLOR_MUTED}">近1分 </span>'
-        f'<span style="color:{_COLOR_OPS};font-weight:700">{ops_1min}</span>',
-    ]
+    """悬浮窗目标区副行：上次获得 / 目标运行 / 子目标运行。"""
+    parts: list[str] = []
     since_parts: list[str] = []
     if since_gold:
         since_parts.append(
@@ -182,9 +198,15 @@ def format_widget_runtime_html(
         )
     if duration:
         parts.append(
-            f'<span style="color:{_COLOR_MUTED}">进行中 </span>'
+            f'<span style="color:{_COLOR_MUTED}">目标运行 </span>'
             f'<span style="color:{_COLOR_TIME};font-weight:700">'
             f"{_html_escape(duration)}</span>"
+        )
+    if sub_duration:
+        parts.append(
+            f'<span style="color:{_COLOR_MUTED}">子目标 </span>'
+            f'<span style="color:{_COLOR_TIME};font-weight:700">'
+            f"{_html_escape(sub_duration)}</span>"
         )
     return f'<span style="{_WIDGET_SUB_FONT}">' + _muted_sep().join(parts) + "</span>"
 
@@ -261,10 +283,9 @@ def format_subgoal_line_html(sub: Subtask, *, is_current: bool) -> str:
         )
     stat_html = "  ".join(stats)
 
-    time_suffix = ""
-    if is_current and not sub.done:
-        compact = format_duration_compact(sub.active_seconds, sub.target_seconds)
-        time_suffix = f'  <span style="color:{_COLOR_TIME}">({compact})</span>'
+    runtime_html = ""
+    if sub.active_seconds > 0 or sub.done or is_current:
+        runtime_html = f'  {format_subgoal_runtime_html(sub)}'
 
     marker_color = _COLOR_CURRENT if is_current and not sub.done else (
         _COLOR_CLAIM if sub.is_claimable() else _COLOR_MARKER
@@ -274,7 +295,7 @@ def format_subgoal_line_html(sub: Subtask, *, is_current: bool) -> str:
         f'<span style="color:{title_color};{title_weight}">{title}</span>'
         f'<br/>'
         f'<span style="color:{_COLOR_MUTED};font-size:11px;">&nbsp;&nbsp;</span>'
-        f"{stat_html}{time_suffix}"
+        f"{stat_html}{runtime_html}"
         f"{_format_subgoal_dates_html(sub)}"
     )
     return f'<span style="{_SUBGOAL_FONT}">{inner}</span>'

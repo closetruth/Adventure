@@ -477,8 +477,7 @@ class TaskCard(QFrame):
         else:
             self.task_stats.show_active_compact(
                 self.task.operations,
-                self.task.earned_gold,
-                self.task.earned_diamond,
+                *self.task.earned_totals(),
             )
         v.addWidget(self.task_stats)
         v.addWidget(meta)
@@ -532,8 +531,7 @@ class TaskCard(QFrame):
         else:
             self.task_stats.show_active_compact(
                 self.task.operations,
-                self.task.earned_gold,
-                self.task.earned_diamond,
+                *self.task.earned_totals(),
             )
 
 class TaskDialog(QDialog):

@@ -11,6 +11,8 @@ class TaskManager:
     def __init__(self, state: AppState):
         self.state = state
         for t in state.tasks:
+            if t.subtasks:
+                t.sync_earned_from_subtasks()
             if t.status == TaskStatus.ACTIVE:
                 self._sync_current_subtask(t)
 
@@ -226,11 +228,12 @@ class TaskManager:
         t.subtasks = [s for s in t.subtasks if s.id != subtask_id]
         if len(t.subtasks) != before:
             self._sync_current_subtask(t)
+            self._sync_task_earned_from_subtasks(t)
             return True
         return False
 
     def tick_active_time(self) -> bool:
-        """每秒调用：累加父/子任务时长，达标则 mark done。返回是否有子任务刚完成。"""
+        """每秒调用：累加父/子任务时长（不自动完成子目标，须手动点完成）。"""
         active = self.state.active_task()
         if active is None:
             return False
@@ -239,17 +242,16 @@ class TaskManager:
         if sub is None:
             return False
         sub.active_seconds += 1
-        if not sub.done and sub.active_seconds >= sub.target_seconds:
-            self._mark_subtask_done(active, sub)
-            return True
         return False
+
+    def _sync_task_earned_from_subtasks(self, task: Task) -> None:
+        task.sync_earned_from_subtasks()
 
     def _apply_roll_to_subtask(self, task: Task, sub: Subtask, reward: Reward) -> None:
         sub.pending_rewards.append(reward)
         sub.earned_gold += reward.gold
         sub.earned_diamond += reward.diamond
-        task.earned_gold += reward.gold
-        task.earned_diamond += reward.diamond
+        self._sync_task_earned_from_subtasks(task)
         self.state.since_roll.gold += reward.gold
         self.state.since_roll.diamond += reward.diamond
 

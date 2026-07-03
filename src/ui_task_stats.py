@@ -177,10 +177,10 @@ class TaskRewardStrip(QWidget):
         gold: float,
         diamond: float,
         *,
-        ops_1min: int = 0,
         since_roll_gold: float = 0.0,
         since_roll_diamond: float = 0.0,
         duration: str = "",
+        sub_duration: str = "",
     ) -> None:
         if self._mode != "compact":
             self.hint_lbl.hide()
@@ -200,7 +200,10 @@ class TaskRewardStrip(QWidget):
         _set_if_changed(
             self.compact_sub_lbl,
             format_widget_runtime_html(
-                ops_1min, since_roll_gold, since_roll_diamond, duration,
+                since_roll_gold,
+                since_roll_diamond,
+                duration,
+                sub_duration=sub_duration,
             ),
         )
 

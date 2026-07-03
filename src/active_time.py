@@ -11,5 +11,5 @@ if TYPE_CHECKING:
 
 class ActiveTimeTracker:
     def tick(self, state: AppState, manager: "TaskManager") -> bool:
-        """返回 True 表示有子任务因时长达标而自动完成。"""
+        """累加进行中任务/聚焦子目标的时长。"""
         return manager.tick_active_time()
