@@ -6,7 +6,7 @@
 ---
 ## 演示
 
-<video controls src="assets/demo.mp4" width="720"></video>
+<video controls src="docs/demo.mp4" width="720"></video>
 
 ## 功能特性
 
