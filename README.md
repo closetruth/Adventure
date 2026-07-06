@@ -6,7 +6,7 @@
 ---
 ## 演示
 
-https://github.com/closetruth/Adventure/assets/demo.mp4
+<video controls src="assets/demo.mp4" width="720"></video>
 
 ## 功能特性
 
