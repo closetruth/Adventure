@@ -4,6 +4,9 @@
 敲键盘、点鼠标会累计操作数并周期性「开奖」；奖励先挂在当前任务上，完成任务后再领进背包。附带两个 pygame 小游戏。
 
 ---
+## 演示
+
+https://github.com/closetruth/Adventure/assets/demo.mp4
 
 ## 功能特性
 
