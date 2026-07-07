@@ -11,7 +11,7 @@ from __future__ import annotations
 import signal
 import sys
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QLockFile, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -36,7 +36,7 @@ from .input_monitor import InputMonitor
 from .inventory_dialog import InventoryDialog
 from .models import AppState, Reward
 from .reward_system import maybe_roll
-from .storage import load_state, save_state
+from .storage import SaveRejectedError, get_data_dir, load_state, save_state, take_load_warning
 from .task_dialog import TaskDialog
 from .task_manager import TaskManager
 from .ui_text import format_reward_gain
@@ -51,13 +51,18 @@ class OpBridge(QObject):
 class Application(QObject):
     def __init__(self, qt_app: QApplication):
         # 高 DPI 处理 (PySide6 默认即开启)
+        super().__init__()
         self.qt_app = qt_app
         self.qt_app.setQuitOnLastWindowClosed(False)
         self.qt_app.setApplicationName("Adventure")
-        super().__init__()
 
         self.state: AppState = load_state()
+        load_warning = take_load_warning()
+        if load_warning:
+            QMessageBox.warning(None, "Adventure", load_warning)
         self.manager = TaskManager(self.state)
+        if self.manager.recover_stuck_subtask_rewards():
+            self._safe_save()
 
         self.widget = FloatingWidget(self.state, self.manager)
         self.widget.request_task_dialog.connect(self.show_task_dialog)
@@ -78,11 +83,15 @@ class Application(QObject):
         else:
             self.monitor.start()
 
-        # 周期性自动存档
+        # 周期性自动存档 + 操作后防抖存档（避免仅依赖 15s 定时器）
         self.save_timer = QTimer(self)
         self.save_timer.setInterval(15_000)
-        self.save_timer.timeout.connect(lambda: save_state(self.state))
+        self.save_timer.timeout.connect(self._auto_save)
         self.save_timer.start()
+        self._save_debounce = QTimer(self)
+        self._save_debounce.setSingleShot(True)
+        self._save_debounce.setInterval(3_000)
+        self._save_debounce.timeout.connect(self._safe_save)
 
         # 系统托盘
         self.tray = self._build_tray()
@@ -90,6 +99,7 @@ class Application(QObject):
         # 引用子窗口避免被 GC
         self._task_dialog = None
         self._inv_dialog = None
+        self._save_reject_notified = False
 
         # 合并高频按键触发的 UI 刷新，避免每键整窗重绘
         self._roll_changed = False
@@ -211,6 +221,7 @@ class Application(QObject):
         self.manager.record_operation(reward)
         self.widget.note_operation()
         self._schedule_ui_flush(roll_changed=reward is not None)
+        self._save_debounce.start()
 
     # ---------- 子窗口 ----------
     def _on_subtask_claimed(self, title: str, reward: Reward) -> None:
@@ -222,7 +233,7 @@ class Application(QObject):
         )
 
     def _on_widget_state_changed(self) -> None:
-        save_state(self.state)
+        self._safe_save()
         self.widget.refresh()
         if self._task_dialog is not None and self._task_dialog.isVisible():
             self._task_dialog.refresh()
@@ -232,7 +243,7 @@ class Application(QObject):
     def show_task_dialog(self) -> None:
         if self._task_dialog is None:
             self._task_dialog = TaskDialog(self.state, self.manager, parent=self.widget)
-            self._task_dialog.state_changed.connect(self.widget.refresh)
+            self._task_dialog.state_changed.connect(self._on_widget_state_changed)
             self._task_dialog.subtask_claimed.connect(self._on_subtask_claimed)
         self._task_dialog.refresh()
         self._task_dialog.show()
@@ -252,7 +263,7 @@ class Application(QObject):
     def play_pet_arena(self) -> None:
         """暂停主窗交互感，启动 pygame 子进程并结算。"""
         ok, msg, _result = launch_pet_arena(self.state)
-        save_state(self.state)
+        self._safe_save()
         self.widget.refresh()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()
@@ -263,7 +274,7 @@ class Application(QObject):
 
     def play_pixel_tactics(self) -> None:
         ok, msg, _result = launch_pixel_tactics(self.state)
-        save_state(self.state)
+        self._safe_save()
         self.widget.refresh()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()
@@ -278,19 +289,73 @@ class Application(QObject):
             self.monitor.stop()
         except Exception:
             pass
+        self._safe_save()
+        self.qt_app.quit()
+
+    def _safe_save(self) -> None:
+        """保存状态，失败时弹窗提示用户。"""
         try:
             save_state(self.state)
+            self._save_reject_notified = False
+        except SaveRejectedError as exc:
+            QMessageBox.warning(
+                self.widget,
+                "保存已拒绝",
+                f"{exc.reason}\n\n"
+                "内存数据可能已损坏，磁盘存档与备份未被覆盖。\n"
+                "请重启应用从 data.json.anchor / data.json.safety 恢复。",
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self.widget,
+                "保存失败",
+                f"数据保存失败，请检查磁盘空间和权限。\n\n{exc}",
+            )
+
+    def _auto_save(self) -> None:
+        """定时自动保存：静默失败；拒绝写入时托盘通知一次。"""
+        try:
+            save_state(self.state)
+            self._save_reject_notified = False
+        except SaveRejectedError:
+            if not self._save_reject_notified and self.tray.isVisible():
+                self._save_reject_notified = True
+                self.tray.showMessage(
+                    "Adventure",
+                    "检测到内存数据异常，已拒绝自动保存以保护备份。请重启应用。",
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    5000,
+                )
         except Exception:
             pass
-        self.qt_app.quit()
 
     def run(self) -> int:
         return self.qt_app.exec()
 
 
+def _acquire_single_instance() -> QLockFile | None:
+    """防止多开互相覆盖存档；返回持有锁的对象，进程退出时自动释放。"""
+    lock_path = get_data_dir() / "instance.lock"
+    lock = QLockFile(str(lock_path))
+    lock.setStaleLockTime(0)
+    if lock.tryLock(200):
+        return lock
+    return None
+
+
 def main() -> int:
     qt_app = QApplication(sys.argv)
+    instance_lock = _acquire_single_instance()
+    if instance_lock is None:
+        QMessageBox.information(
+            None,
+            "Adventure",
+            "Adventure 已在运行中。\n请使用系统托盘中的实例，避免多开导致存档互相覆盖。",
+        )
+        return 0
     app = Application(qt_app)
+    # 持有锁引用，防止被 GC 提前释放
+    app._instance_lock = instance_lock  # type: ignore[attr-defined]
     return app.run()
 
 

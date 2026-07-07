@@ -109,6 +109,10 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
     if not ok:
         return False, msg, None
 
+    # 扣除入场费
+    need = ENTRY_GOLD_COST if game_key == "pet" else GRID_GAME_ENTRY_GOLD_COST
+    state.inventory.gold = max(0, state.inventory.gold - need)
+
     session = GameSession.create(
         gold=state.inventory.gold,
         diamond=state.inventory.diamond,

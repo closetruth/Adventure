@@ -45,6 +45,30 @@ class TaskManager:
     def _completion_bonus(self) -> float:
         return float(self.state.settings.get("subtask_completion_bonus_gold", 0.5))
 
+    def _settle_subtask_rewards(self, task: Task) -> None:
+        """将子目标 pending 结算进背包（完成固定奖仅 done 时加）。"""
+        bonus = self._completion_bonus()
+        for sub in task.subtasks:
+            if sub.rewards_claimed or not sub.pending_rewards:
+                continue
+            total = sub.pending_summary()
+            if sub.done:
+                total.gold += bonus
+            self.state.inventory.add(total)
+            sub.pending_rewards.clear()
+            if sub.done:
+                sub.rewards_claimed = True
+
+    def recover_stuck_subtask_rewards(self) -> bool:
+        """启动时修复：子目标 pending 未进背包（如已完成父目标但子目标未领）。"""
+        changed = False
+        for t in self.state.tasks:
+            if not any(not s.rewards_claimed and s.pending_rewards for s in t.subtasks):
+                continue
+            self._settle_subtask_rewards(t)
+            changed = True
+        return changed
+
     def preview_claim(self, task_id: str, subtask_id: str) -> Optional[Reward]:
         """预览领取总额（pending + 完成固定奖）。"""
         t = self.get(task_id)
@@ -102,10 +126,10 @@ class TaskManager:
             return None
         if t.has_unclaimed_subtasks():
             return None
+        self._settle_subtask_rewards(t)
         total = t.pending_summary()
         self.state.inventory.add(total)
-        t.completed_reward_gold = total.gold
-        t.completed_reward_diamond = total.diamond
+        t.completed_reward_gold, t.completed_reward_diamond = t.earned_totals()
         t.pending_rewards.clear()
         t.status = TaskStatus.COMPLETED
         t.completed_at = time.time()

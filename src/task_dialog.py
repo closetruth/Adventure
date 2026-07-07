@@ -471,8 +471,7 @@ class TaskCard(QFrame):
         if self.task.status == TaskStatus.COMPLETED:
             self.task_stats.show_completed(
                 self.task.operations,
-                self.task.completed_reward_gold,
-                self.task.completed_reward_diamond,
+                *self.task.earned_totals(),
             )
         else:
             self.task_stats.show_active_compact(
@@ -525,8 +524,7 @@ class TaskCard(QFrame):
         if self.task.status == TaskStatus.COMPLETED:
             self.task_stats.show_completed(
                 self.task.operations,
-                self.task.completed_reward_gold,
-                self.task.completed_reward_diamond,
+                *self.task.earned_totals(),
             )
         else:
             self.task_stats.show_active_compact(
@@ -709,7 +707,7 @@ class TaskDialog(QDialog):
                 QMessageBox.information(
                     self,
                     "提示",
-                    "请先领取所有已完成子目标的奖励，再完成目标。",
+                    "请先完成并领取所有子目标的奖励，再完成目标。",
                 )
                 return
             reward = self.manager.complete(task_id)

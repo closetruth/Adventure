@@ -1,6 +1,7 @@
 """数据模型 - Task / Reward / AppState。"""
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -153,7 +154,13 @@ class Task:
         return None
 
     def has_unclaimed_subtasks(self) -> bool:
-        return any(s.is_claimable() for s in self.subtasks)
+        """子目标仍有 pending 或未领取的完成奖励时，不可完成父目标。"""
+        for s in self.subtasks:
+            if s.rewards_claimed:
+                continue
+            if s.is_claimable() or s.pending_rewards:
+                return True
+        return False
 
     def current_subtask_pending(self) -> Reward:
         sub = self.current_subtask()
@@ -300,3 +307,66 @@ class AppState:
         )
         s.settings.update(data.get("settings", {}))
         return s
+
+
+def validate_state_invariants(state: AppState) -> Optional[str]:
+    """检查内存状态的业务不变量；返回错误描述，None 表示通过。"""
+    if state.total_operations < 0:
+        return "total_operations 为负"
+    if state.last_roll_at < 0:
+        return "last_roll_at 为负"
+    if state.last_roll_at > state.total_operations:
+        return "last_roll_at 超过 total_operations"
+
+    inv = state.inventory
+    for name, val in (("gold", inv.gold), ("diamond", inv.diamond)):
+        if not math.isfinite(val) or val < 0:
+            return f"inventory.{name} 非法"
+
+    active_count = 0
+    task_ids: set[str] = set()
+    for t in state.tasks:
+        if not t.id:
+            return "存在空目标 id"
+        if t.id in task_ids:
+            return f"目标 id 重复: {t.id}"
+        task_ids.add(t.id)
+
+        if t.status == TaskStatus.ACTIVE:
+            active_count += 1
+        if t.operations < 0:
+            return f"目标「{t.title}」operations 为负"
+        if not math.isfinite(t.active_seconds) or t.active_seconds < 0:
+            return f"目标「{t.title}」active_seconds 非法"
+
+        sub_ids: set[str] = set()
+        for s in t.subtasks:
+            if not s.id:
+                return "存在空子目标 id"
+            if s.id in sub_ids:
+                return f"子目标 id 重复: {s.id}"
+            sub_ids.add(s.id)
+            if s.operations < 0:
+                return f"子目标「{s.title}」operations 为负"
+            if not math.isfinite(s.target_seconds) or s.target_seconds <= 0:
+                return f"子目标「{s.title}」target_seconds 非法"
+            if not math.isfinite(s.active_seconds) or s.active_seconds < 0:
+                return f"子目标「{s.title}」active_seconds 非法"
+
+        if t.current_subtask_id is not None:
+            sub = next((s for s in t.subtasks if s.id == t.current_subtask_id), None)
+            if sub is None:
+                return f"目标「{t.title}」current_subtask_id 指向不存在的子目标"
+            if sub.done:
+                return f"目标「{t.title}」current_subtask_id 指向已完成的子目标"
+
+    if active_count > 1:
+        return f"存在 {active_count} 个进行中目标（最多 1 个）"
+
+    sr = state.since_roll
+    if not math.isfinite(sr.gold) or sr.gold < 0:
+        return "since_roll.gold 非法"
+    if not math.isfinite(sr.diamond) or sr.diamond < 0:
+        return "since_roll.diamond 非法"
+
+    return None
