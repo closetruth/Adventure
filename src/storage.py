@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Optional
 
 from .models import AppState, validate_state_invariants
+
+logger = logging.getLogger(__name__)
 
 # 滚动备份：每次成功保存前，把当前 data.json 依次落到 .bak1 ~ .bak5
 _BACKUP_FILES = (
@@ -290,6 +293,13 @@ def _check_save_allowed(main_path: Path, new_data: dict) -> Optional[str]:
             anchor_health = None
         if anchor_health is not None:
             if _is_degraded(anchor_health, new_health):
+                logger.warning(
+                    "相较 anchor 快照数据异常退化 (anchor gold=%.1f→new=%.1f, "
+                    "anchor diamond=%.1f→new=%.1f, anchor tasks=%d→new=%d)",
+                    anchor_health["gold"], new_health["gold"],
+                    anchor_health["diamond"], new_health["diamond"],
+                    anchor_health["task_count"], new_health["task_count"],
+                )
                 return "相较可靠快照 data.json.anchor 数据异常退化"
             # anchor 周期内丢失多个目标（允许逐个删除后分次保存）
             anchor_tasks_dropped = anchor_health["task_count"] - new_health["task_count"]
@@ -344,6 +354,7 @@ def _manage_snapshots(main_path: Path) -> None:
     if not hourly_path.exists():
         try:
             shutil.copy2(main_path, hourly_path)
+            logger.info("创建小时快照 %s", hourly_path.name)
         except OSError:
             pass
 
@@ -352,6 +363,7 @@ def _manage_snapshots(main_path: Path) -> None:
     if not daily_path.exists():
         try:
             shutil.copy2(main_path, daily_path)
+            logger.info("创建日快照 %s", daily_path.name)
         except OSError:
             pass
 
@@ -378,12 +390,18 @@ def _cleanup_snapshots(data_dir: Path) -> None:
             p.unlink()
         except OSError:
             pass
+    if len(hourly) > _MAX_HOURLY_SNAPSHOTS:
+        removed = len(hourly) - _MAX_HOURLY_SNAPSHOTS
+        logger.debug("清理 %d 个过期小时快照", removed)
 
     for p in daily[:-_MAX_DAILY_SNAPSHOTS] if _MAX_DAILY_SNAPSHOTS > 0 else daily:
         try:
             p.unlink()
         except OSError:
             pass
+    if len(daily) > _MAX_DAILY_SNAPSHOTS:
+        removed = len(daily) - _MAX_DAILY_SNAPSHOTS
+        logger.debug("清理 %d 个过期日快照", removed)
 
 
 def _legacy_backup_paths(data_dir: Path) -> list[Path]:
@@ -432,6 +450,7 @@ def load_state() -> AppState:
             continue
         if i > 0:
             recovered_from = candidate.name
+            logger.warning("主存档损坏，从「%s」恢复", recovered_from)
             # 主文件坏了，从备份恢复：尽量写回 data.json
             try:
                 shutil.copy2(candidate, path)
@@ -448,7 +467,9 @@ def load_state() -> AppState:
 
     if path.exists():
         _archive_corrupt(path)
+        logger.warning("主存档损坏，已归档为 broken 文件")
     if had_any_file:
+        logger.error("无法读取任何有效存档，新建空白数据")
         _load_warning = (
             "无法读取任何有效存档（可能因异常退出导致文件损坏）。\n"
             "已新建空白存档；请查看 %APPDATA%\\Adventure 下的 .bak 备份文件。"
@@ -465,6 +486,7 @@ def save_state(state: AppState) -> None:
 
     inv_err = validate_state_invariants(state)
     if inv_err:
+        logger.warning("保存前校验失败: %s", inv_err)
         _preserve_good_snapshot(path)
         raise SaveRejectedError(f"内存状态校验失败：{inv_err}")
 
@@ -473,6 +495,7 @@ def save_state(state: AppState) -> None:
 
     reject = _check_save_allowed(path, data_without_hash)
     if reject:
+        logger.warning("保存被拒绝: %s", reject)
         _preserve_good_snapshot(path)
         raise SaveRejectedError(f"{reject}，已拒绝写入以保护备份")
 

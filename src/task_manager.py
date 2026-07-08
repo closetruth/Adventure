@@ -1,10 +1,13 @@
 """任务 CRUD 与状态变更逻辑。"""
 from __future__ import annotations
 
+import logging
 import time
 from typing import List, Optional
 
 from .models import AppState, Reward, Subtask, Task, TaskStatus
+
+logger = logging.getLogger(__name__)
 
 
 class TaskManager:
@@ -66,6 +69,7 @@ class TaskManager:
             if not any(not s.rewards_claimed and s.pending_rewards for s in t.subtasks):
                 continue
             self._settle_subtask_rewards(t)
+            logger.info("启动恢复: 结算目标「%s」的卡住子任务奖励", t.title)
             changed = True
         return changed
 
@@ -99,6 +103,7 @@ class TaskManager:
         self.state.tasks.insert(0, task)
         if status == TaskStatus.ACTIVE:
             self._sync_current_subtask(task)
+        logger.info("创建目标「%s」(id=%s, status=%s)", title, task.id, status.value)
         return task
 
     def pause(self, task_id: str) -> Optional[Task]:
@@ -106,6 +111,7 @@ class TaskManager:
         if not t or t.status != TaskStatus.ACTIVE:
             return t
         t.status = TaskStatus.PAUSED
+        logger.info("暂停目标「%s」(id=%s)", t.title, task_id)
         return t
 
     def resume(self, task_id: str) -> Optional[Task]:
@@ -114,9 +120,11 @@ class TaskManager:
             return t
         current = self.state.active_task()
         if current and current.id != t.id:
+            logger.info("自动暂停「%s」(id=%s)", current.title, current.id)
             current.status = TaskStatus.PAUSED
         t.status = TaskStatus.ACTIVE
         self._sync_current_subtask(t)
+        logger.info("恢复目标「%s」(id=%s)", t.title, task_id)
         return t
 
     def complete(self, task_id: str) -> Optional[Reward]:
@@ -134,6 +142,8 @@ class TaskManager:
         t.status = TaskStatus.COMPLETED
         t.completed_at = time.time()
         t.current_subtask_id = None
+        logger.info("完成任务「%s」(id=%s) 结算 gold=%.1f diamond=%.1f",
+                    t.title, task_id, total.gold, total.diamond)
         return total
 
     def can_complete_task(self, task_id: str) -> bool:
@@ -143,9 +153,13 @@ class TaskManager:
         return not t.has_unclaimed_subtasks()
 
     def delete(self, task_id: str) -> bool:
+        t = self.get(task_id)
         before = len(self.state.tasks)
         self.state.tasks = [t for t in self.state.tasks if t.id != task_id]
-        return len(self.state.tasks) != before
+        if len(self.state.tasks) != before:
+            logger.info("删除目标「%s」(id=%s)", t.title if t else "?", task_id)
+            return True
+        return False
 
     # ----- 子任务 -----
     def add_subtask(
@@ -167,6 +181,7 @@ class TaskManager:
         t.subtasks.append(sub)
         if t.status == TaskStatus.ACTIVE and t.current_subtask_id is None:
             self._sync_current_subtask(t)
+        logger.info("添加子目标「%s」(task_id=%s, target=%dmin)", title, task_id, target_minutes)
         return sub
 
     def confirm_manual_complete_subtask(self, task_id: str, subtask_id: str) -> bool:
@@ -180,6 +195,7 @@ class TaskManager:
         if not t.can_complete_sub(sub):
             return False
         self._mark_subtask_done(t, sub)
+        logger.info("手动完成子目标「%s」(task_id=%s)", sub.title, task_id)
         return True
 
     def subtask_time_met(self, task_id: str, subtask_id: str) -> bool:
@@ -204,6 +220,8 @@ class TaskManager:
         self.state.inventory.add(total)
         sub.pending_rewards.clear()
         sub.rewards_claimed = True
+        logger.info("领取子目标「%s」(task_id=%s) gold=%.1f diamond=%.1f",
+                    sub.title, task_id, total.gold, total.diamond)
         return total
 
     def focus_subtask(self, task_id: str, subtask_id: str) -> bool:
@@ -215,6 +233,7 @@ class TaskManager:
         if not sub or sub.done:
             return False
         t.current_subtask_id = subtask_id
+        logger.debug("聚焦子目标「%s」(task_id=%s)", sub.title, task_id)
         return True
 
     def pause_subtask_focus(self, task_id: str) -> bool:
@@ -224,6 +243,7 @@ class TaskManager:
             return False
         if t.current_subtask_id is None:
             return False
+        logger.debug("暂停子目标聚焦 (task_id=%s)", task_id)
         t.current_subtask_id = None
         return True
 
@@ -249,8 +269,10 @@ class TaskManager:
         if not t or t.status == TaskStatus.COMPLETED:
             return False
         before = len(t.subtasks)
+        sub = self._get_subtask(t, subtask_id)
         t.subtasks = [s for s in t.subtasks if s.id != subtask_id]
         if len(t.subtasks) != before:
+            logger.info("删除子目标「%s」(task_id=%s)", sub.title if sub else "?", task_id)
             self._sync_current_subtask(t)
             self._sync_task_earned_from_subtasks(t)
             return True

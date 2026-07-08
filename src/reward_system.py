@@ -1,10 +1,13 @@
 """奖励抽奖逻辑。每经过 N 次操作 (默认 10) 进行一次开奖。"""
 from __future__ import annotations
 
+import logging
 import random
 from typing import Optional
 
 from .models import AppState, Reward, RollAccum, RollHistoryEntry
+
+logger = logging.getLogger(__name__)
 
 
 def _append_roll_history(state: AppState, reward: Reward) -> None:
@@ -44,6 +47,7 @@ def maybe_roll(state: AppState) -> Optional[Reward]:
     chance = float(s.get("roll_chance", 0.35))
     if random.random() >= chance:
         reward = Reward(op_at=state.total_operations)
+        logger.debug("开奖落空 (ops=%d)", state.total_operations)
         _append_roll_history(state, reward)
         return reward
 
@@ -55,6 +59,7 @@ def maybe_roll(state: AppState) -> Optional[Reward]:
             diamond=round(random.uniform(dmin, dmax), 1),
             op_at=state.total_operations,
         )
+        logger.info("开奖命中钻石 %.1f (ops=%d)", reward.diamond, state.total_operations)
         _append_roll_history(state, reward)
         return reward
 
@@ -64,5 +69,6 @@ def maybe_roll(state: AppState) -> Optional[Reward]:
         gold=round(random.uniform(gold_min, gold_max), 1),
         op_at=state.total_operations,
     )
+    logger.info("开奖命中金币 %.1f (ops=%d)", reward.gold, state.total_operations)
     _append_roll_history(state, reward)
     return reward

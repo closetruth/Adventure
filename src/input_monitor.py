@@ -8,8 +8,11 @@
 """
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Callable, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 try:
     from pynput import keyboard, mouse  # type: ignore
@@ -36,6 +39,7 @@ class InputMonitor:
 
     def start(self) -> None:
         if not self.available():
+            logger.warning("pynput 不可用，跳过输入监听")
             return
         with self._lock:
             if self._running:
@@ -50,6 +54,7 @@ class InputMonitor:
             self._mouse_listener.daemon = True
             self._kb_listener.start()
             self._mouse_listener.start()
+            logger.info("输入监听器已启动")
 
     def stop(self) -> None:
         with self._lock:
@@ -69,6 +74,7 @@ class InputMonitor:
         with self._input_lock:
             self._keys_down.clear()
             self._buttons_down.clear()
+        logger.info("输入监听器已停止")
 
     def _count_op(self) -> None:
         try:

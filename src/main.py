@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import logging
 import signal
 import sys
 
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
 from .game_launcher import launch_pet_arena, launch_pixel_tactics
 from .input_monitor import InputMonitor
 from .inventory_dialog import InventoryDialog
+from .logging_setup import setup_logging
 from .models import AppState, Reward
 from .reward_system import maybe_roll
 from .storage import SaveRejectedError, get_data_dir, load_state, save_state, take_load_warning
@@ -41,6 +43,8 @@ from .task_dialog import TaskDialog
 from .task_manager import TaskManager
 from .ui_text import format_reward_gain
 from .widget import FloatingWidget
+
+logger = logging.getLogger(__name__)
 
 
 class OpBridge(QObject):
@@ -59,9 +63,11 @@ class Application(QObject):
         self.state: AppState = load_state()
         load_warning = take_load_warning()
         if load_warning:
+            logger.warning("存档恢复: %s", load_warning.replace('\n', ' '))
             QMessageBox.warning(None, "Adventure", load_warning)
         self.manager = TaskManager(self.state)
         if self.manager.recover_stuck_subtask_rewards():
+            logger.info("启动时恢复了卡住的子任务奖励")
             self._safe_save()
 
         self.widget = FloatingWidget(self.state, self.manager)
@@ -76,6 +82,7 @@ class Application(QObject):
         self.bridge.op_happened.connect(self._on_operation, Qt.QueuedConnection)
         self.monitor = InputMonitor(on_op=self.bridge.op_happened.emit)
         if not self.monitor.available():
+            logger.warning("pynput 不可用，全局键鼠监听已禁用")
             QMessageBox.warning(
                 None, "Adventure",
                 "未检测到 pynput，全局键鼠监听已禁用。\n请先运行 `pip install pynput` 后再启动。",
@@ -116,6 +123,13 @@ class Application(QObject):
 
         self._place_widget_initial()
         self.widget.show()
+
+        inv = self.state.inventory
+        logger.info(
+            "Adventure 启动完成 (data_dir=%s, total_ops=%d, gold=%.1f, diamond=%.1f, tasks=%d)",
+            get_data_dir(), self.state.total_operations, inv.gold, inv.diamond,
+            len(self.state.tasks),
+        )
 
     # ---------- 系统托盘 ----------
     def _build_tray(self) -> QSystemTrayIcon:
@@ -218,6 +232,9 @@ class Application(QObject):
             return
         self.state.total_operations += 1
         reward = maybe_roll(self.state)
+        if reward is not None:
+            logger.debug("操作 #%d: 开奖 gold=%.1f diamond=%.1f",
+                         self.state.total_operations, reward.gold, reward.diamond)
         self.manager.record_operation(reward)
         self.widget.note_operation()
         self._schedule_ui_flush(roll_changed=reward is not None)
@@ -225,6 +242,7 @@ class Application(QObject):
 
     # ---------- 子窗口 ----------
     def _on_subtask_claimed(self, title: str, reward: Reward) -> None:
+        logger.info("领取子目标「%s」: gold=%.1f diamond=%.1f", title, reward.gold, reward.diamond)
         self._notify_subtask_claim(reward, title=title)
         QMessageBox.information(
             self.widget,
@@ -268,8 +286,10 @@ class Application(QObject):
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()
         if ok:
+            logger.info("宠物竞技场结算: %s", msg.replace('\n', ' '))
             QMessageBox.information(self.widget, "竞技场结算", msg)
         else:
+            logger.warning("宠物竞技场失败: %s", msg)
             QMessageBox.warning(self.widget, "无法开始", msg)
 
     def play_pixel_tactics(self) -> None:
@@ -279,12 +299,20 @@ class Application(QObject):
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()
         if ok:
+            logger.info("像素战场结算: %s", msg.replace('\n', ' '))
             QMessageBox.information(self.widget, "像素战场结算", msg)
         else:
+            logger.warning("像素战场失败: %s", msg)
             QMessageBox.warning(self.widget, "无法开始", msg)
 
     # ---------- 退出 ----------
     def quit(self) -> None:
+        inv = self.state.inventory
+        logger.info(
+            "Adventure 退出 (total_ops=%d, gold=%.1f, diamond=%.1f, tasks=%d)",
+            self.state.total_operations, inv.gold, inv.diamond,
+            len(self.state.tasks),
+        )
         try:
             self.monitor.stop()
         except Exception:
@@ -298,6 +326,7 @@ class Application(QObject):
             save_state(self.state)
             self._save_reject_notified = False
         except SaveRejectedError as exc:
+            logger.warning("手动保存被拒绝: %s", exc.reason)
             QMessageBox.warning(
                 self.widget,
                 "保存已拒绝",
@@ -306,6 +335,7 @@ class Application(QObject):
                 "请重启应用从 data.json.anchor / data.json.safety 恢复。",
             )
         except Exception as exc:
+            logger.error("保存失败: %s", exc)
             QMessageBox.warning(
                 self.widget,
                 "保存失败",
@@ -318,14 +348,16 @@ class Application(QObject):
             save_state(self.state)
             self._save_reject_notified = False
         except SaveRejectedError:
-            if not self._save_reject_notified and self.tray.isVisible():
+            if not self._save_reject_notified:
+                logger.warning("自动保存被拒绝（仅首次通知）")
                 self._save_reject_notified = True
-                self.tray.showMessage(
-                    "Adventure",
-                    "检测到内存数据异常，已拒绝自动保存以保护备份。请重启应用。",
-                    QSystemTrayIcon.MessageIcon.Warning,
-                    5000,
-                )
+                if self.tray.isVisible():
+                    self.tray.showMessage(
+                        "Adventure",
+                        "检测到内存数据异常，已拒绝自动保存以保护备份。请重启应用。",
+                        QSystemTrayIcon.MessageIcon.Warning,
+                        5000,
+                    )
         except Exception:
             pass
 
@@ -344,9 +376,14 @@ def _acquire_single_instance() -> QLockFile | None:
 
 
 def main() -> int:
+    data_dir = get_data_dir()
+    setup_logging(data_dir)
+    logger.info("--- Adventure 启动 (v2) ---")
+
     qt_app = QApplication(sys.argv)
     instance_lock = _acquire_single_instance()
     if instance_lock is None:
+        logger.info("检测到已有实例运行，退出")
         QMessageBox.information(
             None,
             "Adventure",

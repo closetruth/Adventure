@@ -1,12 +1,15 @@
 """数据模型 - Task / Reward / AppState。"""
 from __future__ import annotations
 
+import logging
 import math
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(str, Enum):
@@ -63,6 +66,7 @@ class Subtask:
             target_seconds = float(data["target_seconds"])
         elif "target_ops" in data:
             target_seconds = max(60.0, float(data["target_ops"]) * 60.0)
+            logger.debug("Subtask.from_dict: 旧版 target_ops 迁移 → target_seconds=%.0f", target_seconds)
         else:
             target_seconds = 600.0
         return cls(

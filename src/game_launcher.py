@@ -1,6 +1,7 @@
 """启动 pygame 小游戏子进程并结算奖励。"""
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import List, Optional, Tuple
 from .game_protocol import GameResult, GameSession
 from .models import AppState
 from .ui_text import format_amount
+
+logger = logging.getLogger(__name__)
 
 
 ENTRY_GOLD_COST = 10
@@ -111,7 +114,10 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
 
     # 扣除入场费
     need = ENTRY_GOLD_COST if game_key == "pet" else GRID_GAME_ENTRY_GOLD_COST
+    before_gold = state.inventory.gold
     state.inventory.gold = max(0, state.inventory.gold - need)
+    logger.info("游戏启动(%s): 扣除入场费 %d gold (%.1f→%.1f)",
+                game_key, need, before_gold, state.inventory.gold)
 
     session = GameSession.create(
         gold=state.inventory.gold,
@@ -138,12 +144,14 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
 
     if proc.returncode != 0 and not result_path.exists():
         detail = _format_proc_error(proc)
+        logger.error("游戏(%s) 启动失败 (rc=%d): %s", game_key, proc.returncode, detail[:200])
         return False, f"游戏未能正常启动。\n{detail}\n\n命令：{' '.join(cmd)}", None
 
     result = GameResult.read(result_path)
     if result is None:
         detail = _format_proc_error(proc) if proc.returncode != 0 else ""
         extra = f"\n{detail}" if detail else ""
+        logger.warning("游戏(%s) 未能读取结算文件", game_key)
         return False, f"未读取到游戏结算文件。{extra}", None
 
     if result.session_id and result.session_id != session.session_id:
@@ -151,6 +159,8 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
 
     state.inventory.gold = max(0, state.inventory.gold + result.gold_delta)
     state.inventory.diamond = max(0, state.inventory.diamond + result.diamond_delta)
+    logger.info("游戏(%s) 结算: gold_delta=%+.1f diamond_delta=%+.1f waves=%d",
+                game_key, result.gold_delta, result.diamond_delta, result.waves_cleared)
     state.settings["pet_best_round"] = max(
         int(state.settings.get("pet_best_round", 0)),
         int(result.waves_cleared),

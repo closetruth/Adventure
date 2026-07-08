@@ -1,6 +1,7 @@
 """主悬浮小部件：常驻桌面，显示操作数 / 奖励 / 当前目标。"""
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, QPoint, QTimer, Signal
@@ -42,6 +43,8 @@ from .win_utils import (
     set_startup,
     unpin_window_from_all_desktops,
 )
+
+logger = logging.getLogger(__name__)
 
 
 WIDGET_STYLESHEET = """
@@ -543,6 +546,7 @@ class FloatingWidget(QWidget):
         self.setWindowFlags(flags)
         self.show()
         save_state(self.state)
+        logger.info("窗口置顶: %s", checked)
 
     def _toggle_pin_all(self, checked: bool) -> None:
         self.state.settings["pin_all_desktops"] = checked
@@ -552,11 +556,13 @@ class FloatingWidget(QWidget):
         else:
             unpin_window_from_all_desktops(hwnd)
         save_state(self.state)
+        logger.info("固定所有桌面: %s", checked)
 
     def _toggle_startup(self, checked: bool) -> None:
         self.state.settings["startup"] = checked
         set_startup(checked)
         save_state(self.state)
+        logger.info("开机自启: %s", checked)
 
     def _set_text(self, label: QLabel, text: str) -> None:
         if label.text() != text:
@@ -1057,6 +1063,9 @@ class FloatingWidget(QWidget):
     def _refresh_runtime(self) -> None:
         """仅刷新与时间相关的字段，避免整窗口频繁重绘。"""
         self._active_ticker.tick(self.state, self.manager)
+        self._tick_count = getattr(self, '_tick_count', 0) + 1
+        if self._tick_count % 60 == 0:
+            logger.debug("运行中 (ops=%d)", self.state.total_operations)
         ops_1min = self._op_tracker.count_recent()
         active = self.state.active_task()
 
