@@ -14,35 +14,43 @@ from PySide6.QtWidgets import (
 )
 
 from .models import AppState, TaskStatus
+from .ui_styles import (
+    ACCENT,
+    ACCENT_HOVER,
+    BG_CARD,
+    BG_DIALOG,
+    FONT_FAMILY,
+    TEXT_PRIMARY,
+)
 from .ui_text import format_amount, format_roll_history_line
 
 
-DIALOG_STYLESHEET = """
-QDialog { background-color: #1c1c26; color: #f0f0f6; }
-QLabel { color: #f0f0f6; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"; }
-QFrame#Card {
-    background-color: #23242f;
+INVENTORY_DIALOG_QSS = f"""
+QDialog {{ background-color: {BG_DIALOG}; color: {TEXT_PRIMARY}; }}
+QLabel {{ color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY}; }}
+QFrame#Card {{
+    background-color: {BG_CARD};
     border: 1px solid #2e3040;
     border-radius: 12px;
-}
-QLabel#Big { font-size: 40px; font-weight: 800; }
-QLabel#Cap { font-size: 15px; font-weight: 700; }
-QLabel#Section { color: #e0e4f0; font-size: 14px; font-weight: 700; }
-QLabel#StatLine { color: #c8ccd8; font-size: 13px; font-weight: 500; }
-QLabel#HistLine { color: #b8bcc8; font-size: 12px; font-weight: 500; }
-QLabel#HistHit { color: #ffd54f; font-size: 12px; font-weight: 600; }
-QLabel#HistMiss { color: #8a909e; font-size: 12px; font-weight: 500; }
-QScrollArea { border: none; background: transparent; }
-QScrollArea > QWidget > QWidget { background: transparent; }
-QPushButton {
-    background-color: #2b3050; color: #f0f0f6;
+}}
+QLabel#Big {{ font-size: 40px; font-weight: 800; }}
+QLabel#Cap {{ font-size: 15px; font-weight: 700; }}
+QLabel#Section {{ color: #e0e4f0; font-size: 14px; font-weight: 700; }}
+QLabel#StatLine {{ color: #c8ccd8; font-size: 13px; font-weight: 500; }}
+QLabel#HistLine {{ color: #b8bcc8; font-size: 12px; font-weight: 500; }}
+QLabel#HistHit {{ color: #ffd54f; font-size: 12px; font-weight: 600; }}
+QLabel#HistMiss {{ color: #8a909e; font-size: 12px; font-weight: 500; }}
+QScrollArea {{ border: none; background: transparent; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QPushButton {{
+    background-color: #2b3050; color: {TEXT_PRIMARY};
     border: 1px solid #3a4070; border-radius: 6px;
     padding: 6px 12px;
     font-size: 13px;
-}
-QPushButton:hover { background-color: #3a4070; }
-QPushButton#Primary { background-color: #3a5cff; border-color: #3a5cff; font-weight: 700; }
-QPushButton#Primary:hover { background-color: #4d6dff; }
+}}
+QPushButton:hover {{ background-color: #3a4070; }}
+QPushButton#Primary {{ background-color: {ACCENT}; border-color: {ACCENT}; font-weight: 700; }}
+QPushButton#Primary:hover {{ background-color: {ACCENT_HOVER}; }}
 """
 
 
@@ -55,7 +63,7 @@ class InventoryDialog(QDialog):
         self.state = state
         self.setWindowTitle("奖励背包 - Adventure")
         self.resize(420, 560)
-        self.setStyleSheet(DIALOG_STYLESHEET)
+        self.setStyleSheet(INVENTORY_DIALOG_QSS)
         self._build()
         self.refresh()
 

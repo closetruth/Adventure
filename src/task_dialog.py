@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from .models import AppState, Subtask, Task, TaskStatus
 from .task_manager import TaskManager
+from .ui_styles import DARK_BASE_QSS
 from .ui_task_stats import TASK_STATS_QSS, TaskRewardStrip
 from .ui_text import (
     format_amount,
@@ -34,9 +35,7 @@ from .ui_text import (
 )
 
 
-DIALOG_STYLESHEET = """
-QDialog { background-color: #16161e; color: #e8eaf0; }
-QLabel { color: #e8eaf0; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"; }
+DIALOG_STYLESHEET = DARK_BASE_QSS + """
 QTabWidget::pane {
     background: #1a1b24;
     border: 1px solid #2a2d38;
@@ -58,34 +57,6 @@ QTabBar::tab:selected {
     border: 1px solid #3a3f52;
 }
 QTabBar::tab:hover:!selected { color: #c8ceda; background: #1e1f28; }
-QPushButton {
-    background-color: #252833;
-    color: #e8eaf0;
-    border: 1px solid #3a3f52;
-    border-radius: 8px;
-    padding: 6px 14px;
-    font-weight: 600;
-}
-QPushButton:hover { background-color: #303448; border-color: #4a5068; }
-QPushButton#Primary { background-color: #3a5cff; border-color: #3a5cff; color: #ffffff; }
-QPushButton#Primary:hover { background-color: #4d6dff; border-color: #4d6dff; }
-QPushButton#Ghost {
-    background-color: transparent;
-    color: #b8bfd0;
-    border: 1px solid #3a3f52;
-}
-QPushButton#Ghost:hover { background-color: #252833; color: #e8eaf0; }
-QPushButton#Danger { color: #d09090; border-color: #503838; background: #2a2222; }
-QPushButton#Danger:hover { background-color: #3a2828; border-color: #704040; color: #ffb0b0; }
-QLineEdit, QTextEdit, QSpinBox {
-    background-color: #12141a;
-    color: #e8eaf0;
-    border: 1px solid #2a2d38;
-    border-radius: 8px;
-    padding: 8px;
-    selection-background-color: #3a5cff;
-}
-QLineEdit:focus, QTextEdit:focus, QSpinBox:focus { border-color: #4a6ad0; }
 QLineEdit#SubtaskInput { padding: 6px 8px; font-size: 12px; }
 QSpinBox#SubtaskOps { padding: 4px 6px; font-size: 12px; }
 QPushButton#SubtaskClaim {

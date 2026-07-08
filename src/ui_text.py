@@ -50,24 +50,12 @@ _COLOR_CURRENT = "#7eb4ff"
 _COLOR_MARKER = "#5a6175"
 _COLOR_WARN = "#e6a830"
 _COLOR_CLAIM = "#f0c040"
-_SUBGOAL_FONT = (
-    "font-size:13px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
-)
-_SUBGOAL_HINT_FONT = (
-    "font-size:12px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
-)
-_GOAL_COMPACT_FONT = (
-    "font-size:13px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
-)
-_WIDGET_STAT_FONT = (
-    "font-size:11px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
-)
-_WIDGET_HIST_FONT = (
-    "font-size:10px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
-)
-_WIDGET_SUB_FONT = (
-    "font-size:12px;font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
-)
+
+_BASE_FONT = "font-family:'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;"
+
+
+def _font(size: int) -> str:
+    return f"font-size:{size}px;{_BASE_FONT}"
 
 
 def _muted_sep() -> str:
@@ -97,7 +85,7 @@ def format_global_summary_html(
         f'<span style="color:{_COLOR_DIAM if diamond else _COLOR_MUTED};font-weight:700">'
         f"{format_amount(diamond)}</span>",
     ])
-    return f'<span style="{_WIDGET_STAT_FONT}">' + _muted_sep().join(parts) + "</span>"
+    return f'<span style="{_font(11)}">' + _muted_sep().join(parts) + "</span>"
 
 
 def format_roll_history_line_html(
@@ -139,13 +127,13 @@ def format_roll_history_lines_html(
         items = items[:limit]
     if not items:
         return (
-            f'<span style="{_WIDGET_HIST_FONT}color:{_COLOR_MUTED}">'
+            f'<span style="{_font(10)}color:{_COLOR_MUTED}">'
             f"暂无开奖记录</span>"
         )
     lines = [
         format_roll_history_line_html(e, compact=compact) for e in items
     ]
-    return f'<span style="{_WIDGET_HIST_FONT}">' + "<br/>".join(lines) + "</span>"
+    return f'<span style="{_font(10)}">' + "<br/>".join(lines) + "</span>"
 
 
 def format_subgoal_runtime_html(sub: Subtask) -> str:
@@ -208,7 +196,7 @@ def format_widget_runtime_html(
             f'<span style="color:{_COLOR_TIME};font-weight:700">'
             f"{_html_escape(sub_duration)}</span>"
         )
-    return f'<span style="{_WIDGET_SUB_FONT}">' + _muted_sep().join(parts) + "</span>"
+    return f'<span style="{_font(12)}">' + _muted_sep().join(parts) + "</span>"
 
 
 def format_timestamp_short(ts: float | None) -> str:
@@ -266,7 +254,7 @@ def format_subgoal_line_html(sub: Subtask, *, is_current: bool) -> str:
             f'<span style="color:{_COLOR_MUTED}">未开始</span>'
             f"{_format_subgoal_dates_html(sub)}"
         )
-        return f'<span style="{_SUBGOAL_FONT}">{inner}</span>'
+        return f'<span style="{_font(13)}">{inner}</span>'
 
     stats: list[str] = [
         f'<span style="color:{_COLOR_OPS};font-weight:700">操作{sub.operations}</span>',
@@ -298,7 +286,7 @@ def format_subgoal_line_html(sub: Subtask, *, is_current: bool) -> str:
         f"{stat_html}{runtime_html}"
         f"{_format_subgoal_dates_html(sub)}"
     )
-    return f'<span style="{_SUBGOAL_FONT}">{inner}</span>'
+    return f'<span style="{_font(13)}">{inner}</span>'
 
 
 def format_subgoals_focus_hint_html(active: Task) -> str:
@@ -310,7 +298,7 @@ def format_subgoals_focus_hint_html(active: Task) -> str:
     if all(s.done for s in active.subtasks):
         return ""
     return (
-        f'<span style="{_SUBGOAL_HINT_FONT}color:{_COLOR_WARN};font-weight:600">'
+        f'<span style="{_font(12)}color:{_COLOR_WARN};font-weight:600">'
         f"未聚焦子目标，奖励暂停累计</span>"
     )
 
@@ -319,7 +307,7 @@ def format_subgoals_list_html(active: Task) -> str:
     """悬浮窗：全部子目标 HTML 列表。"""
     if not active.subtasks:
         return (
-            f'<span style="{_SUBGOAL_HINT_FONT}color:{_COLOR_MUTED}">'
+            f'<span style="{_font(12)}color:{_COLOR_MUTED}">'
             f"添加子目标后开始累计奖励</span>"
         )
 
@@ -331,7 +319,7 @@ def format_subgoals_list_html(active: Task) -> str:
     ]
     if active.has_unclaimed_subtasks():
         lines.append(
-            f'<span style="{_SUBGOAL_HINT_FONT}color:{_COLOR_CLAIM};font-weight:700">'
+            f'<span style="{_font(12)}color:{_COLOR_CLAIM};font-weight:700">'
             f"有子目标奖励待领取</span>"
         )
     return "<br>".join(lines)
@@ -346,7 +334,7 @@ def format_goal_compact_html(operations: int, gold: float, diamond: float) -> st
         f"钻 {format_amount(diamond)}</span>",
     ]
     sep = f'<span style="color:{_COLOR_MUTED}"> · </span>'
-    return f'<span style="{_GOAL_COMPACT_FONT}">' + sep.join(parts) + "</span>"
+    return f'<span style="{_font(13)}">' + sep.join(parts) + "</span>"
 
 
 def format_amount(value: float) -> str:

@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .active_time import ActiveTimeTracker
 from .op_tracker import OpRateTracker
 from .models import AppState, Reward, Subtask, Task, TaskStatus
 from .storage import save_state
@@ -227,7 +226,6 @@ class FloatingWidget(QWidget):
         self.setMinimumHeight(460)
 
         self._op_tracker = OpRateTracker(window_sec=60.0)
-        self._active_ticker = ActiveTimeTracker()
         self._subgoal_structure_sig: tuple | None = None
         self._subgoal_line_labels: dict[str, QLabel] = {}
         self._subgoal_pinned_line: QLabel | None = None
@@ -1062,7 +1060,7 @@ class FloatingWidget(QWidget):
 
     def _refresh_runtime(self) -> None:
         """仅刷新与时间相关的字段，避免整窗口频繁重绘。"""
-        self._active_ticker.tick(self.state, self.manager)
+        self.manager.tick_active_time()
         self._tick_count = getattr(self, '_tick_count', 0) + 1
         if self._tick_count % 60 == 0:
             logger.debug("运行中 (ops=%d)", self.state.total_operations)

@@ -13,11 +13,8 @@ def is_windows() -> bool:
     return sys.platform.startswith("win")
 
 
-def pin_window_to_all_desktops(hwnd: int) -> bool:
-    """把指定 HWND 固定到所有虚拟桌面 (Windows 10 / 11)。
-
-    成功返回 True；非 Windows、缺依赖或 API 失败返回 False。
-    """
+def _toggle_pin(hwnd: int, pin: bool) -> bool:
+    """把指定 HWND 固定/取消固定到所有虚拟桌面。"""
     if not is_windows() or not hwnd:
         return False
     try:
@@ -26,40 +23,24 @@ def pin_window_to_all_desktops(hwnd: int) -> bool:
         return False
     try:
         view = AppView(hwnd=hwnd)
-        # 同时 pin app + pin view，保证窗口本身和所属 app 都贯穿所有桌面
-        try:
-            view.pin()
-        except Exception:
-            pass
-        try:
-            view.pin_app()
-        except Exception:
-            pass
+        for method in ("pin" if pin else "unpin", "pin_app" if pin else "unpin_app"):
+            try:
+                getattr(view, method)()
+            except Exception:
+                pass
         return True
     except Exception:
         return False
+
+
+def pin_window_to_all_desktops(hwnd: int) -> bool:
+    """把指定 HWND 固定到所有虚拟桌面 (Windows 10 / 11)。"""
+    return _toggle_pin(hwnd, pin=True)
 
 
 def unpin_window_from_all_desktops(hwnd: int) -> bool:
-    if not is_windows() or not hwnd:
-        return False
-    try:
-        from pyvda import AppView  # type: ignore
-    except Exception:
-        return False
-    try:
-        view = AppView(hwnd=hwnd)
-        try:
-            view.unpin()
-        except Exception:
-            pass
-        try:
-            view.unpin_app()
-        except Exception:
-            pass
-        return True
-    except Exception:
-        return False
+    """取消固定。"""
+    return _toggle_pin(hwnd, pin=False)
 
 
 def set_startup(enabled: bool, exe_path: Optional[str] = None) -> bool:
