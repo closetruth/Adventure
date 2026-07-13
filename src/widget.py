@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -25,8 +24,10 @@ from PySide6.QtWidgets import (
 
 from .op_tracker import OpRateTracker
 from .models import AppState, Reward, Subtask, Task, TaskStatus
+from .reward_system import roll_progress
 from .storage import save_state
 from .task_manager import TaskManager
+from .ui_roll_bar import SegmentedRollBar
 from .ui_task_stats import TaskRewardStrip
 from .ui_text import (
     format_amount,
@@ -180,20 +181,15 @@ QPushButton#CloseBtn, QPushButton#MinBtn {
     color: #c0c4d0;
 }
 QPushButton#CloseBtn:hover { color: #ff7474; }
-QProgressBar {
-    background-color: rgba(255,255,255,16);
-    border: none;
-    border-radius: 7px;
-    text-align: center;
-    color: #cfd3e0;
-    font-size: 10px;
-    min-height: 14px;
-    max-height: 14px;
+QLabel#RollToast {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 0;
+    background: transparent;
 }
-QProgressBar::chunk {
-    background-color: #6c8cff;
-    border-radius: 7px;
-}
+QLabel#RollToastGold { color: #ffd54f; }
+QLabel#RollToastDiam { color: #7dd3fc; }
+QLabel#RollToastMiss { color: #8a909e; }
 QFrame#Divider { background-color: rgba(255,255,255,18); max-height: 1px; min-height: 1px; }
 """
 
@@ -229,6 +225,7 @@ class FloatingWidget(QWidget):
         self._subgoal_structure_sig: tuple | None = None
         self._subgoal_line_labels: dict[str, QLabel] = {}
         self._subgoal_pinned_line: QLabel | None = None
+        self._roll_toast_timer: Optional[QTimer] = None
 
         self._build_ui()
         self._refresh()
@@ -293,12 +290,13 @@ class FloatingWidget(QWidget):
         bar_row.setSpacing(3)
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
-        self.roll_bar = QProgressBar()
-        self.roll_bar.setRange(0, 10)
-        self.roll_bar.setValue(0)
-        self.roll_bar.setTextVisible(True)
+        self.roll_bar = SegmentedRollBar()
+        self.roll_toast = QLabel("")
+        self.roll_toast.setObjectName("RollToast")
+        self.roll_toast.hide()
         bar_row.addWidget(cap)
         bar_row.addWidget(self.roll_bar)
+        bar_row.addWidget(self.roll_toast)
         global_lay.addLayout(bar_row)
 
         hist_row = QVBoxLayout()
@@ -988,7 +986,61 @@ class FloatingWidget(QWidget):
             ops_1min=ops_1min,
         )
 
-    def refresh_light(self, *, roll_changed: bool = False) -> None:
+    def _update_roll_bar(self) -> None:
+        rt = self.state.roll_runtime
+        progress, span = roll_progress(self.state)
+        chance_label = f"概率 {rt.roll_chance:.0%}"
+        self.roll_bar.set_cycle(
+            progress,
+            span,
+            rt.segment_colors,
+            chance_label=chance_label,
+        )
+
+    def refresh_roll_meta(self) -> None:
+        """仅更新进度条概率/颜色元数据（10 分钟重抽后调用）。"""
+        self._update_roll_bar()
+
+    def show_roll_result(self, reward: Reward) -> None:
+        """开奖结果轻量 Toast + 进度条闪动。"""
+        if reward.is_empty():
+            self.roll_toast.setObjectName("RollToast RollToastMiss")
+            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
+            self.roll_toast.setText("未中")
+            hide_ms = 1200
+        elif reward.diamond > 0:
+            self.roll_toast.setObjectName("RollToast RollToastDiam")
+            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
+            self.roll_toast.setText(f"+{format_amount(reward.diamond)} 钻石")
+            hide_ms = 2000
+        else:
+            self.roll_toast.setObjectName("RollToast RollToastGold")
+            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
+            self.roll_toast.setText(f"+{format_amount(reward.gold)} 金币")
+            hide_ms = 2000
+
+        self.roll_toast.show()
+        self._flash_roll_bar()
+
+        if self._roll_toast_timer is not None:
+            self._roll_toast_timer.stop()
+        self._roll_toast_timer = QTimer(self)
+        self._roll_toast_timer.setSingleShot(True)
+        self._roll_toast_timer.setInterval(hide_ms)
+        self._roll_toast_timer.timeout.connect(self.roll_toast.hide)
+        self._roll_toast_timer.start()
+
+    def _flash_roll_bar(self) -> None:
+        self.roll_bar.set_flash(True)
+
+        def _off() -> None:
+            self.roll_bar.set_flash(False)
+
+        QTimer.singleShot(300, _off)
+        QTimer.singleShot(600, lambda: self.roll_bar.set_flash(True))
+        QTimer.singleShot(900, _off)
+
+    def refresh_light(self, *, roll_changed: bool = False, reward: Optional[Reward] = None) -> None:
         """按键后的轻量刷新：跳过未变化字段，开奖历史仅在开奖时更新。"""
         s = self.state
         ops_1min = self._op_tracker.count_recent()
@@ -999,16 +1051,7 @@ class FloatingWidget(QWidget):
             self._format_global_summary_html(ops_1min),
         )
 
-        interval = int(s.settings.get("roll_interval", 10))
-        progress = s.total_operations - s.last_roll_at
-        progress = max(0, min(progress, interval))
-        if self.roll_bar.maximum() != interval:
-            self.roll_bar.setRange(0, interval)
-        if self.roll_bar.value() != progress:
-            self.roll_bar.setValue(progress)
-        fmt = f"{progress}/{interval}"
-        if self.roll_bar.format() != fmt:
-            self.roll_bar.setFormat(fmt)
+        self._update_roll_bar()
 
         if roll_changed:
             self._set_html(
@@ -1017,6 +1060,8 @@ class FloatingWidget(QWidget):
                     s.roll_history, limit=3, compact=True,
                 ),
             )
+            if reward is not None:
+                self.show_roll_result(reward)
 
         self._apply_task_section(
             active,
@@ -1038,12 +1083,7 @@ class FloatingWidget(QWidget):
             self._format_global_summary_html(ops_1min),
         )
 
-        interval = int(s.settings.get("roll_interval", 10))
-        self.roll_bar.setRange(0, interval)
-        progress = s.total_operations - s.last_roll_at
-        progress = max(0, min(progress, interval))
-        self.roll_bar.setValue(progress)
-        self.roll_bar.setFormat(f"{progress}/{interval}")
+        self._update_roll_bar()
 
         self._set_html(
             self.roll_history_lbl,

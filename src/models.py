@@ -251,6 +251,39 @@ class RollHistoryEntry:
 
 
 @dataclass
+class RollRuntime:
+    """当前开奖周期与有效随机参数（内置机制，每 10 分钟重抽概率/范围）。"""
+    next_roll_at: int = 10
+    roll_span: int = 10
+    segment_colors: List[str] = field(default_factory=list)
+    roll_chance: float = 0.35
+    diamond_chance: float = 0.08
+    gold_min: float = 0.1
+    gold_max: float = 1.0
+    diamond_min: float = 0.01
+    diamond_max: float = 0.1
+    last_shuffle_at: float = 0.0
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "RollRuntime":
+        return cls(
+            next_roll_at=int(data.get("next_roll_at", 10)),
+            roll_span=max(1, int(data.get("roll_span", 10))),
+            segment_colors=list(data.get("segment_colors", [])),
+            roll_chance=float(data.get("roll_chance", 0.35)),
+            diamond_chance=float(data.get("diamond_chance", 0.08)),
+            gold_min=float(data.get("gold_min", 0.1)),
+            gold_max=float(data.get("gold_max", 1.0)),
+            diamond_min=float(data.get("diamond_min", 0.01)),
+            diamond_max=float(data.get("diamond_max", 0.1)),
+            last_shuffle_at=float(data.get("last_shuffle_at", 0.0)),
+        )
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+@dataclass
 class AppState:
     """整体应用状态 (持久化对象)。"""
     inventory: Inventory = field(default_factory=Inventory)
@@ -259,6 +292,7 @@ class AppState:
     last_roll_at: int = 0               # 上一次开奖时所属的操作总数
     since_roll: RollAccum = field(default_factory=RollAccum)
     roll_history: List[RollHistoryEntry] = field(default_factory=list)
+    roll_runtime: RollRuntime = field(default_factory=RollRuntime)
     settings: Dict = field(default_factory=lambda: {
         "pin_all_desktops": True,
         "always_on_top": True,
@@ -289,6 +323,7 @@ class AppState:
             "last_roll_at": self.last_roll_at,
             "since_roll": asdict(self.since_roll),
             "roll_history": [e.to_dict() for e in self.roll_history],
+            "roll_runtime": self.roll_runtime.to_dict(),
             "settings": self.settings,
         }
 
@@ -308,6 +343,7 @@ class AppState:
                 diamond=float(sr.get("diamond", 0)),
             ),
             roll_history=history,
+            roll_runtime=RollRuntime.from_dict(data.get("roll_runtime", {})),
         )
         s.settings.update(data.get("settings", {}))
         return s
@@ -372,5 +408,21 @@ def validate_state_invariants(state: AppState) -> Optional[str]:
         return "since_roll.gold 非法"
     if not math.isfinite(sr.diamond) or sr.diamond < 0:
         return "since_roll.diamond 非法"
+
+    rt = state.roll_runtime
+    if rt.roll_span < 1:
+        return "roll_runtime.roll_span 非法"
+    if rt.next_roll_at < state.last_roll_at:
+        return "roll_runtime.next_roll_at 早于 last_roll_at"
+    for name, val in (
+        ("roll_chance", rt.roll_chance),
+        ("diamond_chance", rt.diamond_chance),
+        ("gold_min", rt.gold_min),
+        ("gold_max", rt.gold_max),
+        ("diamond_min", rt.diamond_min),
+        ("diamond_max", rt.diamond_max),
+    ):
+        if not math.isfinite(val) or val < 0:
+            return f"roll_runtime.{name} 非法"
 
     return None

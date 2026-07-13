@@ -16,24 +16,29 @@ https://github.com/user-attachments/assets/1e629403-fa90-4cbe-847e-aedf050f35ad
 ## 功能特性
 
 ### 任务
-- 创建任务（标题 + 备注）
+- 创建任务（标题 + 备注），可添加多个**子目标**（按时长累计）
 - 暂停 / 恢复 / 删除
-- 完成任务并领取该任务累计的待领奖励
+- 子目标时长达标后手动「完成」并「领取」pending 奖励
+- 完成任务并领取该任务剩余待领奖励
 - 显示创建时间、完成时间、本任务操作数、**进行中累计时长**（暂停与系统休眠不计）
 - 同一时间只能有一个「进行中」任务
 
 ### 奖励
 - 金币与钻石（浮点数，界面最多显示 1 位小数）
 - 全局键鼠监听：每次独立按键按下或鼠标按下计 1 次操作（长按不重复计）
-- 每 `N` 次操作（默认 10）触发一次开奖；未命中也会记入开奖历史
-- 参数可在 `data.json` 的 `settings` 中调整（间隔、概率、金币/钻石区间）
-- 奖励先进入**当前进行中任务**的待领列表，**完成任务**后才进入背包
+- **内置随机开奖**：每 **6～14 次操作**（每轮随机）触发一次开奖；未命中也会记入开奖历史
+- **每 10 分钟**自动重抽中奖概率与奖励数值范围（内置机制，无设置界面）
+- 奖励先进入**当前进行中子目标**的待领列表，**点击领取**后才进背包
+- 开奖参数运行时保存在 `roll_runtime`；`settings` 中的旧字段仅用于存档迁移
 
 ### 悬浮窗
 - 置顶、可拖动、系统托盘、右键菜单（置顶 / 固定到所有虚拟桌面 / 开机自启 / 退出）
-- **全局统计**（总操作、背包金币/钻石）以小字显示
-- **任务区**突出显示：本任务操作、待领金币/钻石、近 1 分钟操作、自上次开奖以来累计掉落
-- 距下次开奖进度条、最近 5 条开奖历史
+- **全局统计**（总操作、背包金币/钻石、近 1 分钟操作）以小字显示
+- **任务区**突出显示：本任务操作、累计金币/钻石、近 1 分钟操作、自上次开奖以来累计掉落
+- **彩色分段进度条**：每格随机颜色，显示 `距下次开奖 x/y` 与当前有效概率
+- 开奖瞬间轻量反馈：命中显示 `+金币` / `+钻石` 并闪动进度条；落空显示灰色「未中」
+- 最近 3 条开奖历史
+- 子目标：按时长累计，完成后手动领取 pending 奖励
 
 ### 奖励背包
 - 查看金币、钻石、任务统计、**完整开奖历史**（可滚动）
@@ -129,28 +134,34 @@ build.bat
 | 字段 | 含义 |
 |------|------|
 | `inventory` | 已领取的金币、钻石 |
-| `tasks[]` | 任务列表、`pending_rewards`、完成后 `completed_reward_gold` / `completed_reward_diamond` |
+| `tasks[]` | 任务列表、子目标、`pending_rewards`、完成后 `completed_reward_*` |
 | `total_operations` | 全局操作总数 |
-| `last_roll_at` | 上次开奖检查点（操作数） |
-| `since_roll` | 自上次开奖以来掉落到当前任务的累计奖励 |
+| `last_roll_at` | 上次开奖时的操作数 |
+| `since_roll` | 自上次开奖以来掉落到当前子目标的累计奖励 |
 | `roll_history[]` | 开奖历史（最多约 100 条） |
-| `settings` | 窗口行为、开奖参数、`pet_best_round` 等 |
+| `roll_runtime` | 当前开奖周期：下次阈值、分段颜色、有效概率与奖励范围 |
+| `settings` | 窗口行为、子目标默认值、`pet_best_round` 等 |
 
-`settings` 示例（默认值以 `src/models.py` 为准）：
+`roll_runtime` 示例（由程序自动维护，一般无需手改）：
 
 ```json
 {
-  "roll_interval": 10,
-  "roll_chance": 0.35,
-  "gold_min": 0.1,
-  "gold_max": 1.0,
-  "diamond_chance": 0.08,
-  "diamond_min": 0.01,
-  "diamond_max": 0.1
+  "next_roll_at": 128,
+  "roll_span": 11,
+  "segment_colors": ["#a3c2f1", "#e8b44d", "..."],
+  "roll_chance": 0.312,
+  "diamond_chance": 0.09,
+  "gold_min": 0.11,
+  "gold_max": 0.95,
+  "diamond_min": 0.02,
+  "diamond_max": 0.12,
+  "last_shuffle_at": 1710000000.0
 }
 ```
 
-程序约每 15 秒自动保存；退出时也会保存。损坏的 `data.json` 会被备份为 `data.broken.json` 并重建空档。
+`settings` 中仍保留 `roll_interval`、`roll_chance` 等字段，供**旧存档迁移**时使用；实际开奖以 `roll_runtime` 为准。内置随机范围见 `src/reward_system.py` 顶部常量。
+
+程序约每 15 秒自动保存；退出时也会保存。损坏的 `data.json` 会尝试从 `.bak*` / `.anchor` / `.snap.*` 恢复，并备份为 `data.broken.*.json`。
 
 ---
 
@@ -169,13 +180,14 @@ Adventure/
 │   └── pixel_tactics.py   # 像素格子战场
 └── src/
     ├── main.py            # Qt 应用、托盘、操作事件管线
-    ├── widget.py          # 悬浮窗
+    ├── widget.py          # 悬浮窗（彩色开奖进度条、中奖反馈）
+    ├── ui_roll_bar.py     # 彩色分段开奖进度条
     ├── task_dialog.py     # 任务管理
     ├── inventory_dialog.py# 背包与开奖历史
     ├── ui_task_stats.py   # 任务统计条组件
     ├── ui_text.py         # 金额与历史文案格式化
     ├── task_manager.py    # 任务 CRUD
-    ├── reward_system.py   # 开奖逻辑
+    ├── reward_system.py   # 内置随机开奖、10 分钟重抽参数
     ├── input_monitor.py   # pynput 全局监听
     ├── op_tracker.py      # 近 1 分钟操作计数（仅内存）
     ├── models.py          # 数据模型

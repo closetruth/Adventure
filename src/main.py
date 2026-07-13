@@ -37,7 +37,12 @@ from .input_monitor import InputMonitor
 from .inventory_dialog import InventoryDialog
 from .logging_setup import setup_logging
 from .models import AppState, Reward
-from .reward_system import maybe_roll
+from .reward_system import (
+    SHUFFLE_INTERVAL_SEC,
+    ensure_roll_runtime,
+    maybe_roll,
+    reshuffle_roll_params,
+)
 from .storage import SaveRejectedError, get_data_dir, load_state, save_state, take_load_warning
 from .task_dialog import TaskDialog
 from .task_manager import TaskManager
@@ -65,6 +70,7 @@ class Application(QObject):
         if load_warning:
             logger.warning("存档恢复: %s", load_warning.replace('\n', ' '))
             QMessageBox.warning(None, "Adventure", load_warning)
+        ensure_roll_runtime(self.state)
         self.manager = TaskManager(self.state)
         if self.manager.recover_stuck_subtask_rewards():
             logger.info("启动时恢复了卡住的子任务奖励")
@@ -100,6 +106,12 @@ class Application(QObject):
         self._save_debounce.setInterval(3_000)
         self._save_debounce.timeout.connect(self._safe_save)
 
+        # 每 10 分钟重抽开奖概率与奖励范围
+        self._roll_shuffle_timer = QTimer(self)
+        self._roll_shuffle_timer.setInterval(SHUFFLE_INTERVAL_SEC * 1000)
+        self._roll_shuffle_timer.timeout.connect(self._on_roll_shuffle_timer)
+        self._roll_shuffle_timer.start()
+
         # 系统托盘
         self.tray = self._build_tray()
 
@@ -110,6 +122,7 @@ class Application(QObject):
 
         # 合并高频按键触发的 UI 刷新，避免每键整窗重绘
         self._roll_changed = False
+        self._pending_roll_reward: Reward | None = None
         self._ui_flush_timer = QTimer(self)
         self._ui_flush_timer.setSingleShot(True)
         self._ui_flush_timer.setInterval(100)
@@ -207,15 +220,23 @@ class Application(QObject):
             return False
         return isinstance(w, (QLineEdit, QTextEdit, QPlainTextEdit))
 
-    def _schedule_ui_flush(self, *, roll_changed: bool = False) -> None:
+    def _schedule_ui_flush(
+        self,
+        *,
+        roll_changed: bool = False,
+        reward: Reward | None = None,
+    ) -> None:
         if roll_changed:
             self._roll_changed = True
+            self._pending_roll_reward = reward
         self._ui_flush_timer.start()
 
     def _flush_ui(self) -> None:
         roll_changed = self._roll_changed
+        reward = self._pending_roll_reward if roll_changed else None
         self._roll_changed = False
-        self.widget.refresh_light(roll_changed=roll_changed)
+        self._pending_roll_reward = None
+        self.widget.refresh_light(roll_changed=roll_changed, reward=reward)
         if self._task_dialog is not None and self._task_dialog.isVisible():
             self._task_dialog.refresh_stats()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
@@ -237,8 +258,14 @@ class Application(QObject):
                          self.state.total_operations, reward.gold, reward.diamond)
         self.manager.record_operation(reward)
         self.widget.note_operation()
-        self._schedule_ui_flush(roll_changed=reward is not None)
+        self._schedule_ui_flush(roll_changed=reward is not None, reward=reward)
         self._save_debounce.start()
+
+    def _on_roll_shuffle_timer(self) -> None:
+        reshuffle_roll_params(self.state)
+        self.widget.refresh_roll_meta()
+        self._safe_save()
+        logger.info("10 分钟定时重抽开奖参数完成")
 
     # ---------- 子窗口 ----------
     def _on_subtask_claimed(self, title: str, reward: Reward) -> None:
