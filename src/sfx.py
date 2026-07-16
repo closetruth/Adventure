@@ -83,7 +83,22 @@ class SfxPlayer:
             logger.debug("已加载音效: %s (%s)", stem, sound_path.name)
             return sound
         except Exception as exc:  # pragma: no cover - runtime fallback
-            logger.warning("加载音效失败(%s): %s", stem, exc)
+            # 常见坑：把 m4a/mp4/aac 改名为 .mp3，pygame 无法识别
+            header = ""
+            try:
+                raw = sound_path.read_bytes()[:12]
+                header = raw[:4].hex()
+                if raw[4:8] == b"ftyp":
+                    header = f"mp4/m4a(ftyp={raw[8:12]!r})"
+            except Exception:
+                pass
+            logger.warning(
+                "加载音效失败(%s → %s): %s；请使用真正的 wav/ogg/mp3%s",
+                stem,
+                sound_path.name,
+                exc,
+                f"（当前文件头: {header}）" if header else "",
+            )
             return None
 
     def play(self, stem: str) -> bool:
