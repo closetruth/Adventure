@@ -525,6 +525,11 @@ class FloatingWidget(QWidget):
         act_startup.toggled.connect(self._toggle_startup)
         menu.addAction(act_startup)
 
+        act_sound = QAction("开奖音效", self, checkable=True)
+        act_sound.setChecked(bool(s.get("sound_enabled", True)))
+        act_sound.toggled.connect(self._toggle_sound)
+        menu.addAction(act_sound)
+
         menu.addSeparator()
         act_exit = QAction("退出 Adventure", self)
         act_exit.triggered.connect(self.request_quit)
@@ -559,6 +564,11 @@ class FloatingWidget(QWidget):
         set_startup(checked)
         save_state(self.state)
         logger.info("开机自启: %s", checked)
+
+    def _toggle_sound(self, checked: bool) -> None:
+        self.state.settings["sound_enabled"] = checked
+        save_state(self.state)
+        logger.info("开奖音效: %s", checked)
 
     def _set_text(self, label: QLabel, text: str) -> None:
         if label.text() != text:

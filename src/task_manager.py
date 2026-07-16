@@ -302,17 +302,22 @@ class TaskManager:
         self.state.since_roll.diamond += reward.diamond
 
     # ----- 操作数与奖励 -----
-    def record_operation(self, reward: Optional[Reward]) -> None:
-        """处理一次操作：父/子 ops++；有 current 子目标时才积累开奖奖励。"""
+    def record_operation(self, reward: Optional[Reward]) -> Optional[Reward]:
+        """处理一次操作：父/子 ops++；有 current 子目标时才积累开奖奖励。
+
+        返回实际记入子目标的奖励；未记入时返回 None。
+        """
         active = self.state.active_task()
         if active is None:
-            return
+            return None
 
         active.operations += 1
         sub = active.current_subtask()
         if sub is None:
-            return
+            return None
 
         sub.operations += 1
         if reward is not None and not reward.is_empty():
             self._apply_roll_to_subtask(active, sub, reward)
+            return reward
+        return None

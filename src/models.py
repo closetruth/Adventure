@@ -296,6 +296,9 @@ class AppState:
     settings: Dict = field(default_factory=lambda: {
         "pin_all_desktops": True,
         "always_on_top": True,
+        "sound_enabled": True,
+        "sound_volume": 0.8,
+        "sound_on_roll_hit": True,
         "roll_interval": 10,           # 每多少次操作触发一次开奖
         "roll_chance": 0.35,           # 命中奖励的概率
         "gold_min": 0.1,

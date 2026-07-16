@@ -43,6 +43,7 @@ from .reward_system import (
     maybe_roll,
     reshuffle_roll_params,
 )
+from .sfx import SfxPlayer
 from .storage import SaveRejectedError, get_data_dir, load_state, save_state, take_load_warning
 from .task_dialog import TaskDialog
 from .task_manager import TaskManager
@@ -75,6 +76,7 @@ class Application(QObject):
         if self.manager.recover_stuck_subtask_rewards():
             logger.info("启动时恢复了卡住的子任务奖励")
             self._safe_save()
+        self.sfx = SfxPlayer(self.state.settings)
 
         self.widget = FloatingWidget(self.state, self.manager)
         self.widget.request_task_dialog.connect(self.show_task_dialog)
@@ -256,7 +258,13 @@ class Application(QObject):
         if reward is not None:
             logger.debug("操作 #%d: 开奖 gold=%.1f diamond=%.1f",
                          self.state.total_operations, reward.gold, reward.diamond)
-        self.manager.record_operation(reward)
+        subtask_reward = self.manager.record_operation(reward)
+        if (
+            subtask_reward is not None
+            and not subtask_reward.is_empty()
+            and self.state.settings.get("sound_on_roll_hit", True)
+        ):
+            self.sfx.play_roll_hit(subtask_reward)
         self.widget.note_operation()
         self._schedule_ui_flush(roll_changed=reward is not None, reward=reward)
         self._save_debounce.start()
