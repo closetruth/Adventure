@@ -1,7 +1,0 @@
-{
-  "plugins": {
-    "claude-plugins-official/claude-code-setup": {
-      "enabled": true
-    }
-  }
-}
