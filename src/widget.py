@@ -1077,7 +1077,9 @@ class FloatingWidget(QWidget):
     def _update_roll_bar(self) -> None:
         rt = self.state.roll_runtime
         progress, span = roll_progress(self.state)
-        chance_label = f"概率 {rt.roll_chance:.0%}"
+        chance_label = (
+            f"金 {rt.gold_chance:.0%}  钻 {rt.diamond_chance:.0%}"
+        )
         self.roll_bar.set_cycle(
             progress,
             span,
@@ -1096,6 +1098,13 @@ class FloatingWidget(QWidget):
             self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
             self.roll_toast.setText("未中")
             hide_ms = 1200
+        elif reward.gold > 0 and reward.diamond > 0:
+            self.roll_toast.setObjectName("RollToast RollToastDiam")
+            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
+            self.roll_toast.setText(
+                f"+{format_amount(reward.gold)} 金 +{format_amount(reward.diamond)} 钻"
+            )
+            hide_ms = 2200
         elif reward.diamond > 0:
             self.roll_toast.setObjectName("RollToast RollToastDiam")
             self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)

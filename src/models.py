@@ -256,8 +256,8 @@ class RollRuntime:
     next_roll_at: int = 10
     roll_span: int = 10
     segment_colors: List[str] = field(default_factory=list)
-    roll_chance: float = 0.35
-    diamond_chance: float = 0.08
+    gold_chance: float = 0.35          # 金币掉落概率（与钻石独立）
+    diamond_chance: float = 0.06       # 钻石掉落概率（与金币独立）
     gold_min: float = 0.1
     gold_max: float = 1.0
     diamond_min: float = 0.01
@@ -266,12 +266,17 @@ class RollRuntime:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "RollRuntime":
+        # 兼容旧存档：roll_chance → gold_chance
+        if "gold_chance" in data:
+            gold_chance = float(data["gold_chance"])
+        else:
+            gold_chance = float(data.get("roll_chance", 0.35))
         return cls(
             next_roll_at=int(data.get("next_roll_at", 10)),
             roll_span=max(1, int(data.get("roll_span", 10))),
             segment_colors=list(data.get("segment_colors", [])),
-            roll_chance=float(data.get("roll_chance", 0.35)),
-            diamond_chance=float(data.get("diamond_chance", 0.08)),
+            gold_chance=gold_chance,
+            diamond_chance=float(data.get("diamond_chance", 0.06)),
             gold_min=float(data.get("gold_min", 0.1)),
             gold_max=float(data.get("gold_max", 1.0)),
             diamond_min=float(data.get("diamond_min", 0.01)),
@@ -300,10 +305,11 @@ class AppState:
         "sound_volume": 0.8,
         "sound_on_roll_hit": True,
         "roll_interval": 10,           # 每多少次操作触发一次开奖
-        "roll_chance": 0.35,           # 命中奖励的概率
+        "roll_chance": 0.35,           # 旧字段：迁移用（现为 gold_chance）
+        "gold_chance": 0.35,           # 金币掉落概率（与钻石独立）
         "gold_min": 0.1,
         "gold_max": 1.0,
-        "diamond_chance": 0.08,        # 在命中奖励的前提下，钻石替代金币的概率
+        "diamond_chance": 0.06,        # 钻石掉落概率（与金币独立）
         "diamond_min": 0.01,
         "diamond_max": 0.1,
         "pet_best_round": 0,
@@ -418,7 +424,7 @@ def validate_state_invariants(state: AppState) -> Optional[str]:
     if rt.next_roll_at < state.last_roll_at:
         return "roll_runtime.next_roll_at 早于 last_roll_at"
     for name, val in (
-        ("roll_chance", rt.roll_chance),
+        ("gold_chance", rt.gold_chance),
         ("diamond_chance", rt.diamond_chance),
         ("gold_min", rt.gold_min),
         ("gold_max", rt.gold_max),
