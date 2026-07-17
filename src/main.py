@@ -77,6 +77,8 @@ class Application(QObject):
             logger.info("启动时恢复了卡住的子任务奖励")
             self._safe_save()
         self.sfx = SfxPlayer(self.state.settings)
+        # 休眠唤醒后音频设备常失效；恢复前台时失效 mixer，下次开奖再懒加载重建
+        self.qt_app.applicationStateChanged.connect(self._on_app_state_changed)
 
         self.widget = FloatingWidget(self.state, self.manager)
         self.widget.request_task_dialog.connect(self.show_task_dialog)
@@ -249,6 +251,10 @@ class Application(QObject):
         text = f"{prefix}已领取 {format_reward_gain(reward.gold, reward.diamond)}"
         if self.tray.isVisible():
             self.tray.showMessage("Adventure", text, QSystemTrayIcon.MessageIcon.Information, 2500)
+
+    def _on_app_state_changed(self, state: Qt.ApplicationState) -> None:
+        if state == Qt.ApplicationState.ApplicationActive:
+            self.sfx.invalidate()
 
     def _on_operation(self) -> None:
         if self._typing_in_app():
