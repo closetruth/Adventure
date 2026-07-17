@@ -212,15 +212,16 @@ class TaskCard(QFrame):
             f"操作 {sub.operations}",
         ]
         if sub.earned_gold:
-            parts.append(f"金 {format_amount(sub.earned_gold)}")
+            parts.append(f"累计金 {format_amount(sub.earned_gold)}")
         if sub.earned_diamond:
-            parts.append(f"钻 {format_amount(sub.earned_diamond)}")
+            parts.append(f"累计钻 {format_amount(sub.earned_diamond)}")
         dates = self._subtask_dates_label(sub)
         if dates:
             parts.append(dates)
         if sub.done and not sub.rewards_claimed:
             pending = sub.pending_summary()
-            parts.append(format_pending(pending.gold, pending.diamond))
+            # 领取实际给的是 pending + 完成奖励；与累计 earned 可能不同
+            parts.append(f"可领 {format_pending(pending.gold, pending.diamond)}")
         if is_current:
             parts.append("当前聚焦")
         elif sub.rewards_claimed:

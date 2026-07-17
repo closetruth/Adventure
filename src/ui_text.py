@@ -269,6 +269,13 @@ def format_subgoal_line_html(sub: Subtask, *, is_current: bool) -> str:
         stats.append(
             f'<span style="color:{_COLOR_MUTED};font-weight:600">钻0</span>'
         )
+    if sub.is_claimable():
+        pending = sub.pending_summary()
+        stats.append(
+            f'<span style="color:{_COLOR_CLAIM};font-weight:700">'
+            f"可领金{format_amount(pending.gold)} "
+            f"钻{format_amount(pending.diamond)}</span>"
+        )
     stat_html = "  ".join(stats)
 
     runtime_html = ""
