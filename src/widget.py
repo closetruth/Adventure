@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -145,6 +146,31 @@ QPushButton#GoalPauseBtn:hover, QPushButton#GoalResumeBtn:hover {
     background-color: #303448;
     border-color: #5a6a90;
 }
+QSlider#GoalBrowseSlider {
+    height: 22px;
+    margin: 0px 2px;
+}
+QSlider#GoalBrowseSlider::groove:horizontal {
+    height: 4px;
+    background: #2a2d38;
+    border-radius: 2px;
+}
+QSlider#GoalBrowseSlider::sub-page:horizontal {
+    background: #3a5cff;
+    border-radius: 2px;
+}
+QSlider#GoalBrowseSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    background: #c8d0e8;
+    border: 1px solid #6a7aa0;
+    border-radius: 7px;
+}
+QSlider#GoalBrowseSlider::handle:horizontal:hover {
+    background: #e0e6f8;
+    border-color: #8a9ac0;
+}
 QPushButton#SubDelBtn {
     font-size: 11px;
     padding: 3px 8px;
@@ -222,6 +248,7 @@ class FloatingWidget(QWidget):
         self.setMinimumHeight(460)
 
         self._op_tracker = OpRateTracker(window_sec=60.0)
+        self._browse_index: int = 0
         self._subgoal_structure_sig: tuple | None = None
         self._subgoal_line_labels: dict[str, QLabel] = {}
         self._subgoal_pinned_line: QLabel | None = None
@@ -345,6 +372,17 @@ class FloatingWidget(QWidget):
         goal_head.addWidget(self.goal_resume_btn)
         goal_lay.addLayout(goal_head)
 
+        self.goal_browse_slider = QSlider(Qt.Orientation.Horizontal)
+        self.goal_browse_slider.setObjectName("GoalBrowseSlider")
+        self.goal_browse_slider.setMinimum(0)
+        self.goal_browse_slider.setMaximum(0)
+        self.goal_browse_slider.setSingleStep(1)
+        self.goal_browse_slider.setPageStep(1)
+        self.goal_browse_slider.setCursor(Qt.PointingHandCursor)
+        self.goal_browse_slider.valueChanged.connect(self._on_goal_browse_changed)
+        self.goal_browse_slider.hide()
+        goal_lay.addWidget(self.goal_browse_slider)
+
         self.task_stats = TaskRewardStrip()
         goal_lay.addWidget(self.task_stats)
 
@@ -467,7 +505,7 @@ class FloatingWidget(QWidget):
     def _is_interactive_child(self, pos: QPoint) -> bool:
         w = self.childAt(pos)
         while w is not None and w is not self:
-            if isinstance(w, (QPushButton, QLineEdit, QScrollArea, QSpinBox)):
+            if isinstance(w, (QPushButton, QLineEdit, QScrollArea, QSpinBox, QSlider)):
                 return True
             w = w.parentWidget()
         return False
@@ -838,19 +876,54 @@ class FloatingWidget(QWidget):
             self.goal_pause_btn.hide()
             self.goal_resume_btn.hide()
 
+    def _paused_tasks(self) -> list[Task]:
+        return self.manager.by_status(TaskStatus.PAUSED)
+
+    def _clamp_browse_index(self, paused: list[Task]) -> int:
+        if not paused:
+            self._browse_index = 0
+            return 0
+        self._browse_index = max(0, min(self._browse_index, len(paused) - 1))
+        return self._browse_index
+
+    def _sync_goal_browse_slider(self, paused: list[Task], *, visible: bool) -> None:
+        if not visible or len(paused) <= 1:
+            self.goal_browse_slider.hide()
+            return
+        idx = self._clamp_browse_index(paused)
+        self.goal_browse_slider.blockSignals(True)
+        self.goal_browse_slider.setMaximum(len(paused) - 1)
+        self.goal_browse_slider.setValue(idx)
+        self.goal_browse_slider.blockSignals(False)
+        self.goal_browse_slider.show()
+
+    def _on_goal_browse_changed(self, value: int) -> None:
+        paused = self._paused_tasks()
+        if len(paused) <= 1:
+            return
+        self._browse_index = max(0, min(int(value), len(paused) - 1))
+        self.refresh()
+
     def _on_goal_pause(self) -> None:
         active = self.state.active_task()
         if active is None:
             return
-        self.manager.pause(active.id)
+        paused_id = active.id
+        self.manager.pause(paused_id)
+        paused = self._paused_tasks()
+        for i, t in enumerate(paused):
+            if t.id == paused_id:
+                self._browse_index = i
+                break
         self.state_changed.emit()
         self.refresh()
 
     def _on_goal_resume(self) -> None:
-        paused = self.manager.by_status(TaskStatus.PAUSED)
+        paused = self._paused_tasks()
         if not paused:
             return
-        self.manager.resume(paused[0].id)
+        idx = self._clamp_browse_index(paused)
+        self.manager.resume(paused[idx].id)
         self.state_changed.emit()
         self.refresh()
 
@@ -946,17 +1019,19 @@ class FloatingWidget(QWidget):
         since_gold: float,
         since_diamond: float,
     ) -> None:
-        paused = self.manager.by_status(TaskStatus.PAUSED)
+        paused = self._paused_tasks()
         if active is None:
             self._refresh_task_actions(None)
             self._update_goal_actions(None, paused)
             if paused:
-                p = paused[0]
+                idx = self._clamp_browse_index(paused)
+                p = paused[idx]
                 title = p.title
                 if p.subtasks:
                     done, total = p.subtask_progress()
                     title = f"{p.title}  ({done}/{total})"
-                self._set_text(self.task_title, f"{title} (已暂停)")
+                suffix = f" (已暂停)  {idx + 1}/{len(paused)}"
+                self._set_text(self.task_title, f"{title}{suffix}")
                 earned_gold, earned_diamond = p.earned_totals()
                 self.task_stats.show_active_compact(
                     p.operations,
@@ -965,11 +1040,14 @@ class FloatingWidget(QWidget):
                     since_roll_gold=since_gold,
                     since_roll_diamond=since_diamond,
                 )
+                self._sync_goal_browse_slider(paused, visible=True)
             else:
                 self._set_text(self.task_title, "还没有目标")
                 self.task_stats.show_hint("点击「目标管理」创建第一个目标")
+                self._sync_goal_browse_slider(paused, visible=False)
             return
 
+        self._sync_goal_browse_slider(paused, visible=False)
         self._set_text(self.task_title, self._format_task_title(active))
         self._refresh_task_actions(active)
         self._update_goal_actions(active, paused)
