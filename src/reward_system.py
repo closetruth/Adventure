@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import colorsys
 import logging
+import math
 import random
 import time
 from typing import List, Optional
@@ -14,19 +15,35 @@ logger = logging.getLogger(__name__)
 # 内置随机范围（无设置 UI）
 INTERVAL_MIN = 6
 INTERVAL_MAX = 14
-CHANCE_MIN = 0.22
-CHANCE_MAX = 0.48
-DIAMOND_CHANCE_MIN = 0.05
-DIAMOND_CHANCE_MAX = 0.14
+# 金币/钻石掉落概率互相独立（到开奖点时各自判定）
+GOLD_CHANCE_MIN = 0.22
+GOLD_CHANCE_MAX = 0.48
+DIAMOND_CHANCE_MIN = 0.03
+DIAMOND_CHANCE_MAX = 0.10
 GOLD_MIN_RANGE = (0.08, 0.15)
-GOLD_MAX_RANGE = (0.8, 1.2)
+GOLD_MAX_RANGE = (1.0, 2.0)
 DIAMOND_MIN_RANGE = (0.01, 0.03)
-DIAMOND_MAX_RANGE = (0.08, 0.15)
+DIAMOND_MAX_RANGE = (0.12, 0.35)
 SHUFFLE_INTERVAL_SEC = 600
 
 
 def _rand_float(lo: float, hi: float) -> float:
     return random.uniform(lo, hi)
+
+
+def _right_skewed(lo: float, hi: float, *, sigma: float = 0.55) -> float:
+    """多数靠近 lo，偶发靠近 hi（截断对数正态）。"""
+    if hi <= lo:
+        return float(lo)
+    # 使对数正态中位数落在区间偏左（约 25% 分位）
+    median = lo + 0.25 * (hi - lo)
+    mu = math.log(max(median, 1e-9))
+    x = median
+    for _ in range(24):
+        x = random.lognormvariate(mu, sigma)
+        if lo <= x <= hi:
+            return x
+    return max(lo, min(hi, x))
 
 
 def generate_segment_colors(span: int) -> List[str]:
@@ -44,8 +61,8 @@ def generate_segment_colors(span: int) -> List[str]:
 def reshuffle_roll_params(state: AppState) -> None:
     """在内置范围内重抽概率与奖励数值。"""
     rt = state.roll_runtime
-    rt.roll_chance = round(_rand_float(CHANCE_MIN, CHANCE_MAX), 3)
-    rt.diamond_chance = round(_rand_float(DIAMOND_CHANCE_MIN, DIAMOND_CHANCE_MAX), 3)
+    rt.gold_chance = round(_right_skewed(GOLD_CHANCE_MIN, GOLD_CHANCE_MAX), 3)
+    rt.diamond_chance = round(_right_skewed(DIAMOND_CHANCE_MIN, DIAMOND_CHANCE_MAX), 3)
     rt.gold_min = round(_rand_float(*GOLD_MIN_RANGE), 2)
     rt.gold_max = round(_rand_float(*GOLD_MAX_RANGE), 2)
     if rt.gold_max < rt.gold_min:
@@ -56,8 +73,8 @@ def reshuffle_roll_params(state: AppState) -> None:
         rt.diamond_min, rt.diamond_max = rt.diamond_max, rt.diamond_min
     rt.last_shuffle_at = time.time()
     logger.info(
-        "重抽开奖参数: chance=%.1f%% diamond=%.1f%% gold=%.2f~%.2f diam=%.2f~%.2f",
-        rt.roll_chance * 100,
+        "重抽开奖参数: gold=%.1f%% diamond=%.1f%% gold_amt=%.2f~%.2f diam_amt=%.2f~%.2f",
+        rt.gold_chance * 100,
         rt.diamond_chance * 100,
         rt.gold_min,
         rt.gold_max,
@@ -97,8 +114,11 @@ def _migrate_roll_runtime(state: AppState) -> None:
         rt.segment_colors = generate_segment_colors(rt.roll_span)
 
     if rt.last_shuffle_at <= 0:
-        rt.roll_chance = float(s.get("roll_chance", 0.35))
-        rt.diamond_chance = float(s.get("diamond_chance", 0.08))
+        if "gold_chance" in s:
+            rt.gold_chance = float(s.get("gold_chance", 0.35))
+        else:
+            rt.gold_chance = float(s.get("roll_chance", 0.35))
+        rt.diamond_chance = float(s.get("diamond_chance", 0.06))
         rt.gold_min = float(s.get("gold_min", 0.1))
         rt.gold_max = max(rt.gold_min, float(s.get("gold_max", 1.0)))
         rt.diamond_min = float(s.get("diamond_min", 0.01))
@@ -140,10 +160,12 @@ def _append_roll_history(state: AppState, reward: Reward) -> None:
 def maybe_roll(state: AppState) -> Optional[Reward]:
     """根据 roll_runtime 判断是否到达开奖点，到达则开奖并开启新周期。
 
+    金币与钻石概率互相独立：同一次开奖可同时掉落、只掉一种、或都不掉。
+
     返回值：
         - 当本次没到开奖点时返回 None；
         - 到达间隔但未命中返回 ``Reward()`` 空对象；
-        - 命中则返回包含金币/钻石的 Reward。
+        - 命中则返回包含金币和/或钻石的 Reward。
     """
     ensure_roll_runtime(state)
     rt = state.roll_runtime
@@ -154,32 +176,27 @@ def maybe_roll(state: AppState) -> Optional[Reward]:
     state.last_roll_at = state.total_operations
     state.since_roll = RollAccum()
 
-    if random.random() >= rt.roll_chance:
-        reward = Reward(op_at=state.total_operations)
-        logger.debug("开奖落空 (ops=%d)", state.total_operations)
-        _append_roll_history(state, reward)
-        start_new_roll_cycle(state)
-        return reward
-
+    gold = 0.0
+    diamond = 0.0
+    if random.random() < rt.gold_chance:
+        gold_min = rt.gold_min
+        gold_max = max(gold_min, rt.gold_max)
+        gold = round(_right_skewed(gold_min, gold_max), 1)
     if random.random() < rt.diamond_chance:
         dmin = rt.diamond_min
         dmax = max(dmin, rt.diamond_max)
-        reward = Reward(
-            diamond=round(random.uniform(dmin, dmax), 1),
-            op_at=state.total_operations,
-        )
-        logger.info("开奖命中钻石 %.1f (ops=%d)", reward.diamond, state.total_operations)
-        _append_roll_history(state, reward)
-        start_new_roll_cycle(state)
-        return reward
+        diamond = round(_right_skewed(dmin, dmax), 1)
 
-    gold_min = rt.gold_min
-    gold_max = max(gold_min, rt.gold_max)
-    reward = Reward(
-        gold=round(random.uniform(gold_min, gold_max), 1),
-        op_at=state.total_operations,
-    )
-    logger.info("开奖命中金币 %.1f (ops=%d)", reward.gold, state.total_operations)
+    reward = Reward(gold=gold, diamond=diamond, op_at=state.total_operations)
+    if reward.is_empty():
+        logger.debug("开奖落空 (ops=%d)", state.total_operations)
+    else:
+        logger.info(
+            "开奖命中 gold=%.1f diamond=%.1f (ops=%d)",
+            reward.gold,
+            reward.diamond,
+            state.total_operations,
+        )
     _append_roll_history(state, reward)
     start_new_roll_cycle(state)
     return reward
