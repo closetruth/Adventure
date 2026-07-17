@@ -49,25 +49,40 @@ class SfxPlayer:
                 return path
         return None
 
-    def _ensure_mixer(self) -> bool:
-        if SfxPlayer._mixer_ready:
-            return True
+    def _reset_mixer(self) -> None:
+        """Tear down mixer and clear cached sounds (e.g. after sleep/wake)."""
         try:
             import pygame
 
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
+            if pygame.mixer.get_init():
+                pygame.mixer.quit()
+        except Exception as exc:  # pragma: no cover - runtime fallback
+            logger.debug("pygame.mixer.quit 失败: %s", exc)
+        SfxPlayer._mixer_ready = False
+        self._sounds.clear()
+
+    def invalidate(self) -> None:
+        """Mark mixer stale so the next play re-inits lazily."""
+        self._reset_mixer()
+
+    def _ensure_mixer(self) -> bool:
+        try:
+            import pygame
+
+            if pygame.mixer.get_init():
+                SfxPlayer._mixer_ready = True
+                return True
+
+            SfxPlayer._mixer_ready = False
+            pygame.mixer.init()
             SfxPlayer._mixer_ready = True
             return True
         except Exception as exc:  # pragma: no cover - runtime fallback
+            SfxPlayer._mixer_ready = False
             logger.warning("pygame.mixer 初始化失败: %s", exc)
             return False
 
-    def _sound_for(self, stem: str) -> Optional[object]:
-        existing = self._sounds.get(stem)
-        if existing is not None:
-            return existing
-
+    def _load_sound(self, stem: str) -> Optional[object]:
         sound_path = self._resolve_path(stem)
         if sound_path is None:
             logger.debug("音效文件缺失: %s", stem)
@@ -101,6 +116,16 @@ class SfxPlayer:
             )
             return None
 
+    def _sound_for(self, stem: str) -> Optional[object]:
+        existing = self._sounds.get(stem)
+        if existing is not None:
+            return existing
+        return self._load_sound(stem)
+
+    def _try_play(self, sound: object) -> None:
+        sound.set_volume(self._volume())
+        sound.play()
+
     def play(self, stem: str) -> bool:
         """Play one sound by stem name when enabled and available."""
         if not self._enabled():
@@ -110,12 +135,20 @@ class SfxPlayer:
             return False
 
         try:
-            sound.set_volume(self._volume())
-            sound.play()
+            self._try_play(sound)
             return True
         except Exception as exc:  # pragma: no cover - runtime fallback
-            logger.warning("播放音效失败(%s): %s", stem, exc)
-            return False
+            logger.warning("播放音效失败(%s)，尝试重建 mixer: %s", stem, exc)
+            self._reset_mixer()
+            sound = self._load_sound(stem)
+            if sound is None:
+                return False
+            try:
+                self._try_play(sound)
+                return True
+            except Exception as retry_exc:  # pragma: no cover - runtime fallback
+                logger.warning("播放音效失败(%s): %s", stem, retry_exc)
+                return False
 
     def play_roll_hit(self, reward: Reward) -> bool:
         """Play the configured roll-hit sound based on reward type."""
