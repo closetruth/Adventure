@@ -48,11 +48,23 @@ class TaskManager:
     def _completion_bonus(self) -> float:
         return float(self.state.settings.get("subtask_completion_bonus_gold", 0.5))
 
-    def _settle_subtask_rewards(self, task: Task) -> None:
-        """将子目标 pending 结算进背包（完成固定奖仅 done 时加）。"""
+    def _settle_subtask_rewards(
+        self,
+        task: Task,
+        *,
+        only_claimable: bool = False,
+    ) -> bool:
+        """将子目标 pending 结算进背包（完成固定奖仅 done 时加）。
+
+        only_claimable=True 时，只结算已完成且未领取的子目标，
+        避免把进行中子目标的 pending 提前静默进背包。
+        """
         bonus = self._completion_bonus()
+        changed = False
         for sub in task.subtasks:
             if sub.rewards_claimed or not sub.pending_rewards:
+                continue
+            if only_claimable and not sub.is_claimable():
                 continue
             total = sub.pending_summary()
             if sub.done:
@@ -61,16 +73,21 @@ class TaskManager:
             sub.pending_rewards.clear()
             if sub.done:
                 sub.rewards_claimed = True
+            changed = True
+        return changed
 
     def recover_stuck_subtask_rewards(self) -> bool:
-        """启动时修复：子目标 pending 未进背包（如已完成父目标但子目标未领）。"""
+        """启动时修复：只结算「已完成但未领取」的子目标，或已完成父目标上的残留 pending。"""
         changed = False
         for t in self.state.tasks:
-            if not any(not s.rewards_claimed and s.pending_rewards for s in t.subtasks):
+            if t.status == TaskStatus.COMPLETED:
+                if self._settle_subtask_rewards(t, only_claimable=False):
+                    logger.info("启动恢复: 结算已完成目标「%s」的残留子任务奖励", t.title)
+                    changed = True
                 continue
-            self._settle_subtask_rewards(t)
-            logger.info("启动恢复: 结算目标「%s」的卡住子任务奖励", t.title)
-            changed = True
+            if self._settle_subtask_rewards(t, only_claimable=True):
+                logger.info("启动恢复: 结算目标「%s」的可领取子任务奖励", t.title)
+                changed = True
         return changed
 
     def preview_claim(self, task_id: str, subtask_id: str) -> Optional[Reward]:
