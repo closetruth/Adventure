@@ -185,7 +185,9 @@ def maybe_roll(state: AppState) -> Optional[Reward]:
     if random.random() < rt.diamond_chance:
         dmin = rt.diamond_min
         dmax = max(dmin, rt.diamond_max)
-        diamond = round(_right_skewed(dmin, dmax), 1)
+        # 金额界面只显示 1 位小数；命中后至少保留 0.1，避免 0.01～0.04
+        # 被四舍五入成 0，继而被误记为“未中奖”且不触发钻石音效。
+        diamond = max(0.1, round(_right_skewed(dmin, dmax), 1))
 
     reward = Reward(gold=gold, diamond=diamond, op_at=state.total_operations)
     if reward.is_empty():
