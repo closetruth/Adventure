@@ -77,10 +77,10 @@ class Application(QObject):
             logger.info("启动时恢复了卡住的子任务奖励")
             self._safe_save()
         self.sfx = SfxPlayer(self.state.settings)
-        # 后台预热音频（init + 预加载），避免首次开奖时在主线程卡顿
-        self.sfx.prewarm()
-        # 休眠唤醒后音频设备常失效；恢复前台时失效 mixer，下次开奖再懒加载重建
-        self.qt_app.applicationStateChanged.connect(self._on_app_state_changed)
+        if self.sfx.capable():
+            self.sfx.prewarm()
+            # 休眠唤醒后音频设备常失效；仅在有音效能力时监听并拆除 mixer
+            self.qt_app.applicationStateChanged.connect(self._on_app_state_changed)
 
         self.widget = FloatingWidget(self.state, self.manager)
         self.widget.request_task_dialog.connect(self.show_task_dialog)

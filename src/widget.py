@@ -213,9 +213,9 @@ QLabel#RollToast {
     padding: 2px 0;
     background: transparent;
 }
-QLabel#RollToastGold { color: #ffd54f; }
-QLabel#RollToastDiam { color: #7dd3fc; }
-QLabel#RollToastMiss { color: #8a909e; }
+QLabel#RollToast[toast="gold"] { color: #ffd54f; }
+QLabel#RollToast[toast="diam"] { color: #7dd3fc; }
+QLabel#RollToast[toast="miss"] { color: #8a909e; }
 QFrame#Divider { background-color: rgba(255,255,255,18); max-height: 1px; min-height: 1px; }
 """
 
@@ -1094,37 +1094,44 @@ class FloatingWidget(QWidget):
     def show_roll_result(self, reward: Reward) -> None:
         """开奖结果轻量 Toast + 进度条闪动。"""
         if reward.is_empty():
-            self.roll_toast.setObjectName("RollToast RollToastMiss")
-            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
-            self.roll_toast.setText("未中")
-            hide_ms = 1200
+            toast_kind, text, hide_ms = "miss", "未中", 1200
         elif reward.gold > 0 and reward.diamond > 0:
-            self.roll_toast.setObjectName("RollToast RollToastDiam")
-            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
-            self.roll_toast.setText(
-                f"+{format_amount(reward.gold)} 金 +{format_amount(reward.diamond)} 钻"
+            toast_kind = "diam"
+            text = (
+                f"+{format_amount(reward.gold)} 金 "
+                f"+{format_amount(reward.diamond)} 钻"
             )
             hide_ms = 2200
         elif reward.diamond > 0:
-            self.roll_toast.setObjectName("RollToast RollToastDiam")
-            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
-            self.roll_toast.setText(f"+{format_amount(reward.diamond)} 钻石")
-            hide_ms = 2000
+            toast_kind, text, hide_ms = (
+                "diam",
+                f"+{format_amount(reward.diamond)} 钻石",
+                2000,
+            )
         else:
-            self.roll_toast.setObjectName("RollToast RollToastGold")
-            self.roll_toast.setStyleSheet(WIDGET_STYLESHEET)
-            self.roll_toast.setText(f"+{format_amount(reward.gold)} 金币")
-            hide_ms = 2000
+            toast_kind, text, hide_ms = (
+                "gold",
+                f"+{format_amount(reward.gold)} 金币",
+                2000,
+            )
 
-        self.roll_toast.show()
+        self._set_roll_toast(toast_kind, text, hide_ms)
         self._flash_roll_bar()
 
-        if self._roll_toast_timer is not None:
-            self._roll_toast_timer.stop()
-        self._roll_toast_timer = QTimer(self)
-        self._roll_toast_timer.setSingleShot(True)
+    def _set_roll_toast(self, kind: str, text: str, hide_ms: int) -> None:
+        """更新开奖 Toast；只改动态属性，不重载整份 QSS。"""
+        if self.roll_toast.property("toast") != kind:
+            self.roll_toast.setProperty("toast", kind)
+            self.roll_toast.style().unpolish(self.roll_toast)
+            self.roll_toast.style().polish(self.roll_toast)
+        self._set_text(self.roll_toast, text)
+        self.roll_toast.show()
+
+        if self._roll_toast_timer is None:
+            self._roll_toast_timer = QTimer(self)
+            self._roll_toast_timer.setSingleShot(True)
+            self._roll_toast_timer.timeout.connect(self.roll_toast.hide)
         self._roll_toast_timer.setInterval(hide_ms)
-        self._roll_toast_timer.timeout.connect(self.roll_toast.hide)
         self._roll_toast_timer.start()
 
     def _flash_roll_bar(self) -> None:
