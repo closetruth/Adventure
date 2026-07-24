@@ -205,6 +205,7 @@ class SfxPlayer:
         sound.play()
 
     def _prewarm_worker(self) -> None:
+        time.sleep(0.5)  # 给音频驱动缓冲时间，避免启动时初始化失败/卡顿
         if not self._ensure_mixer():
             return
         for stem in _SOUND_STEMS:
