@@ -37,17 +37,17 @@ build.bat
 ### Threading model
 
 ```
-pynput listener (daemon thread)
-    └─ on_op callback ──→ OpBridge.op_happened (Qt Signal, QueuedConnection)
-                              └─ Application._on_operation() (main thread)
+QTimer @ 50ms (main thread)
+    └─ GetAsyncKeyState 轮询 ──→ _count_op() ──→ OpBridge.op_happened (Qt Signal, AutoConnection)
+                                                       └─ Application._on_operation() (main thread)
                                    ├─ maybe_roll(state)
                                    ├─ TaskManager.record_operation()
                                    └─ widget.refresh() + dialog refreshes
 ```
 
-- **pynput** runs two daemon listeners (keyboard + mouse) in background threads. Each *first press* (not hold-repeat) fires the callback once.
-- `OpBridge` (a `QObject`) bridges the listener thread to the Qt main thread via `Signal` + `QueuedConnection`.
-- All state mutation happens on the main thread — no manual locking needed beyond the listener's internal dedup sets.
+- **InputMonitor** uses a `QTimer` (50ms) to poll keyboard/mouse state via `GetAsyncKeyState`. No system-wide hooks. Detects first-press transitions (not hold-repeat). Falls back to pynput hooks on non-Windows.
+- `OpBridge` (a `QObject`) emits a Qt `Signal`; `AutoConnection` handles thread detection automatically (polling = same thread, hook = cross-thread).
+- All state mutation happens on the main thread — no manual locking needed.
 
 ### Data model (`src/models.py`)
 
@@ -64,7 +64,7 @@ pynput listener (daemon thread)
 | `src/widget.py` | `FloatingWidget`: frameless topmost window, drag, right-click menu, 1s refresh timer |
 | `src/task_manager.py` | `TaskManager`: CRUD + state transitions (create/pause/resume/complete/delete) + operation recording |
 | `src/reward_system.py` | `maybe_roll(state)`: roll check on each operation; mutates state inline, returns `Reward` or `None` |
-| `src/input_monitor.py` | `InputMonitor`: pynput wrapper with key/button dedup; optional (gracefully degrades if pynput missing) |
+| `src/input_monitor.py` | `InputMonitor`: QTimer + GetAsyncKeyState polling with key/button dedup (pynput hook fallback for non-Windows) |
 | `src/storage.py` | `load_state()` / `save_state()`: atomic JSON persistence to `%APPDATA%\Adventure\data.json`; corrupt data → backup to `.broken.json` |
 | `src/game_launcher.py` | `launch_pet_arena()` / `launch_pixel_tactics()`: validate entry cost, write session JSON, spawn subprocess, read result JSON, update state |
 | `src/game_protocol.py` | `GameSession` / `GameResult` dataclasses: JSON protocol between main app and game subprocess via `%APPDATA%\Adventure\game_sessions\` |

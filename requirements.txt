@@ -1,5 +1,5 @@
 PySide6>=6.6.0
-pynput>=1.7.6
+# pynput>=1.7.6  # 可选：仅非 Windows 平台或显式 method="hook" 时需要
 # Python 3.14 请用 pygame-ce（官方 pygame 无预编译包会编译失败）
 pygame-ce>=2.5.2
 pywin32>=306; sys_platform == "win32"

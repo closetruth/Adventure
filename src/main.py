@@ -2,9 +2,9 @@
 
 启动流程:
 1. 加载本地数据 (AppState);
-2. 启动全局键鼠监听 (pynput, 后台线程);
+2. 启动全局键鼠监听 (QTimer + GetAsyncKeyState 轮询, 主线程);
 3. 创建主悬浮 Widget；
-4. 主线程通过 Qt 信号接收监听线程上抛的「操作」事件，统一更新数据 & UI。
+4. 主线程接收键鼠「操作」事件，统一更新数据 & UI。
 """
 from __future__ import annotations
 
@@ -91,13 +91,13 @@ class Application(QObject):
 
         # 桥接全局输入事件
         self.bridge = OpBridge()
-        self.bridge.op_happened.connect(self._on_operation, Qt.QueuedConnection)
+        self.bridge.op_happened.connect(self._on_operation)
         self.monitor = InputMonitor(on_op=self.bridge.op_happened.emit)
         if not self.monitor.available():
-            logger.warning("pynput 不可用，全局键鼠监听已禁用")
+            logger.warning("全局键鼠监听不可用")
             QMessageBox.warning(
                 None, "Adventure",
-                "未检测到 pynput，全局键鼠监听已禁用。\n请先运行 `pip install pynput` 后再启动。",
+                "全局键鼠监听不可用。\n操作计数仅限点击悬浮窗按钮时触发。",
             )
         else:
             self.monitor.start()
