@@ -116,7 +116,7 @@ class Task:
     completed_reward_diamond: float = 0.0
 
     def active_duration_seconds(self) -> float:
-        """进行中累计秒数（暂停与休眠不计）。"""
+        """进行中累计秒数（暂停与关屏不计）。"""
         return self.active_seconds
 
     def pending_summary(self) -> Reward:

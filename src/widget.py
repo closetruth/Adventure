@@ -1236,8 +1236,13 @@ class FloatingWidget(QWidget):
             sub_duration=sub_duration,
         )
 
+    def nativeEvent(self, eventType, message):
+        self.manager.power_monitor.handle_native_event(eventType, message)
+        return super().nativeEvent(eventType, message)
+
     # ---------- 显示时初始化窗口属性 ----------
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self.manager.power_monitor.install_on(self)
         if self.state.settings.get("pin_all_desktops", True):
             pin_window_to_all_desktops(int(self.winId()))

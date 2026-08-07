@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from .game_launcher import launch_pet_arena, launch_pixel_tactics
 from .input_monitor import InputMonitor
+from .power_monitor import PowerMonitor
 from .inventory_dialog import InventoryDialog
 from .logging_setup import setup_logging
 from .models import AppState, Reward
@@ -72,7 +73,8 @@ class Application(QObject):
             logger.warning("存档恢复: %s", load_warning.replace('\n', ' '))
             QMessageBox.warning(None, "Adventure", load_warning)
         ensure_roll_runtime(self.state)
-        self.manager = TaskManager(self.state)
+        self.power_monitor = PowerMonitor()
+        self.manager = TaskManager(self.state, self.power_monitor)
         if self.manager.recover_stuck_subtask_rewards():
             logger.info("启动时恢复了卡住的子任务奖励")
             self._safe_save()

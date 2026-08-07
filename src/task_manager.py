@@ -5,14 +5,22 @@ import logging
 import time
 from typing import List, Optional
 
+from .active_time import ActiveTimeTracker
 from .models import AppState, Reward, Subtask, Task, TaskStatus
+from .power_monitor import PowerMonitor
 
 logger = logging.getLogger(__name__)
 
 
 class TaskManager:
-    def __init__(self, state: AppState):
+    def __init__(
+        self,
+        state: AppState,
+        power_monitor: Optional[PowerMonitor] = None,
+    ):
         self.state = state
+        self.power_monitor = power_monitor or PowerMonitor()
+        self._active_time = ActiveTimeTracker()
         for t in state.tasks:
             if t.subtasks:
                 t.sync_earned_from_subtasks()
@@ -296,15 +304,17 @@ class TaskManager:
         return False
 
     def tick_active_time(self) -> bool:
-        """每秒调用：累加父/子任务时长（不自动完成子目标，须手动点完成）。"""
+        """每秒调用：累加父/子任务时长（关屏不计，不自动完成子目标）。"""
+        seconds = self._active_time.tick(
+            counting_enabled=self.power_monitor.should_count_time(),
+        )
         active = self.state.active_task()
-        if active is None:
+        if active is None or seconds <= 0:
             return False
-        active.active_seconds += 1
+        active.active_seconds += seconds
         sub = active.current_subtask()
-        if sub is None:
-            return False
-        sub.active_seconds += 1
+        if sub is not None:
+            sub.active_seconds += seconds
         return False
 
     def _sync_task_earned_from_subtasks(self, task: Task) -> None:
