@@ -1,46 +1,49 @@
-"""彩色分段开奖进度条。"""
+"""开奖落点画布：随机落点、连通簇可视化、颜色叠加。"""
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Sequence
 
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from .models import RollPoint
+from .reward_system import largest_cluster_indices
 
-class SegmentedRollBar(QWidget):
-    """每格随机颜色的分段进度条，中央显示进度与当前概率。"""
+
+class RollDropCanvas(QWidget):
+    """随机落点画布，大圆半透明叠加，中央显示连通进度。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._progress = 0
+        self._points: List[RollPoint] = []
+        self._cluster_size = 0
         self._span = 10
-        self._colors: List[str] = []
         self._chance_label = ""
         self._flash = False
-        self.setMinimumHeight(18)
-        self.setMaximumHeight(18)
+        self.setMinimumHeight(64)
+        self.setMaximumHeight(72)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    def set_cycle(
+    def set_state(
         self,
-        progress: int,
+        points: Sequence[RollPoint],
+        cluster_size: int,
         span: int,
-        colors: List[str],
         chance_label: str = "",
     ) -> None:
-        progress = max(0, min(progress, max(1, span)))
         span = max(1, span)
-        norm_colors = colors if len(colors) == span else (colors + ["#6c8cff"] * span)[:span]
+        cluster_size = max(0, min(cluster_size, span))
+        norm_points = list(points)
         changed = (
-            self._progress != progress
+            self._points != norm_points
+            or self._cluster_size != cluster_size
             or self._span != span
-            or self._colors != norm_colors
             or self._chance_label != chance_label
         )
-        self._progress = progress
+        self._points = norm_points
+        self._cluster_size = cluster_size
         self._span = span
-        self._colors = norm_colors
         self._chance_label = chance_label
         if changed:
             self.update()
@@ -58,37 +61,59 @@ class SegmentedRollBar(QWidget):
         h = self.height()
         radius = h / 2
 
-        # 背景槽
-        bg = QColor(255, 255, 255, 16)
+        bg_alpha = 28 if not self._flash else 48
+        bg = QColor(255, 255, 255, bg_alpha)
         painter.setPen(Qt.NoPen)
         painter.setBrush(bg)
         painter.drawRoundedRect(QRectF(0, 0, w, h), radius, radius)
 
-        span = self._span
-        gap = 2
-        seg_w = (w - gap * (span - 1)) / span if span > 0 else w
+        if self._points:
+            cluster_idx = set(largest_cluster_indices(self._points))
+            point_radius = min(w, h) * 0.16
 
-        for i in range(span):
-            x = i * (seg_w + gap)
-            color_hex = self._colors[i] if i < len(self._colors) else "#6c8cff"
-            base = QColor(color_hex)
-            filled = i < self._progress
-            if filled:
-                c = base
+            # 最大连通簇内的淡连线
+            cluster_points = [
+                (i, self._points[i]) for i in sorted(cluster_idx)
+            ]
+            if len(cluster_points) >= 2:
+                line_pen = QPen(QColor(255, 255, 255, 36))
+                line_pen.setWidthF(1.2)
+                painter.setPen(line_pen)
+                for ai in range(len(cluster_points)):
+                    _, pa = cluster_points[ai]
+                    ax = pa.x * w
+                    ay = pa.y * h
+                    for bi in range(ai + 1, len(cluster_points)):
+                        _, pb = cluster_points[bi]
+                        dx = pa.x - pb.x
+                        dy = pa.y - pb.y
+                        if dx * dx + dy * dy <= 0.24 * 0.24:
+                            painter.drawLine(
+                                QPointF(ax, ay),
+                                QPointF(pb.x * w, pb.y * h),
+                            )
+
+            painter.setPen(Qt.NoPen)
+            painter.setCompositionMode(QPainter.CompositionMode_Plus)
+            for i, pt in enumerate(self._points):
+                base = QColor(pt.color)
+                alpha = 170 if i in cluster_idx else 110
                 if self._flash:
-                    c = c.lighter(140)
-            else:
-                c = QColor(base)
-                c.setAlpha(40)
-            painter.setBrush(c)
-            painter.drawRoundedRect(QRectF(x, 0, seg_w, h), 3, 3)
+                    alpha = min(255, alpha + 40)
+                base.setAlpha(alpha)
+                painter.setBrush(base)
+                cx = pt.x * w
+                cy = pt.y * h
+                painter.drawEllipse(QPointF(cx, cy), point_radius, point_radius)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
         # 中央文字
-        painter.setPen(QPen(QColor("#cfd3e0")))
+        text_color = QColor("#e8ebf5" if self._flash else "#cfd3e0")
+        painter.setPen(QPen(text_color))
         font = QFont("Microsoft YaHei UI", 8)
         font.setBold(True)
         painter.setFont(font)
-        main_text = f"{self._progress}/{self._span}"
+        main_text = f"{self._cluster_size}/{self._span}"
         if self._chance_label:
             main_text = f"{main_text}  {self._chance_label}"
         painter.drawText(QRectF(0, 0, w, h), Qt.AlignCenter, main_text)

@@ -40,6 +40,7 @@ from .logging_setup import setup_logging
 from .models import AppState, Reward
 from .reward_system import (
     SHUFFLE_INTERVAL_SEC,
+    add_roll_point,
     ensure_roll_runtime,
     maybe_roll,
     reshuffle_roll_params,
@@ -270,6 +271,7 @@ class Application(QObject):
         if self._typing_in_app():
             return
         self.state.total_operations += 1
+        add_roll_point(self.state)
         reward = maybe_roll(self.state)
         if reward is not None:
             logger.debug("操作 #%d: 开奖 gold=%.1f diamond=%.1f",

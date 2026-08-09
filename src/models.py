@@ -251,11 +251,32 @@ class RollHistoryEntry:
 
 
 @dataclass
+class RollPoint:
+    """开奖画布上的一个落点（归一化坐标 + 颜色）。"""
+    x: float = 0.5
+    y: float = 0.5
+    color: str = "#6c8cff"
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "RollPoint":
+        return cls(
+            x=float(data.get("x", 0.5)),
+            y=float(data.get("y", 0.5)),
+            color=str(data.get("color", "#6c8cff")),
+        )
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+@dataclass
 class RollRuntime:
     """当前开奖周期与有效随机参数（内置机制，每 10 分钟重抽概率/范围）。"""
     next_roll_at: int = 10
     roll_span: int = 10
     segment_colors: List[str] = field(default_factory=list)
+    roll_points: List[RollPoint] = field(default_factory=list)
+    roll_points_backfilled: bool = False
     gold_chance: float = 0.35          # 金币掉落概率（与钻石独立）
     diamond_chance: float = 0.06       # 钻石掉落概率（与金币独立）
     gold_min: float = 0.1
@@ -275,6 +296,10 @@ class RollRuntime:
             next_roll_at=int(data.get("next_roll_at", 10)),
             roll_span=max(1, int(data.get("roll_span", 10))),
             segment_colors=list(data.get("segment_colors", [])),
+            roll_points=[
+                RollPoint.from_dict(p) for p in data.get("roll_points", [])
+            ],
+            roll_points_backfilled=bool(data.get("roll_points_backfilled", data.get("roll_points"))),
             gold_chance=gold_chance,
             diamond_chance=float(data.get("diamond_chance", 0.06)),
             gold_min=float(data.get("gold_min", 0.1)),
