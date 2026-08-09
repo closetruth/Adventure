@@ -29,6 +29,7 @@ from .reward_system import roll_progress
 from .storage import save_state
 from .task_manager import TaskManager
 from .ui_roll_bar import SegmentedRollBar
+from .ui_slot_machine import SlotMachineWidget
 from .ui_task_stats import TaskRewardStrip
 from .ui_text import (
     format_amount,
@@ -318,11 +319,14 @@ class FloatingWidget(QWidget):
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
         self.roll_bar = SegmentedRollBar()
+        self.slot_machine = SlotMachineWidget()
+        self.slot_machine.hide()
         self.roll_toast = QLabel("")
         self.roll_toast.setObjectName("RollToast")
         self.roll_toast.hide()
         bar_row.addWidget(cap)
         bar_row.addWidget(self.roll_bar)
+        bar_row.addWidget(self.slot_machine)
         bar_row.addWidget(self.roll_toast)
         global_lay.addLayout(bar_row)
 
@@ -1092,7 +1096,11 @@ class FloatingWidget(QWidget):
         self._update_roll_bar()
 
     def show_roll_result(self, reward: Reward) -> None:
-        """开奖结果轻量 Toast + 进度条闪动。"""
+        """老虎机转轮揭晓，结束后 Toast + 进度条闪动。"""
+        self.slot_machine.start_spin(reward, lambda: self._show_roll_toast(reward))
+
+    def _show_roll_toast(self, reward: Reward) -> None:
+        self.slot_machine.hide()
         if reward.is_empty():
             toast_kind, text, hide_ms = "miss", "未中", 1200
         elif reward.gold > 0 and reward.diamond > 0:
