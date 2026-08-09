@@ -252,7 +252,7 @@ class Application(QObject):
             self._inv_dialog.refresh()
 
     def _notify_subtask_claim(self, reward: Reward, *, title: str = "") -> None:
-        prefix = f"「{title}」" if title else "子目标"
+        prefix = f"「{title}」" if title else "目标"
         text = f"{prefix}已领取 {format_reward_gain(reward.gold, reward.diamond)}"
         if self.tray.isVisible():
             self.tray.showMessage("Adventure", text, QSystemTrayIcon.MessageIcon.Information, 2500)

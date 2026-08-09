@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List, Optional
+from typing import Iterator, List, Optional, Set, Tuple
 
 from .active_time import ActiveTimeTracker
 from .models import AppState, Reward, Subtask, Task, TaskStatus
@@ -21,11 +21,14 @@ class TaskManager:
         self.state = state
         self.power_monitor = power_monitor or PowerMonitor()
         self._active_time = ActiveTimeTracker()
+        self._subtask_expanded: dict[str, Set[str]] = {}
         for t in state.tasks:
             if t.subtasks:
                 t.sync_earned_from_subtasks()
             if t.status == TaskStatus.ACTIVE:
                 self._sync_current_subtask(t)
+                self.expand_all_subtasks(t)
+                self.sync_subtask_expand_to_focus(t)
 
     # ----- 查询 -----
     def all(self) -> List[Task]:
@@ -41,17 +44,109 @@ class TaskManager:
         return None
 
     def _get_subtask(self, task: Task, subtask_id: str) -> Optional[Subtask]:
-        for s in task.subtasks:
-            if s.id == subtask_id:
-                return s
-        return None
+        return task.find_subtask(subtask_id)
 
     def _sync_current_subtask(self, task: Task) -> None:
-        for s in task.subtasks:
-            if not s.done:
-                task.current_subtask_id = s.id
+        for leaf in task.iter_leaves():
+            if not leaf.done:
+                task.current_subtask_id = leaf.id
+                self.sync_subtask_expand_to_focus(task)
                 return
         task.current_subtask_id = None
+        self.sync_subtask_expand_to_focus(task)
+
+    # ----- 子目标展开（UI 状态，不持久化） -----
+    def subtask_container_ancestor_ids(
+        self,
+        task: Task,
+        subtask_id: str,
+    ) -> Set[str]:
+        """路径上所有分组祖先的 id（不含叶子自身）。"""
+        path_ids = task.subtask_path_ids(subtask_id)
+        ancestors: Set[str] = set()
+        for sid in path_ids[:-1]:
+            sub = task.find_subtask(sid)
+            if sub is not None and sub.is_container():
+                ancestors.add(sid)
+        return ancestors
+
+    def expanded_subtask_ids(self, task_id: str) -> Set[str]:
+        return set(self._subtask_expanded.get(task_id, set()))
+
+    def is_subtask_expanded(self, task_id: str, subtask_id: str) -> bool:
+        return subtask_id in self._subtask_expanded.get(task_id, set())
+
+    def sync_subtask_expand_to_focus(self, task: Task) -> None:
+        """确保聚焦路径上的分组已展开（不折叠其它已展开分组）。"""
+        if not task.current_subtask_id:
+            return
+        expanded = self._subtask_expanded.setdefault(task.id, set())
+        expanded |= self.subtask_container_ancestor_ids(
+            task,
+            task.current_subtask_id,
+        )
+
+    def expand_all_subtasks(self, task: Task) -> None:
+        """展开树上所有分组（默认全树可见）。"""
+        expanded: Set[str] = set()
+        for sub in task.iter_subtasks():
+            if sub.is_container():
+                expanded.add(sub.id)
+        self._subtask_expanded[task.id] = expanded
+
+    def toggle_subtask_expand(self, task_id: str, subtask_id: str) -> bool:
+        t = self.get(task_id)
+        if t is None:
+            return False
+        sub = self._get_subtask(t, subtask_id)
+        if sub is None or not sub.is_container():
+            return False
+        expanded = self._subtask_expanded.setdefault(task_id, set())
+        if subtask_id in expanded:
+            expanded.discard(subtask_id)
+        else:
+            expanded.add(subtask_id)
+        return True
+
+    def iter_visible_subtasks(self, task: Task) -> Iterator[Tuple[int, Subtask]]:
+        expanded = self.expanded_subtask_ids(task.id)
+
+        def walk(nodes: List[Subtask], depth: int) -> Iterator[Tuple[int, Subtask]]:
+            for node in nodes:
+                yield depth, node
+                if node.is_container() and node.id in expanded:
+                    yield from walk(node.children, depth + 1)
+
+        yield from walk(task.subtasks, 0)
+
+    def _prune_subtask_expanded(self, task: Task, subtask_id: str) -> None:
+        expanded = self._subtask_expanded.get(task.id)
+        if not expanded:
+            return
+        sub = self._get_subtask(task, subtask_id)
+        if sub is None:
+            return
+        remove_ids = {node.id for node in sub.iter_subtree()}
+        expanded -= remove_ids
+
+    def _remove_subtask(self, task: Task, subtask_id: str) -> bool:
+        for index, sub in enumerate(task.subtasks):
+            if sub.id == subtask_id:
+                task.subtasks.pop(index)
+                return True
+            if self._remove_subtask_from_node(sub, subtask_id):
+                return True
+        return False
+
+    @staticmethod
+    def _remove_subtask_from_node(parent: Subtask, subtask_id: str) -> bool:
+        for index, child in enumerate(parent.children):
+            if child.id == subtask_id:
+                parent.children.pop(index)
+                return True
+            if TaskManager._remove_subtask_from_node(child, subtask_id):
+                return True
+        return False
 
     def _completion_bonus(self) -> float:
         return float(self.state.settings.get("subtask_completion_bonus_gold", 0.5))
@@ -69,17 +164,17 @@ class TaskManager:
         """
         bonus = self._completion_bonus()
         changed = False
-        for sub in task.subtasks:
+        for sub in task.iter_subtasks():
             if sub.rewards_claimed or not sub.pending_rewards:
                 continue
-            if only_claimable and not sub.is_claimable():
+            if only_claimable and not sub.is_claimable() and not sub.can_claim_pending():
                 continue
             total = sub.pending_summary()
-            if sub.done:
+            if sub.done and sub.is_leaf():
                 total.gold += bonus
             self.state.inventory.add(total)
             sub.pending_rewards.clear()
-            if sub.done:
+            if sub.done or sub.is_container():
                 sub.rewards_claimed = True
             changed = True
         return changed
@@ -104,7 +199,13 @@ class TaskManager:
         if not t:
             return None
         sub = self._get_subtask(t, subtask_id)
-        if not sub or not sub.is_claimable():
+        if not sub:
+            return None
+        if sub.is_container():
+            if not sub.can_claim_pending():
+                return None
+            return sub.pending_summary()
+        if not sub.is_claimable():
             return None
         total = sub.pending_summary()
         total.gold += self._completion_bonus()
@@ -128,6 +229,8 @@ class TaskManager:
         self.state.tasks.insert(0, task)
         if status == TaskStatus.ACTIVE:
             self._sync_current_subtask(task)
+        else:
+            self._subtask_expanded[task.id] = set()
         logger.info("创建目标「%s」(id=%s, status=%s)", title, task.id, status.value)
         return task
 
@@ -149,6 +252,8 @@ class TaskManager:
             current.status = TaskStatus.PAUSED
         t.status = TaskStatus.ACTIVE
         self._sync_current_subtask(t)
+        self.expand_all_subtasks(t)
+        self.sync_subtask_expand_to_focus(t)
         logger.info("恢复目标「%s」(id=%s)", t.title, task_id)
         return t
 
@@ -192,6 +297,7 @@ class TaskManager:
         task_id: str,
         title: str,
         target_minutes: Optional[int] = None,
+        parent_subtask_id: Optional[str] = None,
     ) -> Optional[Subtask]:
         t = self.get(task_id)
         if not t or t.status == TaskStatus.COMPLETED:
@@ -203,10 +309,26 @@ class TaskManager:
             target_minutes = int(self.state.settings.get("subtask_default_target_minutes", 10))
         target_minutes = max(1, int(target_minutes))
         sub = Subtask(title=title, target_seconds=float(target_minutes * 60))
-        t.subtasks.append(sub)
-        if t.status == TaskStatus.ACTIVE and t.current_subtask_id is None:
-            self._sync_current_subtask(t)
-        logger.info("添加子目标「%s」(task_id=%s, target=%dmin)", title, task_id, target_minutes)
+        if parent_subtask_id:
+            parent = self._get_subtask(t, parent_subtask_id)
+            if parent is None:
+                return None
+            parent.children.append(sub)
+            self._subtask_expanded.setdefault(task_id, set()).add(parent_subtask_id)
+            if t.current_subtask_id == parent_subtask_id:
+                self._sync_current_subtask(t)
+        else:
+            t.subtasks.append(sub)
+            if t.status == TaskStatus.ACTIVE and t.current_subtask_id is None:
+                self._sync_current_subtask(t)
+        self.expand_all_subtasks(t)
+        logger.info(
+            "添加子目标「%s」(task_id=%s, parent=%s, target=%dmin)",
+            title,
+            task_id,
+            parent_subtask_id or "-",
+            target_minutes,
+        )
         return sub
 
     def confirm_manual_complete_subtask(self, task_id: str, subtask_id: str) -> bool:
@@ -233,15 +355,22 @@ class TaskManager:
         return t.can_complete_sub(sub)
 
     def claim_subtask_reward(self, task_id: str, subtask_id: str) -> Optional[Reward]:
-        """领取子任务奖励：pending + 完成固定奖 → 背包。"""
+        """领取子任务奖励：pending → 背包；叶子完成奖另加固定金。"""
         t = self.get(task_id)
         if not t:
             return None
         sub = self._get_subtask(t, subtask_id)
-        if not sub or not sub.is_claimable():
+        if not sub:
             return None
-        total = sub.pending_summary()
-        total.gold += self._completion_bonus()
+        if sub.is_container():
+            if not sub.can_claim_pending():
+                return None
+            total = sub.pending_summary()
+        else:
+            if not sub.is_claimable():
+                return None
+            total = sub.pending_summary()
+            total.gold += self._completion_bonus()
         self.state.inventory.add(total)
         sub.pending_rewards.clear()
         sub.rewards_claimed = True
@@ -249,15 +378,53 @@ class TaskManager:
                     sub.title, task_id, total.gold, total.diamond)
         return total
 
-    def focus_subtask(self, task_id: str, subtask_id: str) -> bool:
-        """将子目标设为 current（开始累计 ops/时长/奖励）。"""
+    def decompose_subtask(
+        self,
+        task_id: str,
+        subtask_id: str,
+        child_titles: List[str],
+    ) -> bool:
+        """将未完成叶子拆成分组 + 子项；进度/待领留在被拆节点上。"""
         t = self.get(task_id)
         if not t or t.status != TaskStatus.ACTIVE:
             return False
         sub = self._get_subtask(t, subtask_id)
-        if not sub or sub.done:
+        if sub is None or sub.done or not sub.is_leaf():
+            return False
+        titles = [(x or "").strip() for x in child_titles if (x or "").strip()]
+        if not titles:
+            return False
+        target_minutes = int(self.state.settings.get("subtask_default_target_minutes", 10))
+        target_seconds = float(max(1, target_minutes) * 60)
+        was_focused = t.current_subtask_id == subtask_id
+        first_child: Optional[Subtask] = None
+        for title in titles:
+            child = Subtask(title=title, target_seconds=target_seconds)
+            sub.children.append(child)
+            if first_child is None:
+                first_child = child
+        if was_focused and first_child is not None:
+            t.current_subtask_id = first_child.id
+        self.expand_all_subtasks(t)
+        self.sync_subtask_expand_to_focus(t)
+        logger.info(
+            "分解子目标「%s」→ %d 个子项 (task_id=%s)",
+            sub.title,
+            len(titles),
+            task_id,
+        )
+        return True
+
+    def focus_subtask(self, task_id: str, subtask_id: str) -> bool:
+        """将叶子子目标设为 current（开始累计 ops/时长/奖励）。"""
+        t = self.get(task_id)
+        if not t or t.status != TaskStatus.ACTIVE:
+            return False
+        sub = self._get_subtask(t, subtask_id)
+        if not sub or sub.done or not sub.is_leaf():
             return False
         t.current_subtask_id = subtask_id
+        self.sync_subtask_expand_to_focus(t)
         logger.debug("聚焦子目标「%s」(task_id=%s)", sub.title, task_id)
         return True
 
@@ -270,6 +437,7 @@ class TaskManager:
             return False
         logger.debug("暂停子目标聚焦 (task_id=%s)", task_id)
         t.current_subtask_id = None
+        self.sync_subtask_expand_to_focus(t)
         return True
 
     def complete_and_claim_subtask(
@@ -282,7 +450,7 @@ class TaskManager:
         sub = self._get_subtask(t, subtask_id)
         if not sub:
             return None
-        if sub.is_claimable():
+        if sub.is_claimable() or sub.can_claim_pending():
             return self.claim_subtask_reward(task_id, subtask_id)
         if not sub.done and t.can_complete_sub(sub):
             self._mark_subtask_done(t, sub)
@@ -293,15 +461,16 @@ class TaskManager:
         t = self.get(task_id)
         if not t or t.status == TaskStatus.COMPLETED:
             return False
-        before = len(t.subtasks)
         sub = self._get_subtask(t, subtask_id)
-        t.subtasks = [s for s in t.subtasks if s.id != subtask_id]
-        if len(t.subtasks) != before:
-            logger.info("删除子目标「%s」(task_id=%s)", sub.title if sub else "?", task_id)
-            self._sync_current_subtask(t)
-            self._sync_task_earned_from_subtasks(t)
-            return True
-        return False
+        if sub is None:
+            return False
+        if not self._remove_subtask(t, subtask_id):
+            return False
+        self._prune_subtask_expanded(t, subtask_id)
+        logger.info("删除子目标「%s」(task_id=%s)", sub.title, task_id)
+        self._sync_current_subtask(t)
+        self._sync_task_earned_from_subtasks(t)
+        return True
 
     def tick_active_time(self) -> bool:
         """每秒调用：累加父/子任务时长（关屏不计，不自动完成子目标）。"""
