@@ -28,7 +28,7 @@ from .models import AppState, Reward, Subtask, Task, TaskStatus
 from .reward_system import roll_progress
 from .storage import save_state
 from .task_manager import TaskManager
-from .ui_roll_bar import SegmentedRollBar
+from .ui_roll_bar import RollDropCanvas
 from .ui_task_stats import TaskRewardStrip
 from .ui_text import (
     format_amount,
@@ -317,7 +317,7 @@ class FloatingWidget(QWidget):
         bar_row.setSpacing(3)
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
-        self.roll_bar = SegmentedRollBar()
+        self.roll_bar = RollDropCanvas()
         self.roll_toast = QLabel("")
         self.roll_toast.setObjectName("RollToast")
         self.roll_toast.hide()
@@ -1076,14 +1076,14 @@ class FloatingWidget(QWidget):
 
     def _update_roll_bar(self) -> None:
         rt = self.state.roll_runtime
-        progress, span = roll_progress(self.state)
+        cluster_size, span = roll_progress(self.state)
         chance_label = (
             f"金 {rt.gold_chance:.0%}  钻 {rt.diamond_chance:.0%}"
         )
-        self.roll_bar.set_cycle(
-            progress,
+        self.roll_bar.set_state(
+            rt.roll_points,
+            cluster_size,
             span,
-            rt.segment_colors,
             chance_label=chance_label,
         )
 
