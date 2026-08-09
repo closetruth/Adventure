@@ -7,7 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class Reward:
 
 @dataclass
 class Subtask:
-    """目标下的子项：时长达标后完成，点击领取才进背包。"""
+    """目标下的子项（可嵌套）：叶子节点时长达标后完成，点击领取才进背包。"""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     title: str = ""
     target_seconds: float = 600.0
@@ -45,6 +45,27 @@ class Subtask:
     rewards_claimed: bool = False
     created_at: Optional[float] = field(default_factory=time.time)
     completed_at: Optional[float] = None
+    children: List["Subtask"] = field(default_factory=list)
+
+    def is_leaf(self) -> bool:
+        return not self.children
+
+    def is_container(self) -> bool:
+        return bool(self.children)
+
+    def iter_subtree(self) -> Iterator["Subtask"]:
+        yield self
+        for child in self.children:
+            yield from child.iter_subtree()
+
+    def find_by_id(self, subtask_id: str) -> Optional["Subtask"]:
+        if self.id == subtask_id:
+            return self
+        for child in self.children:
+            found = child.find_by_id(subtask_id)
+            if found is not None:
+                return found
+        return None
 
     def pending_summary(self) -> Reward:
         total = Reward()
@@ -54,7 +75,11 @@ class Subtask:
         return total
 
     def is_claimable(self) -> bool:
-        return self.done and not self.rewards_claimed
+        return self.is_leaf() and self.done and not self.rewards_claimed
+
+    def can_claim_pending(self) -> bool:
+        """有 pending 且未领取（含分解后分组上的残留）。"""
+        return bool(self.pending_rewards) and not self.rewards_claimed
 
     def time_target_met(self) -> bool:
         return self.active_seconds >= self.target_seconds
@@ -69,6 +94,7 @@ class Subtask:
             logger.debug("Subtask.from_dict: 旧版 target_ops 迁移 → target_seconds=%.0f", target_seconds)
         else:
             target_seconds = 600.0
+        children = [cls.from_dict(c) for c in data.get("children", [])]
         return cls(
             id=data.get("id", uuid.uuid4().hex[:8]),
             title=data.get("title", ""),
@@ -82,6 +108,7 @@ class Subtask:
             rewards_claimed=bool(data.get("rewards_claimed", False)),
             created_at=data.get("created_at"),
             completed_at=data.get("completed_at"),
+            children=children,
         )
 
     def to_dict(self) -> Dict:
@@ -126,17 +153,97 @@ class Task:
             total.diamond += r.diamond
         return total
 
+    def find_subtask(self, subtask_id: str) -> Optional[Subtask]:
+        for root in self.subtasks:
+            if root.id == subtask_id:
+                return root
+            found = root.find_by_id(subtask_id)
+            if found is not None:
+                return found
+        return None
+
+    def iter_subtasks(self) -> Iterator[Subtask]:
+        for root in self.subtasks:
+            yield from root.iter_subtree()
+
+    def iter_leaves(self) -> Iterator[Subtask]:
+        for sub in self.iter_subtasks():
+            if sub.is_leaf():
+                yield sub
+
+    def flatten_subtasks(self) -> List[Tuple[int, Subtask]]:
+        """先序遍历，返回 (深度, 子目标)。"""
+        flat: List[Tuple[int, Subtask]] = []
+
+        def walk(nodes: List[Subtask], depth: int) -> None:
+            for node in nodes:
+                flat.append((depth, node))
+                walk(node.children, depth + 1)
+
+        walk(self.subtasks, 0)
+        return flat
+
+    def subtask_path_ids(self, subtask_id: str) -> List[str]:
+        """从根到目标的 id 链（含目标自身）。"""
+        path: List[str] = []
+
+        def walk(nodes: List[Subtask]) -> bool:
+            for node in nodes:
+                path.append(node.id)
+                if node.id == subtask_id:
+                    return True
+                if walk(node.children):
+                    return True
+                path.pop()
+            return False
+
+        if walk(self.subtasks):
+            return path
+        return []
+
+    def iter_visible_subtasks(
+        self,
+        expanded_ids: set[str],
+    ) -> Iterator[Tuple[int, Subtask]]:
+        """按展开状态遍历可见子目标（顶层始终可见）。"""
+
+        def walk(nodes: List[Subtask], depth: int) -> Iterator[Tuple[int, Subtask]]:
+            for node in nodes:
+                yield depth, node
+                if node.is_container() and node.id in expanded_ids:
+                    yield from walk(node.children, depth + 1)
+
+        yield from walk(self.subtasks, 0)
+
+    def subtask_path_titles(self, subtask_id: str) -> List[str]:
+        path: List[str] = []
+
+        def walk(nodes: List[Subtask]) -> bool:
+            for node in nodes:
+                path.append(node.title)
+                if node.id == subtask_id:
+                    return True
+                if walk(node.children):
+                    return True
+                path.pop()
+            return False
+
+        if walk(self.subtasks):
+            return path
+        return []
+
     def subtask_progress(self) -> tuple[int, int]:
-        """返回 (已完成数, 总数)。"""
-        total = len(self.subtasks)
-        done = sum(1 for s in self.subtasks if s.done)
+        """返回叶子子目标的 (已完成数, 总数)。"""
+        leaves = list(self.iter_leaves())
+        total = len(leaves)
+        done = sum(1 for s in leaves if s.done)
         return done, total
 
     def earned_totals(self) -> tuple[float, float]:
-        """展示用累计奖励：有子目标时为各子目标之和，否则用父目标字段。"""
+        """展示用累计奖励：有子目标时为各节点之和，否则用父目标字段。"""
         if self.subtasks:
-            gold = sum(s.earned_gold for s in self.subtasks)
-            diamond = sum(s.earned_diamond for s in self.subtasks)
+            gold = sum(s.earned_gold for s in self.iter_subtasks())
+            diamond = sum(s.earned_diamond for s in self.iter_subtasks())
             return gold, diamond
         return self.earned_gold, self.earned_diamond
 
@@ -149,17 +256,17 @@ class Task:
         self.earned_diamond = diamond
 
     def current_subtask(self) -> Optional[Subtask]:
-        """当前聚焦的子目标（仅 current_subtask_id 指向的未完成项）。"""
+        """当前聚焦的叶子子目标（仅 current_subtask_id 指向的未完成叶子）。"""
         if not self.current_subtask_id:
             return None
-        for s in self.subtasks:
-            if s.id == self.current_subtask_id and not s.done:
-                return s
-        return None
+        sub = self.find_subtask(self.current_subtask_id)
+        if sub is None or sub.done or not sub.is_leaf():
+            return None
+        return sub
 
     def has_unclaimed_subtasks(self) -> bool:
         """子目标仍有 pending 或未领取的完成奖励时，不可完成父目标。"""
-        for s in self.subtasks:
+        for s in self.iter_subtasks():
             if s.rewards_claimed:
                 continue
             if s.is_claimable() or s.pending_rewards:
@@ -173,7 +280,7 @@ class Task:
         return sub.pending_summary()
 
     def can_complete_sub(self, sub: Subtask) -> bool:
-        return sub.time_target_met()
+        return sub.is_leaf() and sub.time_target_met()
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Task":
@@ -389,25 +496,37 @@ def validate_state_invariants(state: AppState) -> Optional[str]:
             return f"目标「{t.title}」active_seconds 非法"
 
         sub_ids: set[str] = set()
-        for s in t.subtasks:
-            if not s.id:
-                return "存在空子目标 id"
-            if s.id in sub_ids:
-                return f"子目标 id 重复: {s.id}"
-            sub_ids.add(s.id)
-            if s.operations < 0:
-                return f"子目标「{s.title}」operations 为负"
-            if not math.isfinite(s.target_seconds) or s.target_seconds <= 0:
-                return f"子目标「{s.title}」target_seconds 非法"
-            if not math.isfinite(s.active_seconds) or s.active_seconds < 0:
-                return f"子目标「{s.title}」active_seconds 非法"
+
+        def check_subtree(nodes: List[Subtask]) -> Optional[str]:
+            for s in nodes:
+                if not s.id:
+                    return "存在空子目标 id"
+                if s.id in sub_ids:
+                    return f"子目标 id 重复: {s.id}"
+                sub_ids.add(s.id)
+                if s.operations < 0:
+                    return f"子目标「{s.title}」operations 为负"
+                if not math.isfinite(s.target_seconds) or s.target_seconds <= 0:
+                    return f"子目标「{s.title}」target_seconds 非法"
+                if not math.isfinite(s.active_seconds) or s.active_seconds < 0:
+                    return f"子目标「{s.title}」active_seconds 非法"
+                err = check_subtree(s.children)
+                if err:
+                    return err
+            return None
+
+        err = check_subtree(t.subtasks)
+        if err:
+            return err
 
         if t.current_subtask_id is not None:
-            sub = next((s for s in t.subtasks if s.id == t.current_subtask_id), None)
+            sub = t.find_subtask(t.current_subtask_id)
             if sub is None:
                 return f"目标「{t.title}」current_subtask_id 指向不存在的子目标"
             if sub.done:
                 return f"目标「{t.title}」current_subtask_id 指向已完成的子目标"
+            if not sub.is_leaf():
+                return f"目标「{t.title}」current_subtask_id 指向非叶子子目标"
 
     if active_count > 1:
         return f"存在 {active_count} 个进行中目标（最多 1 个）"
