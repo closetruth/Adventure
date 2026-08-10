@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
@@ -136,6 +136,70 @@ QPushButton#TreeActionBtn[primary="true"] {
 }
 """
 
+GOAL_TREE_PANEL_QSS = """
+QWidget#GoalDetailPanel {
+    background-color: rgba(0, 0, 0, 0.2);
+    border: 1px solid #4a4e5c;
+    border-radius: 6px;
+    margin: 4px 0;
+}
+QLabel#GoalDetailTitle { font-size: 13px; font-weight: 700; color: #ffffff; }
+QLabel#GoalDetailStats { font-size: 12px; color: #e8ecf4; }
+QLabel#SubGoalList {
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.35;
+    background: transparent;
+}
+QLabel#SubGoalHint {
+    color: #f0c060;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+QLineEdit#SubGoalInput {
+    background-color: #1a1b24;
+    color: #d8dce8;
+    border: 1px solid #3a3d4a;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+QSpinBox#SubtaskMinSpin {
+    background-color: #1a1b24;
+    color: #d8dce8;
+    border: 1px solid #3a3d4a;
+    border-radius: 6px;
+    padding: 3px 4px;
+    font-size: 11px;
+    min-height: 22px;
+}
+QSpinBox#SubtaskMinSpin:focus { border-color: #4a6ad0; }
+QPushButton#SubAddBtn {
+    font-size: 12px;
+    padding: 4px 10px;
+    background-color: #252833;
+    border: 1px solid #404558;
+    color: #b8c8e8;
+}
+QPushButton#SubAddBtn:hover { background-color: #303448; }
+QPushButton#GoalPauseBtn, QPushButton#GoalResumeBtn {
+    background-color: #252833;
+    border: 1px solid #404558;
+    color: #a8c4ff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    min-height: 22px;
+    border-radius: 5px;
+}
+QPushButton#GoalPauseBtn:hover, QPushButton#GoalResumeBtn:hover {
+    background-color: #303448;
+    border-color: #5a6a90;
+}
+"""
+
 # 兼容旧引用
 TREE_DETAIL_QSS = TREE_QSS
 
@@ -223,10 +287,12 @@ class SubtaskActionCallbacks:
     """子目标行尾操作回调。"""
 
     on_claim: Optional[Callable[[], None]] = None
+    on_focus: Optional[Callable[[], None]] = None
     on_pause: Optional[Callable[[], None]] = None
     on_complete: Optional[Callable[[], None]] = None
+    on_decompose: Optional[Callable[[], None]] = None
+    on_delete: Optional[Callable[[], None]] = None
     on_add_child: Optional[Callable[[], None]] = None
-    on_more: Optional[Callable[[QPoint], None]] = None
 
 
 def _make_action_btn(
@@ -234,12 +300,13 @@ def _make_action_btn(
     *,
     tooltip: str = "",
     primary: bool = False,
+    width: int = 20,
     parent: QWidget | None = None,
 ) -> QPushButton:
     btn = QPushButton(text, parent)
     btn.setObjectName("TreeActionBtn")
     btn.setCursor(Qt.PointingHandCursor)
-    btn.setFixedSize(20, 20)
+    btn.setFixedSize(width, 20)
     if primary:
         btn.setProperty("primary", True)
     if tooltip:
@@ -268,9 +335,9 @@ def build_subtask_action_buttons(
 
     is_current = sub.id == current_id and not sub.done
 
-    if sub.can_claim_pending() or sub.is_claimable():
+    if sub.is_leaf() and (sub.can_claim_pending() or sub.is_claimable()):
         if callbacks.on_claim is not None:
-            btn = _make_action_btn("↓", tooltip="领取", primary=True, parent=wrap)
+            btn = _make_action_btn("↓", tooltip="领取奖励", primary=True, parent=wrap)
             btn.clicked.connect(callbacks.on_claim)
             lay.addWidget(btn)
 
@@ -280,10 +347,18 @@ def build_subtask_action_buttons(
                 btn = _make_action_btn("||", tooltip="暂停聚焦", parent=wrap)
                 btn.clicked.connect(callbacks.on_pause)
                 lay.addWidget(btn)
-            if sub.time_target_met() and callbacks.on_complete is not None:
-                btn = _make_action_btn("v", tooltip="完成", parent=wrap)
-                btn.clicked.connect(callbacks.on_complete)
-                lay.addWidget(btn)
+        elif callbacks.on_focus is not None:
+            btn = _make_action_btn("▶", tooltip="开始聚焦", parent=wrap)
+            btn.clicked.connect(callbacks.on_focus)
+            lay.addWidget(btn)
+        if sub.time_target_met() and callbacks.on_complete is not None:
+            btn = _make_action_btn("✓", tooltip="完成", parent=wrap)
+            btn.clicked.connect(callbacks.on_complete)
+            lay.addWidget(btn)
+        if callbacks.on_decompose is not None:
+            btn = _make_action_btn("拆", tooltip="分解目标", width=22, parent=wrap)
+            btn.clicked.connect(callbacks.on_decompose)
+            lay.addWidget(btn)
 
     if sub.is_container() and not sub.is_claimable():
         if not (sub.done and sub.rewards_claimed) and callbacks.on_add_child is not None:
@@ -291,11 +366,9 @@ def build_subtask_action_buttons(
             btn.clicked.connect(callbacks.on_add_child)
             lay.addWidget(btn)
 
-    if callbacks.on_more is not None and not (sub.done and sub.rewards_claimed):
-        btn = _make_action_btn("...", tooltip="更多", parent=wrap)
-        btn.clicked.connect(
-            lambda _c=False, b=btn: callbacks.on_more(b.mapToGlobal(QPoint(0, b.height())))
-        )
+    if not (sub.done and sub.rewards_claimed) and callbacks.on_delete is not None:
+        btn = _make_action_btn("×", tooltip="删除", parent=wrap)
+        btn.clicked.connect(callbacks.on_delete)
         lay.addWidget(btn)
 
     wrap.setVisible(False)
@@ -365,9 +438,3 @@ class TreeRow(QWidget):
             self.selected.emit()
             self.activated.emit()
         super().mouseDoubleClickEvent(event)
-
-    def contextMenuEvent(self, event) -> None:
-        if hasattr(self, "_show_context_menu") and callable(self._show_context_menu):
-            self._show_context_menu(event.globalPos())
-        else:
-            super().contextMenuEvent(event)

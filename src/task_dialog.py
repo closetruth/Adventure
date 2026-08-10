@@ -1,7 +1,6 @@
 """目标管理对话框：创建 / 暂停 / 恢复 / 完成 / 删除目标。"""
 from __future__ import annotations
 
-import time
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -9,41 +8,23 @@ from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
-    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from .models import AppState, Subtask, Task, TaskStatus
+from .models import AppState, Task, TaskStatus
 from .task_manager import TaskManager
+from .ui_goal_tree_panel import GoalTreePanel
 from .ui_styles import DARK_BASE_QSS
-from .ui_task_tree import (
-    TREE_DETAIL_QSS,
-    TREE_INDENT_PX,
-    SubtaskActionCallbacks,
-    TreeRow,
-    apply_goal_root_row_state,
-    build_subtask_action_buttons,
-    make_goal_status_badge,
-)
-from .ui_text import (
-    format_duration,
-    format_goal_root_line_html,
-    format_reward_gain,
-    format_tree_node_html,
-)
-
-
-SUBTASK_INDENT_PX = TREE_INDENT_PX
+from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_DETAIL_QSS
+from .ui_text import format_duration, format_reward_gain
 
 DIALOG_STYLESHEET = DARK_BASE_QSS + """
 QTabWidget::pane {
@@ -67,45 +48,6 @@ QTabBar::tab:selected {
     border: 1px solid #3a3f52;
 }
 QTabBar::tab:hover:!selected { color: #c8ceda; background: #1e1f28; }
-QLineEdit#SubtaskInput { padding: 6px 8px; font-size: 12px; }
-QSpinBox#SubtaskOps { padding: 4px 6px; font-size: 12px; }
-QPushButton#SubtaskClaim {
-    background-color: #3a5cff;
-    border-color: #3a5cff;
-    padding: 4px 12px;
-    font-size: 12px;
-}
-QPushButton#SubtaskClaim:hover { background-color: #4d6dff; }
-QPushButton#SubtaskDel {
-    background: #252833;
-    border: 1px solid #503838;
-    color: #a87070;
-    padding: 2px 8px;
-    min-width: 24px;
-    font-size: 14px;
-    border-radius: 6px;
-}
-QPushButton#SubtaskDel:hover { color: #ffb0b0; background: #302525; }
-QPushButton#SubtaskFold {
-    background: #252833;
-    border: 1px solid #404558;
-    color: #c8ceda;
-    padding: 2px 6px;
-    min-width: 24px;
-    font-size: 12px;
-    font-weight: 700;
-    border-radius: 6px;
-}
-QPushButton#SubtaskFold:hover { background: #303448; }
-QCheckBox#SubtaskCheck { spacing: 0; }
-QCheckBox#SubtaskCheck::indicator {
-    width: 16px; height: 16px; border-radius: 4px;
-    border: 1px solid #4a5068; background: #12141a;
-}
-QCheckBox#SubtaskCheck::indicator:checked {
-    background: #3a5cff; border-color: #3a5cff;
-}
-QCheckBox#SubtaskCheck:disabled::indicator { border-color: #333848; background: #1a1b24; }
 QScrollArea { border: none; background: transparent; }
 QScrollArea > QWidget > QWidget { background: transparent; }
 QFrame#Card {
@@ -122,41 +64,15 @@ QFrame#CreateCard {
     border: 1px solid #2a2d38;
     border-radius: 12px;
 }
-QFrame#SubtaskRow {
-    background-color: #16161e;
-    border: 1px solid #2a2d38;
-    border-radius: 8px;
-}
-QFrame#SubtaskRow[nested="true"] {
-    border-left: 3px solid #3a4a68;
-    background-color: #14161e;
-}
-QFrame#SubtaskRow[current="true"] {
-    background-color: #141c30;
-    border-color: #3a5080;
-}
-QFrame#SubtaskRow[claimable="true"] {
-    background-color: #1c1810;
-    border-color: #6a5020;
-}
-QFrame#SubtaskRow[done="true"] { background-color: #16161e; border-color: #252833; }
 QFrame#Divider { background-color: #2a2d38; max-height: 1px; min-height: 1px; border: none; }
 QLabel#TaskTitle { font-size: 16px; font-weight: 700; color: #f0f2f8; }
 QLabel#SectionTitle {
     font-size: 12px; font-weight: 700; color: #8b93a8;
     padding-bottom: 2px;
 }
-QLabel#SubtaskTitle { font-size: 13px; font-weight: 600; color: #c8ceda; }
-QLabel#SubtaskTitle[current="true"] { color: #7eb4ff; }
-QLabel#SubtaskTitle[claimable="true"] { color: #f0c040; }
-QLabel#SubtaskTitle[done="true"] { color: #6e7588; text-decoration: line-through; }
-QLabel#SubtaskMeta { font-size: 11px; color: #6e7588; line-height: 1.35; }
-QLabel#SubtaskMark { font-size: 13px; font-weight: 700; min-width: 14px; }
 QLabel#Note { color: #9aa0b4; font-size: 12px; line-height: 1.4; }
-QLabel#Meta { color: #8b93a8; font-size: 12px; }
-QLabel#CreatedMeta { color: #6e7588; font-size: 11px; }
 QLabel#EmptyHint { color: #6e7588; font-size: 13px; padding: 40px 20px; }
-""" + TREE_DETAIL_QSS
+""" + TREE_DETAIL_QSS + GOAL_TREE_PANEL_QSS
 
 
 def _make_divider() -> QFrame:
@@ -183,298 +99,28 @@ class TaskCard(QFrame):
         task: Task,
         *,
         manager: TaskManager,
-        default_target_minutes: int = 10,
+        state: AppState,
+        selected_subtask_id: str = "",
     ):
         super().__init__()
         self.task = task
         self.manager = manager
-        self._default_target_minutes = max(1, default_target_minutes)
+        self.state = state
         self.setObjectName("Card")
         self.setProperty("active", task.status == TaskStatus.ACTIVE)
-        self._subtask_input: Optional[QLineEdit] = None
-        self._subtask_minutes_spin: Optional[QSpinBox] = None
-        self._sub_add_parent_id: Optional[str] = None
-        self._selected_subtask_id: str = ""
+        self._tree_panel: Optional[GoalTreePanel] = None
         self._build()
+        if selected_subtask_id:
+            self.set_selected_subtask_id(selected_subtask_id)
 
-    def _editable(self) -> bool:
-        return self.task.status != TaskStatus.COMPLETED
+    def selected_subtask_id(self) -> str:
+        if self._tree_panel is None:
+            return ""
+        return self._tree_panel.selected_subtask_id()
 
-    def _on_tree_select(
-        self,
-        subtask_id: str,
-        *,
-        sub: Subtask | None = None,
-        editable: bool = False,
-    ) -> None:
-        self._selected_subtask_id = subtask_id
-        if (
-            editable
-            and sub is not None
-            and sub.is_leaf()
-            and not sub.done
-            and not sub.rewards_claimed
-        ):
-            self.action.emit(self.task.id, "subtask_focus", sub.id)
-
-    def _show_subtask_context_menu(self, sub: Subtask, global_pos) -> None:
-        if not self._editable():
-            return
-        menu = QMenu(self)
-        current_id = self.task.current_subtask_id
-
-        if sub.is_leaf() and not sub.done and not sub.rewards_claimed:
-            if sub.id == current_id:
-                menu.addAction("暂停聚焦", lambda: self.action.emit(
-                    self.task.id, "subtask_pause", sub.id,
-                ))
-            else:
-                menu.addAction("开始聚焦", lambda: self.action.emit(
-                    self.task.id, "subtask_focus", sub.id,
-                ))
-            if sub.time_target_met():
-                menu.addAction("完成", lambda: self.action.emit(
-                    self.task.id, "subtask_confirm_done", sub.id,
-                ))
-            menu.addAction("分解…", lambda: self._prompt_decompose(sub.id))
-            menu.addSeparator()
-
-        if sub.can_claim_pending() or sub.is_claimable():
-            menu.addAction("领取", lambda: self.action.emit(
-                self.task.id, "subtask_claim", sub.id,
-            ))
-            menu.addSeparator()
-
-        if not sub.is_claimable() and not (sub.done and sub.rewards_claimed):
-            menu.addAction("添加子项", lambda: self._set_sub_add_parent(sub.id))
-
-        if not (sub.done and sub.rewards_claimed):
-            menu.addAction("删除", lambda: self.action.emit(
-                self.task.id, "subtask_delete", sub.id,
-            ))
-
-        if not menu.isEmpty():
-            menu.exec(global_pos)
-
-    def _prompt_decompose(self, subtask_id: str) -> None:
-        text, ok = QInputDialog.getText(
-            self,
-            "分解目标",
-            "子项名称（多个用逗号分隔）：",
-            text="子项1, 子项2",
-        )
-        if not ok:
-            return
-        titles = [p.strip() for p in text.replace("，", ",").split(",") if p.strip()]
-        if not titles:
-            return
-        self.action.emit(
-            self.task.id,
-            "subtask_decompose",
-            f"{subtask_id}|{','.join(titles)}",
-        )
-
-    def _append_tree_node_row(
-        self,
-        parent_layout: QVBoxLayout,
-        sub: Subtask,
-        *,
-        depth: int,
-        editable: bool,
-        current_id: Optional[str],
-    ) -> None:
-        is_current = (
-            sub.id == current_id
-            and self.task.status == TaskStatus.ACTIVE
-            and not sub.done
-        )
-        selected = sub.id == self._selected_subtask_id
-        row = TreeRow()
-        row.setObjectName("TreeNodeRow")
-        row.setCursor(Qt.PointingHandCursor)
-        if depth > 0:
-            row.setProperty("nested", True)
-        if selected:
-            row.setProperty("selected", True)
-        if is_current:
-            row.setProperty("current", True)
-
-        row_lay = QHBoxLayout(row)
-        row_lay.setContentsMargins(8 + depth * SUBTASK_INDENT_PX, 4, 8, 4)
-        row_lay.setSpacing(4)
-
-        expanded = (
-            self.manager.is_subtask_expanded(self.task.id, sub.id)
-            if sub.is_container()
-            else True
-        )
-
-        if sub.is_container() and editable:
-            btn_fold = QPushButton("v" if expanded else ">")
-            btn_fold.setObjectName("TreeFoldBtn")
-            btn_fold.setFixedWidth(18)
-            btn_fold.clicked.connect(
-                lambda _c=False, sid=sub.id: self.action.emit(
-                    self.task.id, "subtask_toggle_fold", sid,
-                )
-            )
-            row_lay.addWidget(btn_fold, 0, Qt.AlignVCenter)
-        elif sub.is_container():
-            mark = QLabel("v" if expanded else ">")
-            mark.setFixedWidth(18)
-            row_lay.addWidget(mark, 0, Qt.AlignVCenter)
-
-        line = QLabel(
-            format_tree_node_html(
-                sub,
-                selected=selected,
-                is_current=is_current,
-                expanded=expanded,
-                show_stats=selected or is_current,
-            )
-        )
-        line.setObjectName("SubtaskTitle")
-        line.setTextFormat(Qt.RichText)
-        row_lay.addWidget(line, 1)
-
-        callbacks = SubtaskActionCallbacks(
-            on_claim=lambda: self.action.emit(self.task.id, "subtask_claim", sub.id),
-            on_pause=lambda: self.action.emit(self.task.id, "subtask_pause", sub.id),
-            on_complete=lambda: self.action.emit(
-                self.task.id, "subtask_confirm_done", sub.id,
-            ),
-            on_add_child=lambda: self._set_sub_add_parent(sub.id),
-            on_more=lambda pos, s=sub: self._show_subtask_context_menu(s, pos),
-        )
-        actions = build_subtask_action_buttons(
-            sub,
-            editable=editable,
-            current_id=current_id,
-            callbacks=callbacks,
-            parent=row,
-        )
-        row.set_actions_widget(actions)
-        row_lay.addWidget(actions, 0, Qt.AlignVCenter)
-
-        row.set_row_selected(selected)
-        row.selected.connect(
-            lambda s=sub, e=editable: self._on_tree_select(s.id, sub=s, editable=e)
-        )
-        row._show_context_menu = lambda pos, s=sub: self._show_subtask_context_menu(s, pos)
-        row.style().unpolish(row)
-        row.style().polish(row)
-        parent_layout.addWidget(row)
-
-    def _append_goal_root_row(self, parent_layout: QVBoxLayout) -> None:
-        is_running = self.task.status == TaskStatus.ACTIVE
-        row = TreeRow()
-        row.setObjectName("GoalRootRow")
-        row.setCursor(Qt.PointingHandCursor)
-        apply_goal_root_row_state(row, is_running=is_running)
-        if self._selected_subtask_id == "":
-            row.setProperty("selected", True)
-        row_lay = QHBoxLayout(row)
-        row_lay.setContentsMargins(12, 8, 10, 8)
-        row_lay.setSpacing(8)
-
-        title = QLabel(
-            format_goal_root_line_html(
-                self.task,
-                selected=self._selected_subtask_id == "",
-                is_running=is_running,
-                muted=self.task.status == TaskStatus.PAUSED,
-            )
-        )
-        title.setObjectName("TaskTitle")
-        title.setWordWrap(True)
-        title.setTextFormat(Qt.RichText)
-        row_lay.addWidget(title, 1)
-        row_lay.addWidget(make_goal_status_badge(self.task.status), 0, Qt.AlignTop)
-        row.selected.connect(lambda: self._on_tree_select("", editable=False))
-        row.set_row_selected(self._selected_subtask_id == "")
-        row.style().unpolish(row)
-        row.style().polish(row)
-        parent_layout.addWidget(row)
-
-    def _build_task_tree(self, parent: QVBoxLayout) -> None:
-        editable = self._editable()
-        current_id = self.task.current_subtask_id
-
-        tree_layout = QVBoxLayout()
-        tree_layout.setSpacing(4)
-        tree_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._append_goal_root_row(tree_layout)
-
-        if not self.task.subtasks:
-            hint = QLabel("添加目标后开始累计奖励")
-            hint.setObjectName("Note")
-            hint.setWordWrap(True)
-            tree_layout.addWidget(hint)
-        else:
-            for depth, sub in self.manager.iter_visible_subtasks(self.task):
-                self._append_tree_node_row(
-                    tree_layout,
-                    sub,
-                    depth=depth + 1,
-                    editable=editable,
-                    current_id=current_id,
-                )
-
-        if tree_layout.count():
-            parent.addLayout(tree_layout)
-
-        if editable:
-            add_row = QHBoxLayout()
-            add_row.setSpacing(6)
-            inp = QLineEdit()
-            inp.setObjectName("SubtaskInput")
-            inp.setPlaceholderText("新目标标题…")
-            inp.returnPressed.connect(self._emit_subtask_add)
-            self._subtask_input = inp
-            add_row.addWidget(inp, 1)
-            min_spin = QSpinBox()
-            min_spin.setObjectName("SubtaskOps")
-            min_spin.setRange(1, 999)
-            min_spin.setValue(self._default_target_minutes)
-            min_spin.setPrefix("目标 ")
-            min_spin.setSuffix(" 分钟")
-            min_spin.setToolTip("完成所需时长")
-            self._subtask_minutes_spin = min_spin
-            add_row.addWidget(min_spin)
-            btn_add = QPushButton("添加")
-            btn_add.setObjectName("Primary")
-            btn_add.clicked.connect(self._emit_subtask_add)
-            add_row.addWidget(btn_add)
-            parent.addLayout(add_row)
-
-    def _set_sub_add_parent(self, parent_subtask_id: str) -> None:
-        self._sub_add_parent_id = parent_subtask_id
-        self._selected_subtask_id = parent_subtask_id
-        if self._subtask_input is None:
-            return
-        parent = self.task.find_subtask(parent_subtask_id)
-        if parent is not None:
-            self._subtask_input.setPlaceholderText(f"添加到「{parent.title}」下…")
-        self._subtask_input.setFocus()
-
-    def _emit_subtask_add(self) -> None:
-        if self._subtask_input is None:
-            return
-        title = self._subtask_input.text().strip()
-        if not title:
-            return
-        target_minutes = self._default_target_minutes
-        if self._subtask_minutes_spin is not None:
-            target_minutes = self._subtask_minutes_spin.value()
-        self.action.emit(
-            self.task.id,
-            "subtask_add",
-            f"{title}|{target_minutes}|{self._sub_add_parent_id or ''}",
-        )
-        self._subtask_input.clear()
-        self._sub_add_parent_id = None
-        self._subtask_input.setPlaceholderText("新目标标题…")
+    def set_selected_subtask_id(self, subtask_id: str) -> None:
+        if self._tree_panel is not None:
+            self._tree_panel.set_selected_subtask_id(subtask_id)
 
     def _build(self) -> None:
         v = QVBoxLayout(self)
@@ -487,40 +133,20 @@ class TaskCard(QFrame):
             note.setWordWrap(True)
             v.addWidget(note)
 
-        self._build_task_tree(v)
-
-        meta_parts: list[str] = []
-        created = time.strftime(
-            "%Y-%m-%d %H:%M", time.localtime(self.task.created_at),
+        self._tree_panel = GoalTreePanel(
+            self.task,
+            self.manager,
+            self.state,
+            editable=self.task.status == TaskStatus.ACTIVE,
         )
-        meta_parts.append(f"创建 {created}")
-        if self.task.completed_at:
-            done = time.strftime(
-                "%Y-%m-%d %H:%M", time.localtime(self.task.completed_at),
-            )
-            meta_parts.append(f"完成 {done}")
-        duration = format_duration(
-            self.task.active_duration_seconds()
-            if self.task.status == TaskStatus.ACTIVE
-            else self.task.active_seconds
-        )
-        meta_parts.append(f"累计 {duration}")
-        meta = QLabel(" · ".join(meta_parts))
-        meta.setObjectName("CreatedMeta")
-        meta.setWordWrap(True)
-
-        v.addWidget(_make_divider())
-        v.addWidget(meta)
+        self._tree_panel.action.connect(self.action.emit)
+        v.addWidget(self._tree_panel)
 
         v.addWidget(_make_divider())
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
         if self.task.status == TaskStatus.ACTIVE:
-            b_pause = QPushButton("暂停")
-            b_pause.setObjectName("Ghost")
-            b_pause.clicked.connect(lambda: self.action.emit(self.task.id, "pause", ""))
-            btn_row.addWidget(b_pause)
             b_complete = QPushButton("完成目标")
             b_complete.setObjectName("Primary")
             b_complete.clicked.connect(
@@ -528,12 +154,6 @@ class TaskCard(QFrame):
             )
             btn_row.addWidget(b_complete)
         elif self.task.status == TaskStatus.PAUSED:
-            b_resume = QPushButton("恢复")
-            b_resume.setObjectName("Primary")
-            b_resume.clicked.connect(
-                lambda: self.action.emit(self.task.id, "resume", "")
-            )
-            btn_row.addWidget(b_resume)
             b_complete = QPushButton("完成目标")
             b_complete.setObjectName("Ghost")
             b_complete.clicked.connect(
@@ -551,8 +171,17 @@ class TaskCard(QFrame):
         v.addLayout(btn_row)
 
     def update_stats(self) -> None:
-        """卡片重建前占位；统计由行内展示。"""
-        return
+        task = self.manager.get(self.task.id)
+        if task is None or self._tree_panel is None:
+            return
+        self.task = task
+        since = self.state.since_roll
+        self._tree_panel.refresh(
+            task,
+            since_gold=since.gold,
+            since_diamond=since.diamond,
+        )
+
 
 class TaskDialog(QDialog):
     """目标管理主对话框。"""
@@ -564,6 +193,7 @@ class TaskDialog(QDialog):
         super().__init__(parent)
         self.state = state
         self.manager = manager
+        self._card_selection: dict[str, str] = {}
 
         self.setWindowTitle("目标管理 - Adventure")
         self.resize(540, 640)
@@ -598,7 +228,6 @@ class TaskDialog(QDialog):
         cl.addLayout(bt)
         v.addWidget(create_box)
 
-        # 目标列表
         self.tabs = QTabWidget()
         self.tab_active = self._make_scroll_tab()
         self.tab_paused = self._make_scroll_tab()
@@ -622,7 +251,6 @@ class TaskDialog(QDialog):
         scroll.setWidget(inner)
         return {"widget": scroll, "inner": inner, "layout": layout}
 
-    # ---------- 行为 ----------
     def _on_create(self) -> None:
         title = self.input_title.text().strip()
         note = self.input_note.toPlainText().strip()
@@ -739,8 +367,8 @@ class TaskDialog(QDialog):
                 if sub.done or p.gold or p.diamond:
                     ret = QMessageBox.question(
                         self,
-                    "删除目标",
-                    f"「{sub.title}」有未领取奖励，确定删除吗？",
+                        "删除目标",
+                        f"「{sub.title}」有未领取奖励，确定删除吗？",
                     )
                     if ret != QMessageBox.Yes:
                         return
@@ -781,7 +409,11 @@ class TaskDialog(QDialog):
         self.state_changed.emit()
         self.refresh()
 
-    # ---------- 刷新 ----------
+    def _capture_card_selections(self) -> None:
+        for tab in (self.tab_active, self.tab_paused, self.tab_done):
+            for card in tab["inner"].findChildren(TaskCard):
+                self._card_selection[card.task.id] = card.selected_subtask_id()
+
     def refresh_stats(self) -> None:
         """轻量刷新：只更新各卡片上的操作数/奖励，不重建列表。"""
         for tab in (self.tab_active, self.tab_paused, self.tab_done):
@@ -789,9 +421,9 @@ class TaskDialog(QDialog):
                 card.update_stats()
 
     def refresh(self) -> None:
+        self._capture_card_selections()
         self._fill_tab(self.tab_active, self.manager.by_status(TaskStatus.ACTIVE))
         self._fill_tab(self.tab_paused, self.manager.by_status(TaskStatus.PAUSED))
-        # 已完成：倒序
         done = sorted(
             self.manager.by_status(TaskStatus.COMPLETED),
             key=lambda t: t.completed_at or 0,
@@ -823,8 +455,12 @@ class TaskDialog(QDialog):
             layout.addWidget(empty)
         else:
             for t in tasks:
-                default_min = int(self.state.settings.get("subtask_default_target_minutes", 10))
-                card = TaskCard(t, manager=self.manager, default_target_minutes=default_min)
+                card = TaskCard(
+                    t,
+                    manager=self.manager,
+                    state=self.state,
+                    selected_subtask_id=self._card_selection.get(t.id, ""),
+                )
                 card.action.connect(self._on_card_action)
                 layout.addWidget(card)
         layout.addStretch(1)

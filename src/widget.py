@@ -33,6 +33,7 @@ from .storage import save_state
 from .task_manager import TaskManager
 from .ui_roll_bar import SegmentedRollBar
 from .ui_task_tree import (
+    GOAL_TREE_PANEL_QSS,
     TREE_DETAIL_QSS,
     TREE_INDENT_PX,
     SubtaskActionCallbacks,
@@ -157,16 +158,6 @@ QLabel#GlobalSummary { color: #b0b8cc; font-size: 11px; font-weight: 500; }
 QLabel#RollHistCap { color: #a8b0c4; font-size: 10px; }
 QLabel#RollHist { color: #b8c0d4; font-size: 9px; line-height: 1.25; }
 QLabel#TaskTitle { font-size: 14px; font-weight: 700; color: #ffffff; }
-QWidget#GoalDetailPanel {
-    background-color: rgba(0, 0, 0, 0.2);
-    border: 1px solid #4a4e5c;
-    border-radius: 6px;
-    margin: 4px 0;
-}
-QLabel#GoalDetailTitle { font-size: 13px; font-weight: 700; color: #ffffff; }
-QLabel#GoalDetailStats { font-size: 12px; color: #e8ecf4; }
-QLabel#SubGoalList { color: #ffffff; font-size: 13px; font-weight: 500; line-height: 1.35; background: transparent; }
-QLabel#SubGoalHint { color: #f0c060; font-size: 12px; font-weight: 600; background: transparent; }
 QWidget#SubGoalRow {
     background-color: #1a1b24;
     border-radius: 6px;
@@ -189,24 +180,6 @@ QWidget#SubGoalPinned {
     border-radius: 6px;
     border: 1px solid #3a5080;
 }
-QLineEdit#SubGoalInput {
-    background-color: #1a1b24;
-    color: #d8dce8;
-    border: 1px solid #3a3d4a;
-    border-radius: 6px;
-    padding: 5px 8px;
-    font-size: 12px;
-}
-QSpinBox#SubtaskMinSpin {
-    background-color: #1a1b24;
-    color: #d8dce8;
-    border: 1px solid #3a3d4a;
-    border-radius: 6px;
-    padding: 3px 4px;
-    font-size: 11px;
-    min-height: 22px;
-}
-QSpinBox#SubtaskMinSpin:focus { border-color: #4a6ad0; }
 QPushButton#SubClaimBtn {
     background-color: #3a5cff;
     border-color: #3a5cff;
@@ -216,14 +189,14 @@ QPushButton#SubClaimBtn {
     min-height: 22px;
 }
 QPushButton#SubClaimBtn:hover { background-color: #4d6dff; }
-QPushButton#SubAddBtn, QPushButton#GoalAddBtn {
+QPushButton#GoalAddBtn {
     font-size: 12px;
     padding: 4px 10px;
     background-color: #252833;
     border: 1px solid #404558;
     color: #b8c8e8;
 }
-QPushButton#SubAddBtn:hover, QPushButton#GoalAddBtn:hover {
+QPushButton#GoalAddBtn:hover {
     background-color: #303448;
 }
 QPushButton#SubActionBtn {
@@ -249,20 +222,6 @@ QPushButton#SubFoldBtn {
     border-radius: 5px;
 }
 QPushButton#SubFoldBtn:hover { background-color: #303448; border-color: #5a6a90; }
-QPushButton#GoalPauseBtn, QPushButton#GoalResumeBtn {
-    background-color: #252833;
-    border: 1px solid #404558;
-    color: #a8c4ff;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 10px;
-    min-height: 22px;
-    border-radius: 5px;
-}
-QPushButton#GoalPauseBtn:hover, QPushButton#GoalResumeBtn:hover {
-    background-color: #303448;
-    border-color: #5a6a90;
-}
 QPushButton#SubDelBtn {
     font-size: 11px;
     padding: 3px 8px;
@@ -383,7 +342,7 @@ QLabel#RollToast[toast="gold"] { color: #ffd54f; }
 QLabel#RollToast[toast="diam"] { color: #7dd3fc; }
 QLabel#RollToast[toast="miss"] { color: #8a909e; }
 QFrame#Divider { background-color: rgba(255,255,255,18); max-height: 1px; min-height: 1px; }
-""" + TREE_DETAIL_QSS
+""" + TREE_DETAIL_QSS + GOAL_TREE_PANEL_QSS
 
 
 class FloatingWidget(QWidget):
@@ -658,7 +617,6 @@ class FloatingWidget(QWidget):
         self.goal_detail_btn_lay.setSpacing(6)
         detail_lay.addWidget(self.goal_detail_btn_row)
 
-        detail_lay.addWidget(self.subgoal_actions)
         self.goal_detail_panel.hide()
 
         self.goal_add_btn = QPushButton("新建目标")
@@ -668,6 +626,8 @@ class FloatingWidget(QWidget):
         tree_lay.addWidget(self.goal_add_btn)
         v.addWidget(self.task_tree_section, 1)
 
+        self.subgoal_actions.hide()
+        v.addWidget(self.subgoal_actions)
         v.addWidget(self.goal_detail_panel)
 
         # 按钮
@@ -1141,6 +1101,9 @@ class FloatingWidget(QWidget):
 
         self._sync_subgoals_container_geometry(remeasure=True)
 
+    def _subtask_completion_bonus(self) -> float:
+        return float(self.state.settings.get("subtask_completion_bonus_gold", 0.5))
+
     def _refresh_goal_detail_stats_only(
         self,
         *,
@@ -1162,6 +1125,7 @@ class FloatingWidget(QWidget):
                 sub,
                 since_roll_gold=since_gold,
                 since_roll_diamond=since_diamond,
+                completion_bonus=self._subtask_completion_bonus(),
             ),
         )
 
@@ -1218,41 +1182,6 @@ class FloatingWidget(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-    def _show_subtask_context_menu(
-        self,
-        task_id: str,
-        sub: Subtask,
-        global_pos: QPoint,
-    ) -> None:
-        task = self.manager.get(task_id)
-        if task is None or task.status != TaskStatus.ACTIVE:
-            return
-        menu = QMenu(self)
-        current_id = task.current_subtask_id
-
-        if sub.is_leaf() and not sub.done and not sub.rewards_claimed:
-            if sub.id == current_id:
-                menu.addAction("暂停聚焦", lambda: self._on_sub_pause(task_id))
-            else:
-                menu.addAction("开始聚焦", lambda: self._on_sub_focus(task_id, sub.id))
-            if sub.time_target_met():
-                menu.addAction("完成", lambda: self._on_sub_complete(task_id, sub.id))
-            menu.addAction("分解…", lambda: self._on_decompose(task_id, sub.id))
-            menu.addSeparator()
-
-        if sub.can_claim_pending() or sub.is_claimable():
-            menu.addAction("领取", lambda: self._on_sub_claim(task_id, sub.id))
-            menu.addSeparator()
-
-        if not sub.is_claimable() and not (sub.done and sub.rewards_claimed):
-            menu.addAction("添加子项", lambda: self._on_sub_add_child(sub.id))
-
-        if not (sub.done and sub.rewards_claimed):
-            menu.addAction("删除", lambda: self._on_sub_delete(task_id, sub.id))
-
-        if not menu.isEmpty():
-            menu.exec(global_pos)
-
     @staticmethod
     def _clear_layout(layout) -> None:
         while layout.count():
@@ -1294,12 +1223,12 @@ class FloatingWidget(QWidget):
                 sub,
                 since_roll_gold=since_gold,
                 since_roll_diamond=since_diamond,
+                completion_bonus=self._subtask_completion_bonus(),
             ),
         )
 
         actions_sig = self._goal_detail_actions_signature(task, sub)
         if actions_sig == self._goal_detail_actions_sig:
-            self.subgoal_actions.setVisible(task.status == TaskStatus.ACTIVE)
             return
         self._goal_detail_actions_sig = actions_sig
         self._clear_layout(self.goal_detail_btn_lay)
@@ -1318,71 +1247,8 @@ class FloatingWidget(QWidget):
                 btn.setCursor(Qt.PointingHandCursor)
                 btn.clicked.connect(self._on_goal_pause)
                 self.goal_detail_btn_lay.addWidget(btn)
-        elif task.status == TaskStatus.ACTIVE:
-            current_id = task.current_subtask_id
-            if sub.is_leaf() and not sub.done and not sub.rewards_claimed:
-                if sub.id == current_id:
-                    btn = QPushButton("暂停聚焦")
-                    btn.setCursor(Qt.PointingHandCursor)
-                    btn.clicked.connect(
-                        lambda _c=False, tid=task.id: self._on_sub_pause(tid)
-                    )
-                    self.goal_detail_btn_lay.addWidget(btn)
-                else:
-                    btn = QPushButton("开始聚焦")
-                    btn.setCursor(Qt.PointingHandCursor)
-                    btn.clicked.connect(
-                        lambda _c=False, tid=task.id, sid=sub.id: self._on_sub_focus(
-                            tid, sid
-                        )
-                    )
-                    self.goal_detail_btn_lay.addWidget(btn)
-                if sub.time_target_met():
-                    btn = QPushButton("完成")
-                    btn.setCursor(Qt.PointingHandCursor)
-                    btn.clicked.connect(
-                        lambda _c=False, tid=task.id, sid=sub.id: self._on_sub_complete(
-                            tid, sid
-                        )
-                    )
-                    self.goal_detail_btn_lay.addWidget(btn)
-                btn = QPushButton("分解…")
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.clicked.connect(
-                    lambda _c=False, tid=task.id, sid=sub.id: self._on_decompose(
-                        tid, sid
-                    )
-                )
-                self.goal_detail_btn_lay.addWidget(btn)
-            if sub.can_claim_pending() or sub.is_claimable():
-                btn = QPushButton("领取")
-                btn.setObjectName("SubClaimBtn")
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.clicked.connect(
-                    lambda _c=False, tid=task.id, sid=sub.id: self._on_sub_claim(
-                        tid, sid
-                    )
-                )
-                self.goal_detail_btn_lay.addWidget(btn)
-            if not sub.is_claimable() and not (sub.done and sub.rewards_claimed):
-                btn = QPushButton("+子")
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.clicked.connect(
-                    lambda _c=False, sid=sub.id: self._on_sub_add_child(sid)
-                )
-                self.goal_detail_btn_lay.addWidget(btn)
-            if not (sub.done and sub.rewards_claimed):
-                btn = QPushButton("删除")
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.clicked.connect(
-                    lambda _c=False, tid=task.id, sid=sub.id: self._on_sub_delete(
-                        tid, sid
-                    )
-                )
-                self.goal_detail_btn_lay.addWidget(btn)
 
         self.goal_detail_btn_lay.addStretch(1)
-        self.subgoal_actions.setVisible(task.status == TaskStatus.ACTIVE)
 
     def _apply_tree_selection_ui(
         self,
@@ -1537,12 +1403,12 @@ class FloatingWidget(QWidget):
 
         callbacks = SubtaskActionCallbacks(
             on_claim=lambda tid=task.id, sid=sub.id: self._on_sub_claim(tid, sid),
+            on_focus=lambda tid=task.id, sid=sub.id: self._on_sub_focus(tid, sid),
             on_pause=lambda tid=task.id: self._on_sub_pause(tid),
             on_complete=lambda tid=task.id, sid=sub.id: self._on_sub_complete(tid, sid),
+            on_decompose=lambda tid=task.id, sid=sub.id: self._on_decompose(tid, sid),
+            on_delete=lambda tid=task.id, sid=sub.id: self._on_sub_delete(tid, sid),
             on_add_child=lambda sid=sub.id: self._on_sub_add_child(sid),
-            on_more=lambda pos, tid=task.id, s=sub: self._show_subtask_context_menu(
-                tid, s, pos
-            ),
         )
         actions = build_subtask_action_buttons(
             sub,
@@ -1558,9 +1424,6 @@ class FloatingWidget(QWidget):
             lambda s=sub, tid=task.id, e=editable: self._on_tree_select(
                 tid, s.id, sub=s, editable=e
             )
-        )
-        row._show_context_menu = lambda pos, tid=task.id, s=sub: (
-            self._show_subtask_context_menu(tid, s, pos)
         )
         row.style().unpolish(row)
         row.style().polish(row)
@@ -1819,6 +1682,18 @@ class FloatingWidget(QWidget):
         return box.exec() == QMessageBox.Yes
 
     def _update_action_visibility(self, active: Task | None) -> None:
+        if active is not None and not self._selected_task_id:
+            self._selected_task_id = active.id
+            self._expanded_goal_ids.add(active.id)
+
+        show_add = False
+        if active is not None and active.status != TaskStatus.COMPLETED:
+            show_add = True
+        elif self._selected_task_id:
+            task = self.manager.get(self._selected_task_id)
+            show_add = task is not None and task.status != TaskStatus.COMPLETED
+        self.subgoal_actions.setVisible(show_add)
+
         if not self._selected_task_id:
             self.goal_detail_panel.hide()
             return
@@ -1915,7 +1790,11 @@ class FloatingWidget(QWidget):
         if self._subtree_has_unclaimed(sub):
             if not self._confirm_subgoal_delete(sub, has_rewards=True):
                 return
-        elif not sub.done and (sub.pending_rewards or sub.operations > 0 or sub.children):
+        elif not sub.done and (
+            sub.pending_rewards
+            or sub.rollup_operations() > 0
+            or sub.children
+        ):
             if not self._confirm_subgoal_delete(sub, has_rewards=False):
                 return
         if not self.manager.delete_subtask(task_id, subtask_id):
