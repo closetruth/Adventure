@@ -6,6 +6,7 @@ import time
 from typing import Iterator, List, Optional, Set, Tuple
 
 from .active_time import ActiveTimeTracker
+from .migrate_accounting import detach_subtask_progress_to_legacy, detach_task_progress_to_legacy
 from .models import AppState, Reward, Subtask, Task, TaskStatus
 from .power_monitor import PowerMonitor
 
@@ -174,7 +175,7 @@ class TaskManager:
                 total.gold += bonus
             self.state.inventory.add(total)
             sub.pending_rewards.clear()
-            if sub.done or sub.is_container():
+            if sub.is_leaf():
                 sub.rewards_claimed = True
             changed = True
         return changed
@@ -199,12 +200,8 @@ class TaskManager:
         if not t:
             return None
         sub = self._get_subtask(t, subtask_id)
-        if not sub:
+        if not sub or not sub.is_leaf():
             return None
-        if sub.is_container():
-            if not sub.can_claim_pending():
-                return None
-            return sub.pending_summary()
         if not sub.is_claimable():
             return None
         total = sub.pending_summary()
@@ -318,6 +315,10 @@ class TaskManager:
             if t.current_subtask_id == parent_subtask_id:
                 self._sync_current_subtask(t)
         else:
+            if not parent_subtask_id and not t.subtasks:
+                legacy = detach_task_progress_to_legacy(t)
+                if legacy is not None:
+                    t.subtasks.append(legacy)
             t.subtasks.append(sub)
             if t.status == TaskStatus.ACTIVE and t.current_subtask_id is None:
                 self._sync_current_subtask(t)
@@ -360,17 +361,15 @@ class TaskManager:
         if not t:
             return None
         sub = self._get_subtask(t, subtask_id)
-        if not sub:
+        if not sub or not sub.is_leaf():
             return None
-        if sub.is_container():
-            if not sub.can_claim_pending():
-                return None
-            total = sub.pending_summary()
-        else:
-            if not sub.is_claimable():
-                return None
+        if not sub.is_claimable() and not sub.can_claim_pending():
+            return None
+        if sub.is_claimable():
             total = sub.pending_summary()
             total.gold += self._completion_bonus()
+        else:
+            total = sub.pending_summary()
         self.state.inventory.add(total)
         sub.pending_rewards.clear()
         sub.rewards_claimed = True
@@ -384,7 +383,7 @@ class TaskManager:
         subtask_id: str,
         child_titles: List[str],
     ) -> bool:
-        """将未完成叶子拆成分组 + 子项；进度/待领留在被拆节点上。"""
+        """将未完成叶子拆成分组：原进度迁入 legacy 子叶子，用户新叶子从 0 开始。"""
         t = self.get(task_id)
         if not t or t.status != TaskStatus.ACTIVE:
             return False
@@ -397,19 +396,22 @@ class TaskManager:
         target_minutes = int(self.state.settings.get("subtask_default_target_minutes", 10))
         target_seconds = float(max(1, target_minutes) * 60)
         was_focused = t.current_subtask_id == subtask_id
-        first_child: Optional[Subtask] = None
+
+        legacy = detach_subtask_progress_to_legacy(sub)
+        new_children: List[Subtask] = []
         for title in titles:
-            child = Subtask(title=title, target_seconds=target_seconds)
-            sub.children.append(child)
-            if first_child is None:
-                first_child = child
-        if was_focused and first_child is not None:
-            t.current_subtask_id = first_child.id
+            new_children.append(Subtask(title=title, target_seconds=target_seconds))
+        sub.children = ([legacy] if legacy is not None else []) + new_children
+
+        first_user_child = new_children[0] if new_children else None
+        if was_focused and first_user_child is not None:
+            t.current_subtask_id = first_user_child.id
         self.expand_all_subtasks(t)
         self.sync_subtask_expand_to_focus(t)
         logger.info(
-            "分解子目标「%s」→ %d 个子项 (task_id=%s)",
+            "分解子目标「%s」→ %s + %d 个新子项 (task_id=%s)",
             sub.title,
+            "legacy" if legacy is not None else "无 legacy",
             len(titles),
             task_id,
         )
@@ -429,7 +431,7 @@ class TaskManager:
         return True
 
     def pause_subtask_focus(self, task_id: str) -> bool:
-        """取消子目标聚焦（暂停子目标累计，父 ops 仍增加）。"""
+        """取消子目标聚焦（暂停子目标累计）。"""
         t = self.get(task_id)
         if not t or t.status != TaskStatus.ACTIVE:
             return False
@@ -473,47 +475,60 @@ class TaskManager:
         return True
 
     def tick_active_time(self) -> bool:
-        """每秒调用：累加父/子任务时长（关屏不计，不自动完成子目标）。"""
+        """每秒调用：累加聚焦叶子或扁平目标时长（关屏不计）。"""
         seconds = self._active_time.tick(
             counting_enabled=self.power_monitor.should_count_time(),
         )
         active = self.state.active_task()
         if active is None or seconds <= 0:
             return False
-        active.active_seconds += seconds
-        sub = active.current_subtask()
-        if sub is not None:
-            sub.active_seconds += seconds
+        if active.subtasks:
+            sub = active.current_subtask()
+            if sub is not None:
+                sub.active_seconds += seconds
+        else:
+            active.active_seconds += seconds
         return False
 
     def _sync_task_earned_from_subtasks(self, task: Task) -> None:
         task.sync_earned_from_subtasks()
 
+    def _apply_roll_to_task(self, task: Task, reward: Reward) -> None:
+        task.pending_rewards.append(reward)
+        task.earned_gold += reward.gold
+        task.earned_diamond += reward.diamond
+        self.state.since_roll.gold += reward.gold
+        self.state.since_roll.diamond += reward.diamond
+
     def _apply_roll_to_subtask(self, task: Task, sub: Subtask, reward: Reward) -> None:
         sub.pending_rewards.append(reward)
         sub.earned_gold += reward.gold
         sub.earned_diamond += reward.diamond
-        self._sync_task_earned_from_subtasks(task)
         self.state.since_roll.gold += reward.gold
         self.state.since_roll.diamond += reward.diamond
 
     # ----- 操作数与奖励 -----
     def record_operation(self, reward: Optional[Reward]) -> Optional[Reward]:
-        """处理一次操作：父/子 ops++；有 current 子目标时才积累开奖奖励。
+        """处理一次操作：仅记入聚焦叶子或无子树时的目标本身。
 
-        返回实际记入子目标的奖励；未记入时返回 None。
+        返回实际记入的奖励；未记入时返回 None。
         """
         active = self.state.active_task()
         if active is None:
             return None
 
-        active.operations += 1
-        sub = active.current_subtask()
-        if sub is None:
+        if active.subtasks:
+            sub = active.current_subtask()
+            if sub is None:
+                return None
+            sub.operations += 1
+            if reward is not None and not reward.is_empty():
+                self._apply_roll_to_subtask(active, sub, reward)
+                return reward
             return None
 
-        sub.operations += 1
+        active.operations += 1
         if reward is not None and not reward.is_empty():
-            self._apply_roll_to_subtask(active, sub, reward)
+            self._apply_roll_to_task(active, reward)
             return reward
         return None

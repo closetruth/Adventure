@@ -78,11 +78,46 @@ class Subtask:
         return self.is_leaf() and self.done and not self.rewards_claimed
 
     def can_claim_pending(self) -> bool:
-        """有 pending 且未领取（含分解后分组上的残留）。"""
-        return bool(self.pending_rewards) and not self.rewards_claimed
+        """叶子上有 pending 且未领取。"""
+        return (
+            self.is_leaf()
+            and bool(self.pending_rewards)
+            and not self.rewards_claimed
+        )
 
     def time_target_met(self) -> bool:
         return self.active_seconds >= self.target_seconds
+
+    def rollup_operations(self) -> int:
+        """文件夹式汇总：叶子返回自身，分组返回子孙叶子合计。"""
+        if self.is_leaf():
+            return self.operations
+        return sum(c.rollup_operations() for c in self.children)
+
+    def rollup_earned(self) -> tuple[float, float]:
+        if self.is_leaf():
+            return self.earned_gold, self.earned_diamond
+        gold = diamond = 0.0
+        for child in self.children:
+            cg, cd = child.rollup_earned()
+            gold += cg
+            diamond += cd
+        return gold, diamond
+
+    def rollup_active_seconds(self) -> float:
+        if self.is_leaf():
+            return self.active_seconds
+        return sum(c.rollup_active_seconds() for c in self.children)
+
+    def rollup_pending_summary(self) -> Reward:
+        if self.is_leaf():
+            return self.pending_summary()
+        total = Reward()
+        for child in self.children:
+            sub = child.rollup_pending_summary()
+            total.gold += sub.gold
+            total.diamond += sub.diamond
+        return total
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Subtask":
@@ -143,8 +178,29 @@ class Task:
     completed_reward_diamond: float = 0.0
 
     def active_duration_seconds(self) -> float:
-        """进行中累计秒数（暂停与关屏不计）。"""
-        return self.active_seconds
+        """进行中累计秒数（暂停与关屏不计）；有子树时为子孙叶子合计。"""
+        return self.rollup_active_seconds()
+
+    def rollup_operations(self) -> int:
+        """文件夹式汇总：无子树时返回自身，否则为根级子树合计。"""
+        if not self.subtasks:
+            return self.operations
+        return sum(s.rollup_operations() for s in self.subtasks)
+
+    def rollup_earned(self) -> tuple[float, float]:
+        if not self.subtasks:
+            return self.earned_gold, self.earned_diamond
+        gold = diamond = 0.0
+        for sub in self.subtasks:
+            sg, sd = sub.rollup_earned()
+            gold += sg
+            diamond += sd
+        return gold, diamond
+
+    def rollup_active_seconds(self) -> float:
+        if not self.subtasks:
+            return self.active_seconds
+        return sum(s.rollup_active_seconds() for s in self.subtasks)
 
     def pending_summary(self) -> Reward:
         total = Reward()
@@ -240,20 +296,13 @@ class Task:
         return done, total
 
     def earned_totals(self) -> tuple[float, float]:
-        """展示用累计奖励：有子目标时为各节点之和，否则用父目标字段。"""
-        if self.subtasks:
-            gold = sum(s.earned_gold for s in self.iter_subtasks())
-            diamond = sum(s.earned_diamond for s in self.iter_subtasks())
-            return gold, diamond
-        return self.earned_gold, self.earned_diamond
+        """展示用累计奖励（文件夹式 rollup）。"""
+        return self.rollup_earned()
 
     def sync_earned_from_subtasks(self) -> None:
-        """将父目标 earned_* 与子目标合计对齐（有子目标时）。"""
+        """有子树时展示走 rollup，不再镜像写入父字段。"""
         if not self.subtasks:
             return
-        gold, diamond = self.earned_totals()
-        self.earned_gold = gold
-        self.earned_diamond = diamond
 
     def current_subtask(self) -> Optional[Subtask]:
         """当前聚焦的叶子子目标（仅 current_subtask_id 指向的未完成叶子）。"""

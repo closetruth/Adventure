@@ -225,113 +225,6 @@ def _format_subgoal_dates_html(sub: Subtask) -> str:
     )
 
 
-def format_subgoal_line_html(
-    sub: Subtask,
-    *,
-    is_current: bool,
-    depth: int = 0,
-    expanded: bool = True,
-) -> str:
-    """悬浮窗子目标行（RichText HTML）。"""
-    if sub.is_container():
-        leaves = [s for s in sub.iter_subtree() if s.is_leaf() and s.id != sub.id]
-        done = sum(1 for s in leaves if s.done)
-        total = len(leaves)
-        title = _html_escape(sub.title)
-        fold = "v" if expanded else ">"
-        inner = (
-            f'<span style="color:{_COLOR_MARKER};font-weight:700">{fold}&nbsp;</span>'
-            f'<span style="color:{_COLOR_TEXT};font-weight:600;">{title}</span>  '
-            f'<span style="color:{_COLOR_MUTED}">({done}/{total})</span>'
-        )
-        return f'<span style="{_font(13)}">{inner}</span>'
-
-    if sub.done:
-        marker = "●" if sub.is_claimable() else "✓"
-    elif is_current:
-        marker = "●"
-    else:
-        marker = "○"
-
-    title = _html_escape(sub.title)
-    title_weight = "font-weight:600;" if is_current and not sub.done else "font-weight:500;"
-    if sub.is_claimable():
-        title_color = _COLOR_CLAIM
-        title_weight = "font-weight:700;"
-    elif is_current and not sub.done:
-        title_color = _COLOR_CURRENT
-    else:
-        title_color = _COLOR_TEXT
-
-    if (
-        not sub.done
-        and sub.active_seconds <= 0
-        and not is_current
-        and sub.operations <= 0
-    ):
-        inner = (
-            f'<span style="color:{_COLOR_MUTED}">{marker}</span> '
-            f'<span style="color:{_COLOR_MUTED};font-weight:500;">{title}</span>  '
-            f'<span style="color:{_COLOR_MUTED}">未开始</span>'
-            f"{_format_subgoal_dates_html(sub)}"
-        )
-        return f'<span style="{_font(13)}">{inner}</span>'
-
-    stats: list[str] = [
-        f'<span style="color:{_COLOR_OPS};font-weight:700">操作{sub.operations}</span>',
-        f'<span style="color:{_COLOR_GOLD};font-weight:700">金{format_amount(sub.earned_gold)}</span>',
-    ]
-    if sub.earned_diamond:
-        stats.append(
-            f'<span style="color:{_COLOR_DIAM};font-weight:700">'
-            f"钻{format_amount(sub.earned_diamond)}</span>"
-        )
-    else:
-        stats.append(
-            f'<span style="color:{_COLOR_MUTED};font-weight:600">钻0</span>'
-        )
-    if sub.is_claimable():
-        pending = sub.pending_summary()
-        stats.append(
-            f'<span style="color:{_COLOR_CLAIM};font-weight:700">'
-            f"可领金{format_amount(pending.gold)} "
-            f"钻{format_amount(pending.diamond)}</span>"
-        )
-    stat_html = "  ".join(stats)
-
-    runtime_html = ""
-    if sub.active_seconds > 0 or sub.done or is_current:
-        runtime_html = f'  {format_subgoal_runtime_html(sub)}'
-
-    marker_color = _COLOR_CURRENT if is_current and not sub.done else (
-        _COLOR_CLAIM if sub.is_claimable() else _COLOR_MARKER
-    )
-    inner = (
-        f'<span style="color:{marker_color};font-weight:700">{marker}</span> '
-        f'<span style="color:{title_color};{title_weight}">{title}</span>'
-        f'<br/>'
-        f'<span style="color:{_COLOR_MUTED};font-size:11px;">'
-        f"{stat_html}{runtime_html}"
-        f"{_format_subgoal_dates_html(sub)}</span>"
-    )
-    return f'<span style="{_font(13)}">{inner}</span>'
-
-
-def format_subgoal_breadcrumb_html(active: Task) -> str:
-    """当前聚焦子目标的面包屑路径。"""
-    current = active.current_subtask()
-    if current is None:
-        return ""
-    titles = active.subtask_path_titles(current.id)
-    if len(titles) <= 1:
-        return ""
-    path = " › ".join(_html_escape(t) for t in titles)
-    return (
-        f'<span style="{_font(12)}color:{_COLOR_MUTED};font-weight:600">'
-        f"{path}</span>"
-    )
-
-
 def format_subgoals_focus_hint_html(active: Task) -> str:
     """有未完成叶子子目标但未聚焦时的提示。"""
     if not active.subtasks:
@@ -345,44 +238,6 @@ def format_subgoals_focus_hint_html(active: Task) -> str:
         f'<span style="{_font(12)}color:{_COLOR_WARN};font-weight:600">'
         f"未聚焦目标，奖励暂停累计</span>"
     )
-
-
-def format_subgoals_list_html(
-    active: Task,
-    *,
-    expanded_ids: set[str] | None = None,
-) -> str:
-    """悬浮窗：可见子目标 HTML 列表。"""
-    if not active.subtasks:
-        return (
-            f'<span style="{_font(12)}color:{_COLOR_MUTED}">'
-            f"添加目标后开始累计奖励</span>"
-        )
-
-    expanded = expanded_ids if expanded_ids is not None else set()
-    current = active.current_subtask()
-    current_id = current.id if current is not None else None
-    lines = [
-        format_subgoal_line_html(
-            sub,
-            is_current=sub.id == current_id,
-            depth=depth,
-            expanded=sub.id in expanded if sub.is_container() else True,
-        )
-        for depth, sub in active.iter_visible_subtasks(expanded)
-    ]
-    if active.has_unclaimed_subtasks():
-        lines.append(
-            f'<span style="{_font(12)}color:{_COLOR_CLAIM};font-weight:700">'
-            f"有目标奖励待领取</span>"
-        )
-    return "<br>".join(lines)
-
-
-def format_goal_root_stats_html(task: Task) -> str:
-    """目录树根节点第二行：操作 / 金 / 钻。"""
-    gold, diamond = task.earned_totals()
-    return format_goal_compact_html(task.operations, gold, diamond)
 
 
 def format_goal_root_line_html(
@@ -438,6 +293,13 @@ def format_active_since_roll_html(since_gold: float, since_diamond: float) -> st
     )
 
 
+def _format_inline_stats_html(operations: int, gold: float, diamond: float) -> str:
+    return (
+        f'  <span style="color:{_COLOR_MUTED};font-weight:500">'
+        f"操作 {operations} · 金 {format_amount(gold)}</span>"
+    )
+
+
 def format_tree_node_html(
     sub: Subtask,
     *,
@@ -465,10 +327,14 @@ def format_tree_node_html(
         leaves = [s for s in sub.iter_subtree() if s.is_leaf() and s.id != sub.id]
         done = sum(1 for s in leaves if s.done)
         total = len(leaves)
+        ops = sub.rollup_operations()
+        gold, diamond = sub.rollup_earned()
         inner = (
             f'<span style="color:{_COLOR_TEXT};font-weight:600;">{title}</span>  '
             f'<span style="color:{_COLOR_MUTED}">({done}/{total})</span>'
         )
+        if show_stats or ops or gold or diamond:
+            inner += _format_inline_stats_html(ops, gold, diamond)
         return f'<span style="{_font(13)}">{inner}</span>'
 
     if sub.done:
@@ -484,11 +350,12 @@ def format_tree_node_html(
         f'<span style="color:{marker_color};font-weight:700">{marker}</span> '
         f'<span style="color:{title_color};font-weight:{title_weight}">{title}</span>'
     )
-    if show_stats and (sub.operations or sub.earned_gold or sub.earned_diamond):
-        inner += (
-            f'  <span style="color:{_COLOR_MUTED};font-weight:500">'
-            f"操作 {sub.operations} · 金 {format_amount(sub.earned_gold)}</span>"
-        )
+    has_stats = sub.operations or sub.earned_gold or sub.earned_diamond
+    if show_stats or sub.done or has_stats:
+        if has_stats or sub.done:
+            inner += _format_inline_stats_html(
+                sub.operations, sub.earned_gold, sub.earned_diamond,
+            )
     return f'<span style="{_font(13)}">{inner}</span>'
 
 
@@ -498,31 +365,34 @@ def format_tree_detail_html(
     *,
     since_roll_gold: float = 0.0,
     since_roll_diamond: float = 0.0,
+    completion_bonus: float = 0.5,
 ) -> str:
     """详情面板统计文案。"""
     if sub is None:
         gold, diamond = task.earned_totals()
         lines = [
-            format_goal_compact_html(task.operations, gold, diamond),
+            format_goal_compact_html(task.rollup_operations(), gold, diamond),
+            f'<span style="color:{_COLOR_MUTED}">累计 '
+            f'{format_duration(task.active_duration_seconds())}</span>',
         ]
         if task.status == TaskStatus.ACTIVE:
             lines.append(
                 format_widget_runtime_html(
                     since_roll_gold,
                     since_roll_diamond,
-                    format_duration(task.active_duration_seconds()),
+                    "",
                 )
             )
         return "<br>".join(lines)
 
     if sub.is_container():
+        ops = sub.rollup_operations()
+        gold, diamond = sub.rollup_earned()
+        pending = sub.rollup_pending_summary()
         parts = [f'<span style="color:{_COLOR_MUTED}">分组</span>']
-        if sub.operations or sub.earned_gold or sub.pending_rewards:
-            parts.append(
-                format_goal_compact_html(sub.operations, sub.earned_gold, sub.earned_diamond)
-            )
-            if sub.pending_rewards:
-                pending = sub.pending_summary()
+        if ops or gold or pending.gold or pending.diamond:
+            parts.append(format_goal_compact_html(ops, gold, diamond))
+            if pending.gold or pending.diamond:
                 parts.append(
                     f'<span style="color:{_COLOR_CLAIM};font-weight:700">'
                     f"待领 金{format_amount(pending.gold)} 钻{format_amount(pending.diamond)}</span>"
@@ -537,7 +407,8 @@ def format_tree_detail_html(
         pending = sub.pending_summary()
         parts.append(
             f'<span style="color:{_COLOR_CLAIM};font-weight:700">'
-            f"可领 金{format_amount(pending.gold + 0.5)} 钻{format_amount(pending.diamond)}</span>"
+            f"可领 金{format_amount(pending.gold + completion_bonus)} "
+            f"钻{format_amount(pending.diamond)}</span>"
         )
     elif sub.can_claim_pending():
         pending = sub.pending_summary()

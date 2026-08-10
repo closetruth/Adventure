@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from .models import AppState, validate_state_invariants
+from .migrate_accounting import migrate_folder_accounting
 
 logger = logging.getLogger(__name__)
 
@@ -463,6 +464,12 @@ def load_state() -> AppState:
                 "若仍有数据缺失，请检查 data.json.anchor / data.json.safety / .bak* / .snap.*。"
             )
         _maybe_update_anchor(path)
+        if migrate_folder_accounting(state):
+            logger.info("文件夹式计数迁移完成")
+            try:
+                save_state(state)
+            except SaveRejectedError as exc:
+                logger.warning("迁移后保存失败: %s", exc)
         return state
 
     if path.exists():
