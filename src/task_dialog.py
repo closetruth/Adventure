@@ -294,7 +294,9 @@ class TaskDialog(QDialog):
                 self._emit_state_changed()
             return
         elif action == "subtask_pause":
-            if self.manager.pause_subtask_focus(task_id):
+            task = self.manager.get(task_id)
+            if task is not None and task.status == TaskStatus.ACTIVE:
+                self.manager.pause(task_id)
                 self._emit_state_changed()
             return
         elif action == "subtask_decompose":

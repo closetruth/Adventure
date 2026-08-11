@@ -329,8 +329,12 @@ def format_tree_node_html(
         total = len(leaves)
         ops = sub.rollup_operations()
         gold, diamond = sub.rollup_earned()
+        prefix = ""
+        if is_current and not sub.done:
+            prefix = f'<span style="color:{_COLOR_CURRENT};font-weight:700">● </span>'
         inner = (
-            f'<span style="color:{_COLOR_TEXT};font-weight:600;">{title}</span>  '
+            f"{prefix}"
+            f'<span style="color:{title_color};font-weight:{title_weight};">{title}</span>  '
             f'<span style="color:{_COLOR_MUTED}">({done}/{total})</span>'
         )
         if show_stats or ops or gold or diamond:
