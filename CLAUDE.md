@@ -38,11 +38,11 @@ build.bat
 
 ```
 QTimer @ 50ms (main thread)
-    └─ GetAsyncKeyState 轮询 ──→ _count_op() ──→ OpBridge.op_happened (Qt Signal, AutoConnection)
-                                                       └─ Application._on_operation() (main thread)
-                                   ├─ maybe_roll(state)
-                                   ├─ TaskManager.record_operation()
-                                   └─ widget.refresh() + dialog refreshes
+ └─ GetAsyncKeyState 轮询 ──→ _count_op() ──→ OpBridge.op_happened (Qt Signal, AutoConnection)
+ └─ Application._on_operation() (main thread)
+ ├─ maybe_roll(state)
+ ├─ TaskManager.record_operation()
+ └─ widget.refresh() + dialog refreshes
 ```
 
 - **InputMonitor** uses a `QTimer` (50ms) to poll keyboard/mouse state via `GetAsyncKeyState`. No system-wide hooks. Detects first-press transitions (not hold-repeat). Falls back to pynput hooks on non-Windows.
@@ -51,30 +51,53 @@ QTimer @ 50ms (main thread)
 
 ### Data model (`src/models.py`)
 
-- `AppState` is the single root state object — inventory, task list, roll history, settings dict.
+- `AppState` is the single root state object — inventory, task list, roll history, `roll_runtime`, settings dict.
 - `Task` has `status: ACTIVE | PAUSED | COMPLETED`. Only **one** ACTIVE task is allowed at a time.
+- `Task.current_subtask_id` points at the focused **leaf** subtask (when the task has a subtask tree). `Task.active_focus_path_ids()` returns the root-to-leaf path for UI highlighting.
+- `Subtask` forms a tree: **leaf** nodes accumulate ops/time/rewards; **container** nodes (`children` non-empty) rollup from descendants via `rollup_operations()`, `rollup_earned()`, etc. Leaves have `target_seconds`, `pending_rewards`, `done`, `rewards_claimed`.
 - `Reward` is a simple gold+diamond value object.
-- `RollAccum` tracks rewards accumulated *since* the last roll checkpoint (stored per-task for display).
+- `RollAccum` tracks rewards accumulated *since* the last roll checkpoint (global display).
+- `RollRuntime` holds the current roll cycle: `next_roll_at`, `roll_span`, `segment_colors`, `gold_chance` / `diamond_chance`, amount ranges, `last_shuffle_at`. Persisted; `settings` roll fields are migration-only.
+
+### Operation accounting
+
+On each keyboard/mouse op (when an ACTIVE task exists):
+
+1. `maybe_roll(state)` may award gold/diamond (independent gold/diamond rolls at cycle end).
+2. `TaskManager.record_operation(reward)`:
+   - **No subtasks**: increment `task.operations`; apply roll reward to `task.pending_rewards`.
+   - **Has subtasks**: only if `task.current_subtask()` is a non-done leaf — increment that leaf's `operations` and apply roll reward to the leaf's `pending_rewards`; otherwise drop subtask rewards.
+3. `tick_active_time()` (1s timer): adds seconds to the focused leaf, or to the flat task when no subtasks. Skips when paused or screen off (`power_monitor`).
+
+Folder-style accounting: parent task `earned_*` / display totals sync from subtask rollup (`sync_earned_from_subtasks`); do not mirror leaf progress into parent fields when subtasks exist.
 
 ### Core modules
 
 | Module | Role |
 |--------|------|
 | `src/main.py` | `Application` class: wires everything — Qt app, tray, widget, input monitor, timers, dialogs |
-| `src/widget.py` | `FloatingWidget`: frameless topmost window, drag, right-click menu, 1s refresh timer |
-| `src/task_manager.py` | `TaskManager`: CRUD + state transitions (create/pause/resume/complete/delete) + operation recording |
-| `src/reward_system.py` | `maybe_roll(state)`: roll check on each operation; mutates state inline, returns `Reward` or `None` |
+| `src/widget.py` | `FloatingWidget`: frameless topmost window, **directory-style goal tree**, detail panel, roll bar; deferred refresh via `QTimer.singleShot(0)`; `_refreshing` reentrancy guard |
+| `src/task_manager.py` | `TaskManager`: task/subtask CRUD, `focus_subtask` / `start_subtask` / `pause` / `decompose_subtask` / `delete_subtask`; `_subtask_expanded` (in-memory UI only) |
+| `src/reward_system.py` | `maybe_roll(state)`, `reshuffle_roll_params`, random 6–14 op cycles, `RollRuntime` migration |
 | `src/input_monitor.py` | `InputMonitor`: QTimer + GetAsyncKeyState polling with key/button dedup (pynput hook fallback for non-Windows) |
 | `src/storage.py` | `load_state()` / `save_state()`: atomic JSON persistence to `%APPDATA%\Adventure\data.json`; corrupt data → backup to `.broken.json` |
 | `src/game_launcher.py` | `launch_pet_arena()` / `launch_pixel_tactics()`: validate entry cost, write session JSON, spawn subprocess, read result JSON, update state |
 | `src/game_protocol.py` | `GameSession` / `GameResult` dataclasses: JSON protocol between main app and game subprocess via `%APPDATA%\Adventure\game_sessions\` |
+| `src/migrate_accounting.py` | Flat-task → nested subtask migration; `detach_subtask_progress_to_legacy` for decompose |
 
 ### UI helpers
 
+- `src/ui_task_tree.py` — `TreeRow`, `build_subtask_action_buttons`, `append_subtask_detail_actions`, `_connect_callback` (wraps `QPushButton.clicked` so `checked` is not passed to user callbacks).
+- `src/ui_goal_tree_panel.py` — `GoalTreePanel`: shared goal tree embedded in `TaskCard` (`task_dialog.py`).
+- `src/goal_actions.py` — `try_complete_goal`, `try_delete_goal` with confirmation.
+- `src/ui_confirm.py` — `ask_yes_no`: topmost styled confirm dialog.
 - `src/ui_task_stats.py` — `TaskRewardStrip`: the big-number chips (task ops, pending gold/diamond, 1-min rate, since-roll) on the floating widget.
-- `src/ui_text.py` — formatting functions: amounts (max 1 decimal), durations, roll history lines. **No emoji** — intentional, because Windows default fonts render them as tofu.
+- `src/ui_text.py` — formatting functions: amounts (max 1 decimal), durations, tree node HTML. **No emoji** — intentional, because Windows default fonts render them as tofu.
+- `src/ui_roll_bar.py` — `SegmentedRollBar`: colored segment roll progress widget.
 - `src/op_tracker.py` — `OpRateTracker`: sliding 60s window of operation timestamps (in-memory only, not persisted).
-- `src/active_time.py` — `ActiveTimeTracker`: increments `active_seconds` on the active task every 1s tick; paused tasks don't tick.
+- `src/active_time.py` — `ActiveTimeTracker`: increments focused leaf or flat task `active_seconds` every 1s tick; paused tasks don't tick.
+- `src/power_monitor.py` — `should_count_time()`: false when display is off.
+- `src/sfx.py` — roll hit sound playback.
 - `src/win_utils.py` — `pin_window_to_all_desktops` (pyvda), `set_startup` (registry Run key). Graceful no-ops on non-Windows.
 
 ### Game subprocess protocol
@@ -85,7 +108,7 @@ QTimer @ 50ms (main thread)
 
 ### Settings (in `data.json` → `settings`)
 
-Key tunables: `roll_interval` (ops per roll), `roll_chance`, `gold_min`/`gold_max`, `diamond_chance`, `diamond_min`/`diamond_max`. Defaults in `AppState.__init__` (`src/models.py`).
+Key tunables: `roll_interval`, `roll_chance` / `gold_chance`, `gold_min`/`gold_max`, `diamond_chance`, `diamond_min`/`diamond_max`, `subtask_default_target_minutes`, `subtask_completion_bonus_gold`, window/sound flags. Runtime roll values live in `roll_runtime`; settings roll fields are for **legacy migration** only. Defaults in `AppState.__init__` (`src/models.py`).
 
 ### Save behavior
 
