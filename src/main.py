@@ -302,12 +302,13 @@ class Application(QObject):
         )
 
     def _on_widget_state_changed(self) -> None:
-        self._safe_save()
+        # 先刷新 UI，再写盘，避免暂停/开始时先卡在存档上
         self.widget.refresh()
         if self._task_dialog is not None and self._task_dialog.isVisible():
             self._task_dialog.refresh()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()
+        self._save_debounce.start()
 
     def show_task_dialog(self) -> None:
         if self._task_dialog is None:

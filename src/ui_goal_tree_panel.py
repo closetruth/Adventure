@@ -22,6 +22,7 @@ from .ui_task_tree import (
     TREE_INDENT_PX,
     SubtaskActionCallbacks,
     TreeRow,
+    append_subtask_detail_actions,
     apply_goal_block_ui,
     apply_goal_root_row_state,
     apply_subtask_block_ui,
@@ -92,7 +93,7 @@ class GoalTreePanel(QWidget):
         if parent is not None:
             self._subgoal_input.setPlaceholderText(f"添加到「{parent.title}」下…")
         else:
-            self._subgoal_input.setPlaceholderText("添加目标…")
+            self._subgoal_input.setPlaceholderText("子目标标题…")
         self._update_add_context()
         self._subgoal_input.setFocus()
         since = self.state.since_roll
@@ -151,11 +152,15 @@ class GoalTreePanel(QWidget):
         add_outer.setContentsMargins(0, 0, 0, 0)
         add_outer.setSpacing(4)
 
+        add_title = QLabel("添加子目标")
+        add_title.setObjectName("SectionTitle")
+        add_outer.addWidget(add_title)
+
         add_row = QHBoxLayout()
         add_row.setSpacing(4)
         self._subgoal_input = QLineEdit()
         self._subgoal_input.setObjectName("SubGoalInput")
-        self._subgoal_input.setPlaceholderText("添加目标…")
+        self._subgoal_input.setPlaceholderText("子目标标题…")
         self._subgoal_input.returnPressed.connect(self._on_add_subgoal)
         add_row.addWidget(self._subgoal_input, 1)
 
@@ -249,6 +254,7 @@ class GoalTreePanel(QWidget):
             item = self._tree_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
 
     @staticmethod
@@ -257,6 +263,7 @@ class GoalTreePanel(QWidget):
             item = layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
             elif item.layout() is not None:
                 GoalTreePanel._clear_layout(item.layout())
@@ -454,13 +461,14 @@ class GoalTreePanel(QWidget):
         )
         actions = build_subtask_action_buttons(
             sub,
-            editable=editable,
+            task_status=task.status,
             current_id=current_id,
             callbacks=callbacks,
             parent=row,
         )
         row.set_actions_widget(actions)
         row_lay.addWidget(actions, 0, Qt.AlignVCenter)
+        row.set_row_focused(is_current)
 
         row.selected.connect(
             lambda s=sub, e=editable: self._on_tree_select(s.id, sub=s, editable=e)
@@ -490,17 +498,6 @@ class GoalTreePanel(QWidget):
             since_gold=since.gold,
             since_diamond=since.diamond,
         )
-        if sub is not None and sub.is_container():
-            self._emit_toggle_fold(sub.id)
-            return
-        if (
-            editable
-            and sub is not None
-            and sub.is_leaf()
-            and not sub.done
-            and not sub.rewards_claimed
-        ):
-            self.action.emit(self.task.id, "subtask_focus", sub.id)
 
     def _apply_selection_ui(
         self,
@@ -520,6 +517,12 @@ class GoalTreePanel(QWidget):
             self._goal_root_row.set_row_selected(not self._selected_subtask_id)
         for sid, row in self._tree_row_widgets.items():
             row.set_row_selected(sid == self._selected_subtask_id)
+            task = self.task
+            current_id = None
+            if task.status == TaskStatus.ACTIVE:
+                current = task.current_subtask()
+                current_id = current.id if current is not None else None
+            row.set_row_focused(sid == current_id)
         for sid, sub_block in self._subtask_blocks.items():
             apply_subtask_block_ui(
                 sub_block,
@@ -609,7 +612,11 @@ class GoalTreePanel(QWidget):
         sub: Subtask | None,
     ) -> tuple:
         if sub is None:
-            return ("goal", task.id, task.status)
+            return ("goal", task.id, task.status, bool(
+                task.subtasks
+                and task.status == TaskStatus.ACTIVE
+                and task.current_subtask() is None
+            ))
         return (
             "sub",
             task.id,
@@ -657,7 +664,7 @@ class GoalTreePanel(QWidget):
 
         if sub is None:
             if task.status == TaskStatus.PAUSED:
-                btn = QPushButton("开始")
+                btn = QPushButton("开始运行")
                 btn.setObjectName("GoalResumeBtn")
                 btn.setCursor(Qt.PointingHandCursor)
                 btn.clicked.connect(
@@ -672,6 +679,46 @@ class GoalTreePanel(QWidget):
                     lambda _c=False: self.action.emit(task.id, "pause", "")
                 )
                 self._detail_btn_lay.addWidget(btn)
+                if task.subtasks and task.current_subtask() is None:
+                    first_leaf = next(
+                        (leaf for leaf in task.iter_leaves() if not leaf.done),
+                        None,
+                    )
+                    if first_leaf is not None:
+                        btn_start = QPushButton("开始运行")
+                        btn_start.setObjectName("GoalResumeBtn")
+                        btn_start.setCursor(Qt.PointingHandCursor)
+                        btn_start.setToolTip("聚焦第一个未完成的子目标")
+                        btn_start.clicked.connect(
+                            lambda _c=False, sid=first_leaf.id: self.action.emit(
+                                task.id, "subtask_focus", sid,
+                            )
+                        )
+                        self._detail_btn_lay.addWidget(btn_start)
+
+        elif (
+            sub is not None
+            and task.status != TaskStatus.COMPLETED
+        ):
+            sid = sub.id
+            callbacks = SubtaskActionCallbacks(
+                on_claim=lambda: self.action.emit(task.id, "subtask_claim", sid),
+                on_focus=lambda: self.action.emit(task.id, "subtask_focus", sid),
+                on_pause=lambda: self.action.emit(task.id, "subtask_pause", ""),
+                on_complete=lambda: self.action.emit(
+                    task.id, "subtask_confirm_done", sid,
+                ),
+                on_decompose=lambda: self._prompt_decompose(sid),
+                on_delete=lambda: self.action.emit(task.id, "subtask_delete", sid),
+                on_add_child=lambda: self.set_add_parent(sid),
+            )
+            append_subtask_detail_actions(
+                self._detail_btn_lay,
+                sub,
+                task_status=task.status,
+                current_id=task.current_subtask_id,
+                callbacks=callbacks,
+            )
 
         self._detail_btn_lay.addStretch(1)
 
@@ -726,5 +773,5 @@ class GoalTreePanel(QWidget):
         )
         self._subgoal_input.clear()
         self._sub_add_parent_id = None
-        self._subgoal_input.setPlaceholderText("添加目标…")
+        self._subgoal_input.setPlaceholderText("子目标标题…")
         self._update_add_context()
