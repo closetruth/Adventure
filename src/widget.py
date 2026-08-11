@@ -1106,17 +1106,17 @@ class FloatingWidget(QWidget):
                 and sub_id == self._selected_subtask_id
             )
             task = self.manager.get(task_id)
-            current_id = None
+            active_path: frozenset[str] = frozenset()
             if task is not None and task.status == TaskStatus.ACTIVE:
-                current = task.current_subtask()
-                current_id = current.id if current is not None else None
-            row.set_row_focused(sub_id == current_id)
+                active_path = task.active_focus_path_ids()
+            row.set_row_focused(sub_id in active_path)
 
         for key, sub_block in self._subtask_blocks.items():
             task_id, sub_id = key.split(":", 1)
             task = self.manager.get(task_id)
             if task is None:
                 continue
+            active_path = task.active_focus_path_ids()
             is_sub_selected = (
                 task_id == self._selected_task_id
                 and sub_id == self._selected_subtask_id
@@ -1125,7 +1125,7 @@ class FloatingWidget(QWidget):
             apply_subtask_block_ui(
                 sub_block,
                 selected=is_sub_selected,
-                focused=False,
+                focused=sub_id in active_path,
             )
 
         for task in self._widget_goals():
@@ -1139,7 +1139,7 @@ class FloatingWidget(QWidget):
                     block,
                     is_running=task.status == TaskStatus.ACTIVE,
                     selected=goal_selected,
-                    focused=False,
+                    focused=bool(task.active_focus_path_ids()),
                 )
                 apply_goal_block_hover(
                     block,
@@ -1155,8 +1155,7 @@ class FloatingWidget(QWidget):
     ) -> None:
         for task in self._widget_goals():
             editable = task.status == TaskStatus.ACTIVE
-            current = task.current_subtask() if editable else None
-            current_id = current.id if current is not None else None
+            active_path = task.active_focus_path_ids() if editable else frozenset()
 
             if not stats_only:
                 line = self._goal_root_lines.get(task.id)
@@ -1186,7 +1185,7 @@ class FloatingWidget(QWidget):
                     task.id == self._selected_task_id
                     and sid == self._selected_subtask_id
                 )
-                is_current = sid == current_id
+                is_current = sid in active_path
                 if stats_only and not (is_selected or is_current):
                     continue
                 show_stats = is_selected or is_current
@@ -1718,8 +1717,7 @@ class FloatingWidget(QWidget):
             block_layout.addWidget(root_row)
 
             if goal_expanded:
-                current = task.current_subtask() if editable else None
-                current_id = current.id if current is not None else None
+                active_path = task.active_focus_path_ids() if editable else frozenset()
 
                 if not task.subtasks and is_running:
                     hint = QLabel("添加目标后开始累计奖励")
@@ -1738,7 +1736,7 @@ class FloatingWidget(QWidget):
                                 task.id == self._selected_task_id
                                 and sub.id == self._selected_subtask_id
                             ),
-                            is_current=sub.id == current_id,
+                            is_current=sub.id in active_path,
                             editable=editable,
                         )
                         self._subgoal_line_labels[key] = line
@@ -1747,6 +1745,14 @@ class FloatingWidget(QWidget):
                         sub_block = QWidget()
                         sub_block.setObjectName("SubtaskBlock")
                         sub_block.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+                        apply_subtask_block_ui(
+                            sub_block,
+                            selected=(
+                                task.id == self._selected_task_id
+                                and sub.id == self._selected_subtask_id
+                            ),
+                            focused=sub.id in active_path,
+                        )
                         sub_block_layout = QVBoxLayout(sub_block)
                         sub_block_layout.setContentsMargins(0, 0, 0, 0)
                         sub_block_layout.setSpacing(0)
@@ -1780,7 +1786,7 @@ class FloatingWidget(QWidget):
                     block,
                     is_running=task.status == TaskStatus.ACTIVE,
                     selected=goal_selected,
-                    focused=False,
+                    focused=bool(task.active_focus_path_ids()),
                 )
 
         for task_id, block in self._goal_blocks.items():
@@ -1892,19 +1898,22 @@ class FloatingWidget(QWidget):
             self._request_state_sync()
 
     def _on_sub_pause(self, task_id: str) -> None:
-        if self.manager.pause_subtask_focus(task_id):
-            self._request_state_sync()
+        task = self.manager.get(task_id)
+        if task is None or task.status != TaskStatus.ACTIVE:
+            return
+        self.manager.pause(task_id)
+        self._request_state_sync()
 
     def _on_sub_complete(self, task_id: str, subtask_id: str) -> None:
         task = self.manager.get(task_id)
-        if task is None or task.status != TaskStatus.ACTIVE:
+        if task is None or task.status == TaskStatus.COMPLETED:
             return
         if self.manager.confirm_manual_complete_subtask(task_id, subtask_id):
             self._request_state_sync()
 
     def _on_sub_claim(self, task_id: str, subtask_id: str) -> None:
         task = self.manager.get(task_id)
-        if task is None or task.status != TaskStatus.ACTIVE:
+        if task is None or task.status == TaskStatus.COMPLETED:
             return
         sub = task.find_subtask(subtask_id)
         if sub is None:
@@ -1924,7 +1933,7 @@ class FloatingWidget(QWidget):
 
     def _on_sub_delete(self, task_id: str, subtask_id: str) -> None:
         task = self.manager.get(task_id)
-        if task is None or task.status != TaskStatus.ACTIVE:
+        if task is None or task.status == TaskStatus.COMPLETED:
             return
         sub = task.find_subtask(subtask_id)
         if sub is None:
@@ -1941,6 +1950,8 @@ class FloatingWidget(QWidget):
                 return
         if not self.manager.delete_subtask(task_id, subtask_id):
             return
+        if self._selected_subtask_id == subtask_id:
+            self._selected_subtask_id = ""
         if self._sub_add_parent_id == subtask_id:
             self._sub_add_parent_id = None
             self._update_subgoal_add_hint()

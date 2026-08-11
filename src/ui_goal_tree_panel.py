@@ -297,6 +297,7 @@ class GoalTreePanel(QWidget):
         if self._goal_expanded:
             current = task.current_subtask() if editable else None
             current_id = current.id if current is not None else None
+            active_path = task.active_focus_path_ids() if editable else frozenset()
 
             if not task.subtasks and is_running:
                 hint = QLabel("添加目标后开始累计奖励")
@@ -311,7 +312,7 @@ class GoalTreePanel(QWidget):
                         sub,
                         depth=depth + 1,
                         selected=sub.id == self._selected_subtask_id,
-                        is_current=sub.id == current_id,
+                        is_current=sub.id in active_path,
                         editable=editable,
                         current_id=current_id,
                     )
@@ -321,6 +322,11 @@ class GoalTreePanel(QWidget):
                     sub_block = QWidget()
                     sub_block.setObjectName("SubtaskBlock")
                     sub_block.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+                    apply_subtask_block_ui(
+                        sub_block,
+                        selected=sub.id == self._selected_subtask_id,
+                        focused=sub.id in active_path,
+                    )
                     sub_block_layout = QVBoxLayout(sub_block)
                     sub_block_layout.setContentsMargins(0, 0, 0, 0)
                     sub_block_layout.setSpacing(0)
@@ -345,7 +351,7 @@ class GoalTreePanel(QWidget):
             block,
             is_running=is_running,
             selected=root_selected,
-            focused=False,
+            focused=bool(task.active_focus_path_ids()),
         )
         self._tree_layout.addWidget(block, 0, Qt.AlignLeft)
         self._apply_selection_ui(since_gold=since_gold, since_diamond=since_diamond)
@@ -518,24 +524,30 @@ class GoalTreePanel(QWidget):
         for sid, row in self._tree_row_widgets.items():
             row.set_row_selected(sid == self._selected_subtask_id)
             task = self.task
-            current_id = None
-            if task.status == TaskStatus.ACTIVE:
-                current = task.current_subtask()
-                current_id = current.id if current is not None else None
-            row.set_row_focused(sid == current_id)
+            active_path = (
+                task.active_focus_path_ids()
+                if task.status == TaskStatus.ACTIVE
+                else frozenset()
+            )
+            row.set_row_focused(sid in active_path)
         for sid, sub_block in self._subtask_blocks.items():
+            active_path = (
+                self.task.active_focus_path_ids()
+                if self.task.status == TaskStatus.ACTIVE
+                else frozenset()
+            )
             apply_subtask_block_ui(
                 sub_block,
                 selected=bool(self._selected_subtask_id)
                 and sid == self._selected_subtask_id,
-                focused=False,
+                focused=sid in active_path,
             )
         if self._goal_block is not None:
             apply_goal_block_ui(
                 self._goal_block,
                 is_running=self.task.status == TaskStatus.ACTIVE,
                 selected=not self._selected_subtask_id,
-                focused=False,
+                focused=bool(self.task.active_focus_path_ids()),
             )
 
     def _refresh_tree_labels(
@@ -547,8 +559,7 @@ class GoalTreePanel(QWidget):
     ) -> None:
         task = self.task
         editable = self._editable
-        current = task.current_subtask() if editable else None
-        current_id = current.id if current is not None else None
+        active_path = task.active_focus_path_ids() if editable else frozenset()
 
         if not stats_only and self._goal_root_line is not None:
             self._goal_root_line.setText(
@@ -565,7 +576,7 @@ class GoalTreePanel(QWidget):
             if sub is None:
                 continue
             is_selected = sid == self._selected_subtask_id
-            is_current = sid == current_id
+            is_current = sid in active_path
             if stats_only and not (is_selected or is_current):
                 continue
             show_stats = is_selected or is_current

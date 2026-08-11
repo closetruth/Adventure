@@ -390,7 +390,7 @@ class TaskManager:
     ) -> bool:
         """将未完成叶子拆成分组：原进度迁入 legacy 子叶子，用户新叶子从 0 开始。"""
         t = self.get(task_id)
-        if not t or t.status != TaskStatus.ACTIVE:
+        if not t or t.status == TaskStatus.COMPLETED:
             return False
         sub = self._get_subtask(t, subtask_id)
         if sub is None or sub.done or not sub.is_leaf():

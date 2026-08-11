@@ -44,6 +44,12 @@ QWidget#SubtaskBlock[selected="true"] {
     border: 2px solid #7eb4ff;
     background-color: transparent;
 }
+QWidget#SubtaskBlock[focused="true"] {
+    background-color: rgba(126, 180, 255, 0.06);
+}
+QWidget#GoalBlock[focused="true"] {
+    background-color: rgba(126, 180, 255, 0.04);
+}
 QWidget#GoalBlock {
     background-color: transparent;
     border: none;
@@ -345,6 +351,7 @@ def build_subtask_action_buttons(
 
     is_active = task_status == TaskStatus.ACTIVE
     can_start = task_status in (TaskStatus.ACTIVE, TaskStatus.PAUSED)
+    can_modify = can_start
 
     is_current = is_active and sub.id == current_id and not sub.done
 
@@ -357,7 +364,7 @@ def build_subtask_action_buttons(
     if sub.is_leaf() and not sub.done and not sub.rewards_claimed:
         if is_current:
             if callbacks.on_pause is not None:
-                btn = _make_action_btn("||", tooltip="暂停聚焦", parent=wrap)
+                btn = _make_action_btn("||", tooltip="暂停整个目标", parent=wrap)
                 _connect_callback(btn, callbacks.on_pause)
                 lay.addWidget(btn)
         elif can_start and callbacks.on_focus is not None:
@@ -368,7 +375,7 @@ def build_subtask_action_buttons(
             btn = _make_action_btn("✓", tooltip="完成", parent=wrap)
             _connect_callback(btn, callbacks.on_complete)
             lay.addWidget(btn)
-        if is_active and callbacks.on_decompose is not None:
+        if can_modify and callbacks.on_decompose is not None:
             btn = _make_action_btn("拆", tooltip="分解目标", width=22, parent=wrap)
             _connect_callback(btn, callbacks.on_decompose)
             lay.addWidget(btn)
@@ -417,6 +424,7 @@ def append_subtask_detail_actions(
 
     is_active = task_status == TaskStatus.ACTIVE
     can_start = task_status in (TaskStatus.ACTIVE, TaskStatus.PAUSED)
+    can_modify = can_start
 
     if sub.is_container():
         if is_active and callbacks.on_add_child is not None:
@@ -458,7 +466,7 @@ def append_subtask_detail_actions(
                 btn = _make_detail_action_btn(
                     "暂停",
                     object_name="GoalPauseBtn",
-                    tooltip="暂停聚焦",
+                    tooltip="暂停整个目标",
                 )
                 _connect_callback(btn, callbacks.on_pause)
                 layout.addWidget(btn)
@@ -478,7 +486,7 @@ def append_subtask_detail_actions(
             )
             _connect_callback(btn, callbacks.on_complete)
             layout.addWidget(btn)
-        if is_active and callbacks.on_decompose is not None:
+        if can_modify and callbacks.on_decompose is not None:
             btn = _make_detail_action_btn(
                 "分解",
                 object_name="Ghost",

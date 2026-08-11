@@ -257,6 +257,13 @@ class Task:
             return path
         return []
 
+    def active_focus_path_ids(self) -> frozenset[str]:
+        """进行中且已聚焦叶子时，从根到叶的整条路径 id（含分组与叶子）。"""
+        if self.status != TaskStatus.ACTIVE or not self.current_subtask_id:
+            return frozenset()
+        path = self.subtask_path_ids(self.current_subtask_id)
+        return frozenset(path) if path else frozenset()
+
     def iter_visible_subtasks(
         self,
         expanded_ids: set[str],
