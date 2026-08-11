@@ -173,6 +173,19 @@ build.bat
 
 ---
 
+## 开奖音效（可选）
+
+将音频文件放入 `assets/sounds/`（支持 `.wav` / `.ogg` / `.mp3`）：
+
+| 路径 | 用途 |
+|------|------|
+| `roll_gold.*` | 中金币时播放的**固定**音效 |
+| `diamond/*` | 中钻石时从该文件夹**随机选一个**播放 |
+
+若同时中金币与钻石，两轨音效会**同时播放**。未放置任何音效文件时，程序不会初始化音频设备（零开销）。悬浮窗右键菜单可关闭「开奖音效」。
+
+---
+
 ## 项目结构
 
 ```
@@ -183,6 +196,10 @@ Adventure/
 ├── fix_game.bat           # 仅修复 pygame-ce
 ├── build.bat              # PyInstaller 打包
 ├── requirements.txt
+├── assets/
+│   └── sounds/
+│       ├── roll_gold.*        # 金币开奖音效（固定）
+│       └── diamond/           # 钻石开奖音效（多个，随机）
 ├── docs/
 │   └── engagement-mechanics.md  # 成瘾/留存机制设计草案
 ├── games/
