@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -19,12 +19,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .goal_actions import try_complete_goal, try_delete_goal
 from .models import AppState, Task, TaskStatus
 from .task_manager import TaskManager
+from .ui_confirm import ask_yes_no
 from .ui_goal_tree_panel import GoalTreePanel
 from .ui_styles import DARK_BASE_QSS
 from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_DETAIL_QSS
-from .ui_text import format_duration, format_reward_gain
+from .ui_text import format_duration
 
 DIALOG_STYLESHEET = DARK_BASE_QSS + """
 QTabWidget::pane {
@@ -150,14 +152,14 @@ class TaskCard(QFrame):
             b_complete = QPushButton("完成目标")
             b_complete.setObjectName("Primary")
             b_complete.clicked.connect(
-                lambda: self.action.emit(self.task.id, "complete", "")
+                lambda _c=False: self.action.emit(self.task.id, "complete", "")
             )
             btn_row.addWidget(b_complete)
         elif self.task.status == TaskStatus.PAUSED:
             b_complete = QPushButton("完成目标")
             b_complete.setObjectName("Ghost")
             b_complete.clicked.connect(
-                lambda: self.action.emit(self.task.id, "complete", "")
+                lambda _c=False: self.action.emit(self.task.id, "complete", "")
             )
             btn_row.addWidget(b_complete)
         else:
@@ -166,7 +168,9 @@ class TaskCard(QFrame):
         btn_row.addStretch(1)
         b_del = QPushButton("删除")
         b_del.setObjectName("Danger")
-        b_del.clicked.connect(lambda: self.action.emit(self.task.id, "delete", ""))
+        b_del.clicked.connect(
+            lambda _c=False: self.action.emit(self.task.id, "delete", "")
+        )
         btn_row.addWidget(b_del)
         v.addLayout(btn_row)
 
@@ -194,6 +198,8 @@ class TaskDialog(QDialog):
         self.state = state
         self.manager = manager
         self._card_selection: dict[str, str] = {}
+        self._refreshing = False
+        self._state_change_pending = False
 
         self.setWindowTitle("目标管理 - Adventure")
         self.resize(540, 640)
@@ -263,6 +269,17 @@ class TaskDialog(QDialog):
         self.state_changed.emit()
         self.refresh()
 
+    def _emit_state_changed(self) -> None:
+        """延迟发出，避免在按钮回调里同步重建卡片导致卡死。"""
+        if self._state_change_pending:
+            return
+        self._state_change_pending = True
+        QTimer.singleShot(0, self._flush_state_change)
+
+    def _flush_state_change(self) -> None:
+        self._state_change_pending = False
+        self.state_changed.emit()
+
     def _on_card_action(self, task_id: str, action: str, extra: str = "") -> None:
         if action == "pause":
             self.manager.pause(task_id)
@@ -270,18 +287,15 @@ class TaskDialog(QDialog):
             self.manager.resume(task_id)
         elif action == "subtask_toggle_fold":
             if self.manager.toggle_subtask_expand(task_id, extra):
-                self.state_changed.emit()
-                self.refresh()
+                self._emit_state_changed()
             return
         elif action == "subtask_focus":
-            if self.manager.focus_subtask(task_id, extra):
-                self.state_changed.emit()
-                self.refresh()
+            if self.manager.start_subtask(task_id, extra):
+                self._emit_state_changed()
             return
         elif action == "subtask_pause":
             if self.manager.pause_subtask_focus(task_id):
-                self.state_changed.emit()
-                self.refresh()
+                self._emit_state_changed()
             return
         elif action == "subtask_decompose":
             parts = extra.split("|", 1)
@@ -292,8 +306,7 @@ class TaskDialog(QDialog):
             if not titles:
                 return
             if self.manager.decompose_subtask(task_id, subtask_id, titles):
-                self.state_changed.emit()
-                self.refresh()
+                self._emit_state_changed()
             return
         elif action == "subtask_add":
             parts = extra.split("|")
@@ -304,12 +317,17 @@ class TaskDialog(QDialog):
                 target_minutes = max(1, int(parts[1]))
             if len(parts) >= 3 and parts[2]:
                 parent_subtask_id = parts[2]
-            self.manager.add_subtask(
+            sub = self.manager.add_subtask(
                 task_id,
                 title,
                 target_minutes=target_minutes,
                 parent_subtask_id=parent_subtask_id,
             )
+            if sub is None:
+                return
+            self._card_selection[task_id] = sub.id
+            self._emit_state_changed()
+            return
         elif action == "subtask_confirm_done":
             task = self.manager.get(task_id)
             if task is None:
@@ -339,8 +357,7 @@ class TaskDialog(QDialog):
             if not self.manager.confirm_manual_complete_subtask(task_id, extra):
                 self.refresh()
                 return
-            self.state_changed.emit()
-            self.refresh()
+            self._emit_state_changed()
             return
         elif action == "subtask_claim":
             task = self.manager.get(task_id)
@@ -352,8 +369,7 @@ class TaskDialog(QDialog):
             reward = self.manager.claim_subtask_reward(task_id, extra)
             if reward is not None:
                 self.subtask_claimed.emit(sub.title, reward)
-            self.state_changed.emit()
-            self.refresh()
+            self._emit_state_changed()
             return
         elif action == "subtask_delete":
             task = self.manager.get(task_id)
@@ -365,49 +381,23 @@ class TaskDialog(QDialog):
             if not sub.rewards_claimed:
                 p = sub.pending_summary()
                 if sub.done or p.gold or p.diamond:
-                    ret = QMessageBox.question(
+                    if not ask_yes_no(
                         self,
                         "删除目标",
                         f"「{sub.title}」有未领取奖励，确定删除吗？",
-                    )
-                    if ret != QMessageBox.Yes:
+                    ):
                         return
             self.manager.delete_subtask(task_id, extra)
         elif action == "delete":
-            task = self.manager.get(task_id)
-            if task is None:
-                return
-            ret = QMessageBox.question(
-                self, "删除目标",
-                f"确定要删除「{task.title}」吗？\n未领取的奖励将一并丢失。",
-            )
-            if ret != QMessageBox.Yes:
-                return
-            self.manager.delete(task_id)
+            if try_delete_goal(self, self.manager, task_id):
+                self._emit_state_changed()
+            return
         elif action == "complete":
-            task = self.manager.get(task_id)
-            if task is None:
-                return
-            if not self.manager.can_complete_task(task_id):
-                QMessageBox.information(
-                    self,
-                    "提示",
-                    "请先完成并领取所有目标的奖励，再完成目标。",
-                )
-                return
-            reward = self.manager.complete(task_id)
-            if reward is not None and not reward.is_empty():
-                QMessageBox.information(
-                    self, "恭喜",
-                    f"目标「{task.title}」已完成！\n获得 {format_reward_gain(reward.gold, reward.diamond)}",
-                )
-            else:
-                QMessageBox.information(
-                    self, "完成",
-                    f"目标「{task.title}」已完成。本次没有累计到奖励。",
-                )
-        self.state_changed.emit()
-        self.refresh()
+            if try_complete_goal(self, self.manager, task_id):
+                self._emit_state_changed()
+            return
+        # 由主程序统一 refresh 对话框，避免与按钮回调同步重建冲突
+        self._emit_state_changed()
 
     def _capture_card_selections(self) -> None:
         for tab in (self.tab_active, self.tab_paused, self.tab_done):
@@ -421,19 +411,25 @@ class TaskDialog(QDialog):
                 card.update_stats()
 
     def refresh(self) -> None:
-        self._capture_card_selections()
-        self._fill_tab(self.tab_active, self.manager.by_status(TaskStatus.ACTIVE))
-        self._fill_tab(self.tab_paused, self.manager.by_status(TaskStatus.PAUSED))
-        done = sorted(
-            self.manager.by_status(TaskStatus.COMPLETED),
-            key=lambda t: t.completed_at or 0,
-            reverse=True,
-        )
-        self._fill_tab(self.tab_done, done)
+        if self._refreshing:
+            return
+        self._refreshing = True
+        try:
+            self._capture_card_selections()
+            self._fill_tab(self.tab_active, self.manager.by_status(TaskStatus.ACTIVE))
+            self._fill_tab(self.tab_paused, self.manager.by_status(TaskStatus.PAUSED))
+            done = sorted(
+                self.manager.by_status(TaskStatus.COMPLETED),
+                key=lambda t: t.completed_at or 0,
+                reverse=True,
+            )
+            self._fill_tab(self.tab_done, done)
 
-        self.tabs.setTabText(0, f"进行中 ({len(self.manager.by_status(TaskStatus.ACTIVE))})")
-        self.tabs.setTabText(1, f"已暂停 ({len(self.manager.by_status(TaskStatus.PAUSED))})")
-        self.tabs.setTabText(2, f"已完成 ({len(self.manager.by_status(TaskStatus.COMPLETED))})")
+            self.tabs.setTabText(0, f"进行中 ({len(self.manager.by_status(TaskStatus.ACTIVE))})")
+            self.tabs.setTabText(1, f"已暂停 ({len(self.manager.by_status(TaskStatus.PAUSED))})")
+            self.tabs.setTabText(2, f"已完成 ({len(self.manager.by_status(TaskStatus.COMPLETED))})")
+        finally:
+            self._refreshing = False
 
     def _clear_tab_layout(self, layout: QVBoxLayout) -> None:
         while layout.count() > 0:
@@ -442,7 +438,7 @@ class TaskDialog(QDialog):
                 continue
             w = item.widget()
             if w is not None:
-                w.setParent(None)
+                w.hide()
                 w.deleteLater()
 
     def _fill_tab(self, tab: dict, tasks) -> None:

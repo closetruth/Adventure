@@ -75,16 +75,16 @@ def format_global_summary_html(
     parts: list[str] = []
     if ops_1min is not None:
         parts.append(
-            f'<span style="color:{_COLOR_MUTED}">近1分 </span>'
+            f'<span style="color:{_COLOR_OPS}">近1分 </span>'
             f'<span style="color:{_COLOR_OPS};font-weight:700">{ops_1min}</span>'
         )
     parts.extend([
-        f'<span style="color:{_COLOR_MUTED}">总操作 </span>'
+        f'<span style="color:{_COLOR_OPS}">总操作 </span>'
         f'<span style="color:{_COLOR_OPS};font-weight:700">{total_ops:,}</span>',
-        f'<span style="color:{_COLOR_MUTED}">金币 </span>'
+        f'<span style="color:{_COLOR_GOLD}">金币 </span>'
         f'<span style="color:{_COLOR_GOLD};font-weight:700">{format_amount(gold)}</span>',
-        f'<span style="color:{_COLOR_MUTED}">钻石 </span>'
-        f'<span style="color:{_COLOR_DIAM if diamond else _COLOR_MUTED};font-weight:700">'
+        f'<span style="color:{_COLOR_DIAM}">钻石 </span>'
+        f'<span style="color:{_COLOR_DIAM};font-weight:700">'
         f"{format_amount(diamond)}</span>",
     ])
     return f'<span style="{_font(11)}">' + _muted_sep().join(parts) + "</span>"

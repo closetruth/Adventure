@@ -28,7 +28,6 @@ class TaskManager:
                 t.sync_earned_from_subtasks()
             if t.status == TaskStatus.ACTIVE:
                 self._sync_current_subtask(t)
-                self.expand_all_subtasks(t)
                 self.sync_subtask_expand_to_focus(t)
 
     # ----- 查询 -----
@@ -94,6 +93,14 @@ class TaskManager:
             if sub.is_container():
                 expanded.add(sub.id)
         self._subtask_expanded[task.id] = expanded
+
+    def expand_subtask_path(self, task_id: str, subtask_id: str) -> None:
+        """展开到指定子项路径上的分组（不含叶子自身）。"""
+        t = self.get(task_id)
+        if t is None:
+            return
+        expanded = self._subtask_expanded.setdefault(task_id, set())
+        expanded |= self.subtask_container_ancestor_ids(t, subtask_id)
 
     def toggle_subtask_expand(self, task_id: str, subtask_id: str) -> bool:
         t = self.get(task_id)
@@ -249,7 +256,6 @@ class TaskManager:
             current.status = TaskStatus.PAUSED
         t.status = TaskStatus.ACTIVE
         self._sync_current_subtask(t)
-        self.expand_all_subtasks(t)
         self.sync_subtask_expand_to_focus(t)
         logger.info("恢复目标「%s」(id=%s)", t.title, task_id)
         return t
@@ -322,7 +328,6 @@ class TaskManager:
             t.subtasks.append(sub)
             if t.status == TaskStatus.ACTIVE and t.current_subtask_id is None:
                 self._sync_current_subtask(t)
-        self.expand_all_subtasks(t)
         logger.info(
             "添加子目标「%s」(task_id=%s, parent=%s, target=%dmin)",
             title,
@@ -406,7 +411,7 @@ class TaskManager:
         first_user_child = new_children[0] if new_children else None
         if was_focused and first_user_child is not None:
             t.current_subtask_id = first_user_child.id
-        self.expand_all_subtasks(t)
+        self._subtask_expanded.setdefault(task_id, set()).add(subtask_id)
         self.sync_subtask_expand_to_focus(t)
         logger.info(
             "分解子目标「%s」→ %s + %d 个新子项 (task_id=%s)",
@@ -416,6 +421,17 @@ class TaskManager:
             task_id,
         )
         return True
+
+    def start_subtask(self, task_id: str, subtask_id: str) -> bool:
+        """恢复已暂停目标（如需）并聚焦叶子子目标。"""
+        t = self.get(task_id)
+        if not t or t.status == TaskStatus.COMPLETED:
+            return False
+        if t.status == TaskStatus.PAUSED:
+            resumed = self.resume(task_id)
+            if resumed is None or resumed.status != TaskStatus.ACTIVE:
+                return False
+        return self.focus_subtask(task_id, subtask_id)
 
     def focus_subtask(self, task_id: str, subtask_id: str) -> bool:
         """将叶子子目标设为 current（开始累计 ops/时长/奖励）。"""

@@ -295,6 +295,16 @@ class SubtaskActionCallbacks:
     on_add_child: Optional[Callable[[], None]] = None
 
 
+def _connect_callback(
+    btn: QPushButton,
+    callback: Optional[Callable[[], None]],
+) -> None:
+    """连接无参回调；兼容 QPushButton.clicked 传入的 checked 参数。"""
+    if callback is None:
+        return
+    btn.clicked.connect(lambda _checked=False, cb=callback: cb())
+
+
 def _make_action_btn(
     text: str,
     *,
@@ -317,7 +327,7 @@ def _make_action_btn(
 def build_subtask_action_buttons(
     sub: Subtask,
     *,
-    editable: bool,
+    task_status: TaskStatus,
     current_id: Optional[str],
     callbacks: SubtaskActionCallbacks,
     parent: QWidget | None = None,
@@ -329,50 +339,162 @@ def build_subtask_action_buttons(
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(0)
 
-    if not editable:
+    if task_status == TaskStatus.COMPLETED:
         wrap.hide()
         return wrap
 
-    is_current = sub.id == current_id and not sub.done
+    is_active = task_status == TaskStatus.ACTIVE
+    can_start = task_status in (TaskStatus.ACTIVE, TaskStatus.PAUSED)
 
-    if sub.is_leaf() and (sub.can_claim_pending() or sub.is_claimable()):
+    is_current = is_active and sub.id == current_id and not sub.done
+
+    if is_active and sub.is_leaf() and (sub.can_claim_pending() or sub.is_claimable()):
         if callbacks.on_claim is not None:
             btn = _make_action_btn("↓", tooltip="领取奖励", primary=True, parent=wrap)
-            btn.clicked.connect(callbacks.on_claim)
+            _connect_callback(btn, callbacks.on_claim)
             lay.addWidget(btn)
 
     if sub.is_leaf() and not sub.done and not sub.rewards_claimed:
         if is_current:
             if callbacks.on_pause is not None:
                 btn = _make_action_btn("||", tooltip="暂停聚焦", parent=wrap)
-                btn.clicked.connect(callbacks.on_pause)
+                _connect_callback(btn, callbacks.on_pause)
                 lay.addWidget(btn)
-        elif callbacks.on_focus is not None:
-            btn = _make_action_btn("▶", tooltip="开始聚焦", parent=wrap)
-            btn.clicked.connect(callbacks.on_focus)
+        elif can_start and callbacks.on_focus is not None:
+            btn = _make_action_btn("开始", tooltip="开始运行", width=34, parent=wrap)
+            _connect_callback(btn, callbacks.on_focus)
             lay.addWidget(btn)
-        if sub.time_target_met() and callbacks.on_complete is not None:
+        if is_active and sub.time_target_met() and callbacks.on_complete is not None:
             btn = _make_action_btn("✓", tooltip="完成", parent=wrap)
-            btn.clicked.connect(callbacks.on_complete)
+            _connect_callback(btn, callbacks.on_complete)
             lay.addWidget(btn)
-        if callbacks.on_decompose is not None:
+        if is_active and callbacks.on_decompose is not None:
             btn = _make_action_btn("拆", tooltip="分解目标", width=22, parent=wrap)
-            btn.clicked.connect(callbacks.on_decompose)
+            _connect_callback(btn, callbacks.on_decompose)
             lay.addWidget(btn)
 
     if sub.is_container() and not sub.is_claimable():
-        if not (sub.done and sub.rewards_claimed) and callbacks.on_add_child is not None:
+        if is_active and not (sub.done and sub.rewards_claimed) and callbacks.on_add_child is not None:
             btn = _make_action_btn("+", tooltip="添加子项", parent=wrap)
-            btn.clicked.connect(callbacks.on_add_child)
+            _connect_callback(btn, callbacks.on_add_child)
             lay.addWidget(btn)
 
     if not (sub.done and sub.rewards_claimed) and callbacks.on_delete is not None:
         btn = _make_action_btn("×", tooltip="删除", parent=wrap)
-        btn.clicked.connect(callbacks.on_delete)
+        _connect_callback(btn, callbacks.on_delete)
         lay.addWidget(btn)
 
     wrap.setVisible(False)
     return wrap
+
+
+def _make_detail_action_btn(
+    text: str,
+    *,
+    object_name: str,
+    tooltip: str = "",
+    parent: QWidget | None = None,
+) -> QPushButton:
+    btn = QPushButton(text, parent)
+    btn.setObjectName(object_name)
+    btn.setCursor(Qt.PointingHandCursor)
+    if tooltip:
+        btn.setToolTip(tooltip)
+    return btn
+
+
+def append_subtask_detail_actions(
+    layout: QHBoxLayout,
+    sub: Subtask,
+    *,
+    task_status: TaskStatus,
+    current_id: Optional[str],
+    callbacks: SubtaskActionCallbacks,
+) -> None:
+    """详情面板：子目标常显操作按钮（叶子 / 分组）。"""
+    if task_status == TaskStatus.COMPLETED:
+        return
+
+    is_active = task_status == TaskStatus.ACTIVE
+    can_start = task_status in (TaskStatus.ACTIVE, TaskStatus.PAUSED)
+
+    if sub.is_container():
+        if is_active and callbacks.on_add_child is not None:
+            btn = _make_detail_action_btn(
+                "添加子项",
+                object_name="Ghost",
+                tooltip="在此分组下添加子目标",
+            )
+            _connect_callback(btn, callbacks.on_add_child)
+            layout.addWidget(btn)
+        if not (sub.done and sub.rewards_claimed) and callbacks.on_delete is not None:
+            btn = _make_detail_action_btn(
+                "删除",
+                object_name="Danger",
+                tooltip="删除此分组",
+            )
+            _connect_callback(btn, callbacks.on_delete)
+            layout.addWidget(btn)
+        return
+
+    if not sub.is_leaf():
+        return
+
+    is_current = is_active and sub.id == current_id and not sub.done
+
+    if is_active and (sub.can_claim_pending() or sub.is_claimable()):
+        if callbacks.on_claim is not None:
+            btn = _make_detail_action_btn(
+                "领取",
+                object_name="Primary",
+                tooltip="领取奖励",
+            )
+            _connect_callback(btn, callbacks.on_claim)
+            layout.addWidget(btn)
+
+    if not sub.done and not sub.rewards_claimed:
+        if is_current:
+            if callbacks.on_pause is not None:
+                btn = _make_detail_action_btn(
+                    "暂停",
+                    object_name="GoalPauseBtn",
+                    tooltip="暂停聚焦",
+                )
+                _connect_callback(btn, callbacks.on_pause)
+                layout.addWidget(btn)
+        elif can_start and callbacks.on_focus is not None:
+            btn = _make_detail_action_btn(
+                "开始运行",
+                object_name="GoalResumeBtn",
+                tooltip="开始运行此子目标",
+            )
+            _connect_callback(btn, callbacks.on_focus)
+            layout.addWidget(btn)
+        if is_active and sub.time_target_met() and callbacks.on_complete is not None:
+            btn = _make_detail_action_btn(
+                "完成",
+                object_name="Ghost",
+                tooltip="标记完成",
+            )
+            _connect_callback(btn, callbacks.on_complete)
+            layout.addWidget(btn)
+        if is_active and callbacks.on_decompose is not None:
+            btn = _make_detail_action_btn(
+                "分解",
+                object_name="Ghost",
+                tooltip="分解为多个子项",
+            )
+            _connect_callback(btn, callbacks.on_decompose)
+            layout.addWidget(btn)
+
+    if not (sub.done and sub.rewards_claimed) and callbacks.on_delete is not None:
+        btn = _make_detail_action_btn(
+            "删除",
+            object_name="Danger",
+            tooltip="删除此子目标",
+        )
+        _connect_callback(btn, callbacks.on_delete)
+        layout.addWidget(btn)
 
 
 class TreeRow(QWidget):
@@ -400,13 +522,22 @@ class TreeRow(QWidget):
         self.style().polish(self)
         self._sync_actions_visible()
 
+    def set_row_focused(self, focused: bool) -> None:
+        self.setProperty("subcurrent", focused)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._sync_actions_visible()
+
     def _sync_actions_visible(self) -> None:
         if self._actions_widget is None:
             return
         lay = self._actions_widget.layout()
         has_buttons = lay is not None and lay.count() > 0
         hovered = self.underMouse()
-        self._actions_widget.setVisible(has_buttons and (self._selected or hovered))
+        focused = bool(self.property("subcurrent"))
+        self._actions_widget.setVisible(
+            has_buttons and (self._selected or hovered or focused)
+        )
 
     def enterEvent(self, event) -> None:
         self._sync_actions_visible()
