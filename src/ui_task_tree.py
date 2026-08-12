@@ -350,8 +350,6 @@ def build_subtask_action_buttons(
         return wrap
 
     is_active = task_status == TaskStatus.ACTIVE
-    can_start = task_status in (TaskStatus.ACTIVE, TaskStatus.PAUSED)
-    can_modify = can_start
 
     is_current = is_active and sub.id == current_id and not sub.done
 
@@ -367,17 +365,9 @@ def build_subtask_action_buttons(
                 btn = _make_action_btn("||", tooltip="暂停整个目标", parent=wrap)
                 _connect_callback(btn, callbacks.on_pause)
                 lay.addWidget(btn)
-        elif can_start and callbacks.on_focus is not None:
-            btn = _make_action_btn("开始", tooltip="开始运行", width=34, parent=wrap)
-            _connect_callback(btn, callbacks.on_focus)
-            lay.addWidget(btn)
         if is_active and sub.time_target_met() and callbacks.on_complete is not None:
             btn = _make_action_btn("✓", tooltip="完成", parent=wrap)
             _connect_callback(btn, callbacks.on_complete)
-            lay.addWidget(btn)
-        if can_modify and callbacks.on_decompose is not None:
-            btn = _make_action_btn("拆", tooltip="分解目标", width=22, parent=wrap)
-            _connect_callback(btn, callbacks.on_decompose)
             lay.addWidget(btn)
 
     if sub.is_container() and not sub.is_claimable():
@@ -385,11 +375,6 @@ def build_subtask_action_buttons(
             btn = _make_action_btn("+", tooltip="添加子项", parent=wrap)
             _connect_callback(btn, callbacks.on_add_child)
             lay.addWidget(btn)
-
-    if not (sub.done and sub.rewards_claimed) and callbacks.on_delete is not None:
-        btn = _make_action_btn("×", tooltip="删除", parent=wrap)
-        _connect_callback(btn, callbacks.on_delete)
-        lay.addWidget(btn)
 
     wrap.setVisible(False)
     return wrap

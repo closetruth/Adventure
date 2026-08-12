@@ -5,9 +5,9 @@ import time
 from typing import TYPE_CHECKING, Iterable, List
 
 if TYPE_CHECKING:
-    from .models import RollHistoryEntry, Subtask, Task
+    from .models import Reward, RollHistoryEntry, Subtask, Task
 else:
-    from .models import Subtask, Task, TaskStatus
+    from .models import Reward, Subtask, Task, TaskStatus
 
 
 def format_duration(seconds: float) -> str:
@@ -41,8 +41,12 @@ def _html_escape(text: str) -> str:
 
 # 子目标区：深色底 + 彩色数据（避免一片白）
 _COLOR_OPS = "#6ee7a0"
+_COLOR_OPS_1MIN = "#ff9f6b"
 _COLOR_GOLD = "#f5c842"
 _COLOR_DIAM = "#5ec8f2"
+_TOAST_GOLD = "#ffd54f"
+_TOAST_DIAM = "#7dd3fc"
+_TOAST_CRIT = "#ff9f43"
 _COLOR_TIME = "#b0b8cc"
 _COLOR_TEXT = "#ffffff"
 _COLOR_MUTED = "#e8ecf4"
@@ -64,6 +68,75 @@ def _muted_sep() -> str:
     return f'<span style="color:{_COLOR_MUTED}"> · </span>'
 
 
+def _crit_base(amount: float, mult: float) -> str:
+    """由暴击后实得反推基数（一位小数）。"""
+    if mult <= 0:
+        return format_amount(amount)
+    return format_amount(round(float(amount) / float(mult), 1))
+
+
+def _html_span(color: str, text: str, *, bold: bool = True) -> str:
+    weight = "font-weight:700;" if bold else ""
+    return f'<span style="color:{color};{weight}">{text}</span>'
+
+
+def _crit_formula_html(
+    amount: float,
+    mult: float,
+    label: str,
+    amount_color: str,
+    formula_color: str,
+    *,
+    spaced: bool,
+) -> str:
+    """基数 × 倍率 → +实得标签。"""
+    base = _crit_base(amount, mult)
+    mult_txt = format_amount(mult)
+    if spaced:
+        left = _html_span(formula_color, f"{base} × {mult_txt}")
+        arrow = _html_span(_COLOR_MUTED, " → ", bold=False)
+        gained = f"+{format_amount(amount)} {label}"
+    else:
+        left = _html_span(formula_color, f"{base}×{mult_txt}")
+        arrow = _html_span(_COLOR_MUTED, "→", bold=False)
+        gained = f"+{format_amount(amount)}{label}"
+    return left + arrow + _html_span(amount_color, gained)
+
+
+def _plain_amount_html(
+    amount: float,
+    label: str,
+    color: str,
+    *,
+    spaced: bool,
+) -> str:
+    text = (
+        f"+{format_amount(amount)} {label}"
+        if spaced
+        else f"+{format_amount(amount)}{label}"
+    )
+    return _html_span(color, text)
+
+
+def _crit_formula_plain(
+    amount: float,
+    mult: float,
+    label: str,
+    *,
+    spaced: bool,
+) -> str:
+    """纯文本：未暴击只写实得；暴击写成 基数×倍率→实得。"""
+    if mult <= 1.0:
+        if spaced:
+            return f"+{format_amount(amount)} {label}"
+        return f"+{format_amount(amount)}{label}"
+    base = _crit_base(amount, mult)
+    mult_txt = format_amount(mult)
+    if spaced:
+        return f"{base} × {mult_txt} → +{format_amount(amount)} {label}"
+    return f"{base}×{mult_txt}→+{format_amount(amount)}{label}"
+
+
 def format_global_summary_html(
     total_ops: int,
     gold: float,
@@ -75,8 +148,8 @@ def format_global_summary_html(
     parts: list[str] = []
     if ops_1min is not None:
         parts.append(
-            f'<span style="color:{_COLOR_OPS}">近1分 </span>'
-            f'<span style="color:{_COLOR_OPS};font-weight:700">{ops_1min}</span>'
+            f'<span style="color:{_COLOR_OPS_1MIN}">近1分 </span>'
+            f'<span style="color:{_COLOR_OPS_1MIN};font-weight:700">{ops_1min}</span>'
         )
     parts.extend([
         f'<span style="color:{_COLOR_OPS}">总操作 </span>'
@@ -88,6 +161,54 @@ def format_global_summary_html(
         f"{format_amount(diamond)}</span>",
     ])
     return f'<span style="{_font(11)}">' + _muted_sep().join(parts) + "</span>"
+
+
+def format_roll_toast_html(reward: "Reward") -> str:
+    """开奖 Toast：金黄钻青分色；暴击写成 基数 × 倍率 → 实得。"""
+    gold_hit = reward.gold > 0
+    diam_hit = reward.diamond > 0
+    dual = gold_hit and diam_hit
+    spaced = not dual
+    parts: list[str] = []
+    if gold_hit:
+        gold_label = "金" if dual else "金币"
+        if reward.gold_is_crit():
+            parts.append(
+                _crit_formula_html(
+                    reward.gold,
+                    reward.gold_crit_mult,
+                    gold_label,
+                    _TOAST_GOLD,
+                    _TOAST_CRIT,
+                    spaced=spaced,
+                )
+            )
+        else:
+            parts.append(
+                _plain_amount_html(
+                    reward.gold, gold_label, _TOAST_GOLD, spaced=spaced
+                )
+            )
+    if diam_hit:
+        diam_label = "钻" if dual else "钻石"
+        if reward.diamond_is_crit():
+            parts.append(
+                _crit_formula_html(
+                    reward.diamond,
+                    reward.diamond_crit_mult,
+                    diam_label,
+                    _TOAST_DIAM,
+                    _TOAST_CRIT,
+                    spaced=spaced,
+                )
+            )
+        else:
+            parts.append(
+                _plain_amount_html(
+                    reward.diamond, diam_label, _TOAST_DIAM, spaced=spaced
+                )
+            )
+    return "  ".join(parts)
 
 
 def format_roll_history_line_html(
@@ -102,17 +223,43 @@ def format_roll_history_line_html(
         return f'{op} <span style="color:{_COLOR_MUTED}">{miss}</span>'
     reward_parts: list[str] = []
     if entry.gold:
-        suffix = "金" if compact else " 金币"
-        reward_parts.append(
-            f'<span style="color:{_COLOR_GOLD};font-weight:700">'
-            f"+{format_amount(entry.gold)}{suffix}</span>"
-        )
+        gold_label = "金" if compact else "金币"
+        if entry.gold_crit_mult > 1.0:
+            reward_parts.append(
+                _crit_formula_html(
+                    entry.gold,
+                    entry.gold_crit_mult,
+                    gold_label,
+                    _COLOR_GOLD,
+                    _COLOR_WARN,
+                    spaced=not compact,
+                )
+            )
+        else:
+            reward_parts.append(
+                _plain_amount_html(
+                    entry.gold, gold_label, _COLOR_GOLD, spaced=not compact
+                )
+            )
     if entry.diamond:
-        suffix = "钻" if compact else " 钻石"
-        reward_parts.append(
-            f'<span style="color:{_COLOR_DIAM};font-weight:700">'
-            f"+{format_amount(entry.diamond)}{suffix}</span>"
-        )
+        diam_label = "钻" if compact else "钻石"
+        if entry.diamond_crit_mult > 1.0:
+            reward_parts.append(
+                _crit_formula_html(
+                    entry.diamond,
+                    entry.diamond_crit_mult,
+                    diam_label,
+                    _COLOR_DIAM,
+                    _COLOR_WARN,
+                    spaced=not compact,
+                )
+            )
+        else:
+            reward_parts.append(
+                _plain_amount_html(
+                    entry.diamond, diam_label, _COLOR_DIAM, spaced=not compact
+                )
+            )
     gap = " " if compact else f' <span style="color:{_COLOR_MUTED}">·</span> '
     return f"{op} {gap.join(reward_parts)}"
 
@@ -202,27 +349,31 @@ def format_widget_runtime_html(
 
 
 def format_timestamp_short(ts: float | None) -> str:
-    """短日期时间，用于子目标行。"""
+    """短日期时间（含年），用于详情条创建/完成。"""
     if ts is None:
         return ""
-    return time.strftime("%m-%d %H:%M", time.localtime(ts))
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
 
-def _format_subgoal_dates_html(sub: Subtask) -> str:
+def _format_created_completed_html(
+    created_at: float | None,
+    completed_at: float | None,
+) -> list[str]:
+    """详情条可拼接的「创建 / 完成」片段（未完成则无完成项）。"""
     parts: list[str] = []
-    created = format_timestamp_short(sub.created_at)
+    created = format_timestamp_short(created_at)
     if created:
-        parts.append(f"创 {created}")
-    completed = format_timestamp_short(sub.completed_at)
+        parts.append(
+            f'<span style="color:{_COLOR_MUTED}">创建 </span>'
+            f'<span style="color:{_COLOR_TIME};font-weight:700">{created}</span>'
+        )
+    completed = format_timestamp_short(completed_at)
     if completed:
-        parts.append(f"完 {completed}")
-    if not parts:
-        return ""
-    joined = " · ".join(parts)
-    return (
-        f'<br/><span style="color:{_COLOR_MUTED};font-size:11px;">'
-        f"&nbsp;&nbsp;{joined}</span>"
-    )
+        parts.append(
+            f'<span style="color:{_COLOR_MUTED}">完成 </span>'
+            f'<span style="color:{_COLOR_TIME};font-weight:700">{completed}</span>'
+        )
+    return parts
 
 
 def format_subgoals_focus_hint_html(active: Task) -> str:
@@ -293,10 +444,12 @@ def format_active_since_roll_html(since_gold: float, since_diamond: float) -> st
     )
 
 
-def _format_inline_stats_html(operations: int, gold: float, diamond: float) -> str:
+def _format_inline_stats_html(operations: int, active_seconds: float) -> str:
+    """树行标题后的紧凑统计：仅操作与运行时间。"""
+    duration = format_duration(active_seconds)
     return (
         f'  <span style="color:{_COLOR_MUTED};font-weight:500">'
-        f"操作 {operations} · 金 {format_amount(gold)}</span>"
+        f"操作 {operations} · 运行 {duration}</span>"
     )
 
 
@@ -328,7 +481,7 @@ def format_tree_node_html(
         done = sum(1 for s in leaves if s.done)
         total = len(leaves)
         ops = sub.rollup_operations()
-        gold, diamond = sub.rollup_earned()
+        secs = sub.rollup_active_seconds()
         prefix = ""
         if is_current and not sub.done:
             prefix = f'<span style="color:{_COLOR_CURRENT};font-weight:700">● </span>'
@@ -337,8 +490,8 @@ def format_tree_node_html(
             f'<span style="color:{title_color};font-weight:{title_weight};">{title}</span>  '
             f'<span style="color:{_COLOR_MUTED}">({done}/{total})</span>'
         )
-        if show_stats or ops or gold or diamond:
-            inner += _format_inline_stats_html(ops, gold, diamond)
+        if show_stats or ops or secs:
+            inner += _format_inline_stats_html(ops, secs)
         return f'<span style="{_font(13)}">{inner}</span>'
 
     if sub.done:
@@ -354,12 +507,10 @@ def format_tree_node_html(
         f'<span style="color:{marker_color};font-weight:700">{marker}</span> '
         f'<span style="color:{title_color};font-weight:{title_weight}">{title}</span>'
     )
-    has_stats = sub.operations or sub.earned_gold or sub.earned_diamond
+    has_stats = bool(sub.operations or sub.active_seconds)
     if show_stats or sub.done or has_stats:
         if has_stats or sub.done:
-            inner += _format_inline_stats_html(
-                sub.operations, sub.earned_gold, sub.earned_diamond,
-            )
+            inner += _format_inline_stats_html(sub.operations, sub.active_seconds)
     return f'<span style="{_font(13)}">{inner}</span>'
 
 
@@ -374,10 +525,16 @@ def format_tree_detail_html(
     """详情面板统计文案。"""
     if sub is None:
         gold, diamond = task.earned_totals()
-        lines = [
-            format_goal_compact_html(task.rollup_operations(), gold, diamond),
+        accum_parts = [
             f'<span style="color:{_COLOR_MUTED}">累计 '
             f'{format_duration(task.active_duration_seconds())}</span>',
+        ]
+        accum_parts.extend(
+            _format_created_completed_html(task.created_at, task.completed_at)
+        )
+        lines = [
+            format_goal_compact_html(task.rollup_operations(), gold, diamond),
+            "  ".join(accum_parts),
         ]
         if task.status == TaskStatus.ACTIVE:
             lines.append(
@@ -407,6 +564,7 @@ def format_tree_detail_html(
         format_goal_compact_html(sub.operations, sub.earned_gold, sub.earned_diamond),
         format_subgoal_runtime_html(sub),
     ]
+    parts.extend(_format_created_completed_html(sub.created_at, sub.completed_at))
     if sub.is_claimable():
         pending = sub.pending_summary()
         parts.append(
@@ -492,16 +650,32 @@ def format_roll_history_line(
     elif compact:
         parts = []
         if entry.gold:
-            parts.append(f"+{format_amount(entry.gold)}金")
+            parts.append(
+                _crit_formula_plain(
+                    entry.gold, entry.gold_crit_mult, "金", spaced=False
+                )
+            )
         if entry.diamond:
-            parts.append(f"+{format_amount(entry.diamond)}钻")
+            parts.append(
+                _crit_formula_plain(
+                    entry.diamond, entry.diamond_crit_mult, "钻", spaced=False
+                )
+            )
         text = f"{op} {' '.join(parts)}"
     else:
         parts = []
         if entry.gold:
-            parts.append(f"+{format_amount(entry.gold)} 金币")
+            parts.append(
+                _crit_formula_plain(
+                    entry.gold, entry.gold_crit_mult, "金币", spaced=True
+                )
+            )
         if entry.diamond:
-            parts.append(f"+{format_amount(entry.diamond)} 钻石")
+            parts.append(
+                _crit_formula_plain(
+                    entry.diamond, entry.diamond_crit_mult, "钻石", spaced=True
+                )
+            )
         text = f"{op}  {' · '.join(parts)}"
     if include_time:
         ts = time.strftime("%m-%d %H:%M", time.localtime(entry.at))

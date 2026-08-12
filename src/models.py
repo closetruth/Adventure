@@ -25,9 +25,20 @@ class Reward:
     diamond: float = 0.0
     # 触发时所属的操作计数，便于排序回顾
     op_at: int = 0
+    gold_crit_mult: float = 1.0
+    diamond_crit_mult: float = 1.0
 
     def is_empty(self) -> bool:
         return self.gold == 0 and self.diamond == 0
+
+    def gold_is_crit(self) -> bool:
+        return self.gold > 0 and self.gold_crit_mult > 1.0
+
+    def diamond_is_crit(self) -> bool:
+        return self.diamond > 0 and self.diamond_crit_mult > 1.0
+
+    def has_crit(self) -> bool:
+        return self.gold_is_crit() or self.diamond_is_crit()
 
 
 @dataclass
@@ -396,6 +407,8 @@ class RollHistoryEntry:
     hit: bool = False
     gold: float = 0.0
     diamond: float = 0.0
+    gold_crit_mult: float = 1.0
+    diamond_crit_mult: float = 1.0
     task_title: str = ""
 
     @classmethod
@@ -406,6 +419,8 @@ class RollHistoryEntry:
             hit=bool(data.get("hit", False)),
             gold=float(data.get("gold", 0)),
             diamond=float(data.get("diamond", 0)),
+            gold_crit_mult=float(data.get("gold_crit_mult", 1.0)),
+            diamond_crit_mult=float(data.get("diamond_crit_mult", 1.0)),
             task_title=str(data.get("task_title", "")),
         )
 
