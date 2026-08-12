@@ -25,6 +25,9 @@ GOLD_MAX_RANGE = (1.0, 2.0)
 DIAMOND_MIN_RANGE = (0.01, 0.03)
 DIAMOND_MAX_RANGE = (0.12, 0.35)
 SHUFFLE_INTERVAL_SEC = 600
+CRIT_CHANCE = 0.08
+CRIT_MULT_MIN = 1.2
+CRIT_MULT_MAX = 20.0
 
 
 def _rand_float(lo: float, hi: float) -> float:
@@ -44,6 +47,12 @@ def _right_skewed(lo: float, hi: float, *, sigma: float = 0.55) -> float:
         if lo <= x <= hi:
             return x
     return max(lo, min(hi, x))
+
+
+def _crit_multiplier(*, hi: float = CRIT_MULT_MAX) -> float:
+    """右偏暴击倍率：多数接近 1x，极少数接近高倍。"""
+    mult = _right_skewed(CRIT_MULT_MIN, hi, sigma=0.95)
+    return min(hi, round(mult, 1))
 
 
 def generate_segment_colors(span: int) -> List[str]:
@@ -149,6 +158,8 @@ def _append_roll_history(state: AppState, reward: Reward) -> None:
         hit=not reward.is_empty(),
         gold=reward.gold,
         diamond=reward.diamond,
+        gold_crit_mult=reward.gold_crit_mult,
+        diamond_crit_mult=reward.diamond_crit_mult,
         task_title=active.title if active else "",
     )
     state.roll_history.insert(0, entry)
@@ -189,14 +200,31 @@ def maybe_roll(state: AppState) -> Optional[Reward]:
         # 被四舍五入成 0，继而被误记为“未中奖”且不触发钻石音效。
         diamond = max(0.1, round(_right_skewed(dmin, dmax), 1))
 
-    reward = Reward(gold=gold, diamond=diamond, op_at=state.total_operations)
+    gold_crit_mult = 1.0
+    diamond_crit_mult = 1.0
+    if gold > 0 and random.random() < CRIT_CHANCE:
+        gold_crit_mult = _crit_multiplier()
+        gold = round(gold * gold_crit_mult, 1)
+    if diamond > 0 and random.random() < CRIT_CHANCE:
+        diamond_crit_mult = _crit_multiplier()
+        diamond = max(0.1, round(diamond * diamond_crit_mult, 1))
+
+    reward = Reward(
+        gold=gold,
+        diamond=diamond,
+        op_at=state.total_operations,
+        gold_crit_mult=gold_crit_mult,
+        diamond_crit_mult=diamond_crit_mult,
+    )
     if reward.is_empty():
         logger.debug("开奖落空 (ops=%d)", state.total_operations)
     else:
         logger.info(
-            "开奖命中 gold=%.1f diamond=%.1f (ops=%d)",
+            "开奖命中 gold=%.1f diamond=%.1f crit=(%.1fx, %.1fx) (ops=%d)",
             reward.gold,
             reward.diamond,
+            reward.gold_crit_mult,
+            reward.diamond_crit_mult,
             state.total_operations,
         )
     _append_roll_history(state, reward)
