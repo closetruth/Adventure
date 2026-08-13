@@ -26,7 +26,7 @@ _app = QApplication.instance() or QApplication([])
 
 
 class WidgetGeometryRegressionTest(unittest.TestCase):
-    """回归：窗口 minimumSizeHint 必须 ≤ 600，点击后窗口高度不变。"""
+    """回归：窗口 minimumSizeHint 必须 ≤ 600，点击/显示后窗口高度不变。"""
 
     @classmethod
     def setUpClass(cls):
@@ -45,6 +45,17 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
         _app.processEvents()
         _app.processEvents()
         cls.widget = widget
+
+    def test_show_does_not_grow_window_after_layout(self):
+        """回归：显示后不得把窗口撑大（曾从 631 撑回 677）。"""
+        widget = self.widget
+        _app.processEvents()
+        h_after_show = widget.height()
+        widget.hide()
+        widget.show()
+        _app.processEvents()
+        _app.processEvents()
+        self.assertEqual(widget.height(), h_after_show, "show 后窗口高度不得变化")
 
     def test_click_tree_rows_does_not_resize_window(self):
         widget = self.widget
