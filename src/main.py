@@ -213,9 +213,10 @@ class Application(QObject):
         if screen is None:
             return
         geo = screen.availableGeometry()
-        # 默认放置到屏幕右上角，留出 24px 边距
-        self.widget.adjustSize()
-        size = self.widget.sizeHint()
+        # 默认放置到屏幕右上角，留出 24px 边距。
+        # 不要 adjustSize()：启动时布局未算完会算出错误高度，
+        # 显示后重排把窗口“撑大”，用户感知为窗口自己变大。
+        size = self.widget.size()
         x = geo.right() - size.width() - 24
         y = geo.top() + 80
         self.widget.move(x, y)

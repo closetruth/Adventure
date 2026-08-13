@@ -408,8 +408,8 @@ class FloatingWidget(QWidget):
         self.setWindowFlags(flags)
         self.setFixedWidth(308)
         self.setMinimumHeight(600)
-        # 高度上限：内容再多也只在窗口内滚动，不让布局把窗口越顶越高
-        self.setMaximumHeight(760)
+        # 高度上限 = 初始高度：任何布局重算都不得把窗口撑过 680
+        self.setMaximumHeight(680)
         self.resize(308, 680)
 
         self._op_tracker = OpRateTracker(window_sec=60.0)
@@ -2183,11 +2183,9 @@ class FloatingWidget(QWidget):
         )
 
     def showEvent(self, event) -> None:
+        # 不做显示后几何重算：启动重排曾在显示后把窗口从 631 撑回 677，
+        # 用户感知为“窗口自己变大”。初始几何已在 __init__/_refresh 中同步完成。
         super().showEvent(event)
-        QTimer.singleShot(
-            0,
-            lambda: self._sync_subgoals_container_geometry(remeasure=True),
-        )
 
     # ---------- 刷新 ----------
     def refresh(self) -> None:
