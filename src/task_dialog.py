@@ -335,30 +335,31 @@ class TaskDialog(QDialog):
             if task is None:
                 return
             sub = task.find_subtask(extra)
-            if sub is None or sub.done:
+            if sub is None:
                 self.refresh()
                 return
-            if not self.manager.subtask_time_met(task_id, extra):
-                QMessageBox.information(
-                    self,
-                    "提示",
-                    f"目标「{sub.title}」时长未达标（"
-                    f"{format_duration(sub.active_seconds)}/"
-                    f"{format_duration(sub.target_seconds)}），暂不能完成。",
-                )
+            if not sub.can_finish():
+                if not sub.done:
+                    QMessageBox.information(
+                        self,
+                        "提示",
+                        f"目标「{sub.title}」时长未达标（"
+                        f"{format_duration(sub.active_seconds)}/"
+                        f"{format_duration(sub.target_seconds)}），暂不能完成。",
+                    )
                 self.refresh()
                 return
             ret = QMessageBox.question(
                 self,
                 "完成目标",
-                f"完成目标「{sub.title}」？\n完成后请点击「领取」获得奖励。",
+                f"完成目标「{sub.title}」并领取奖励？",
             )
             if ret != QMessageBox.Yes:
                 self.refresh()
                 return
-            if not self.manager.confirm_manual_complete_subtask(task_id, extra):
-                self.refresh()
-                return
+            reward = self.manager.complete_and_claim_subtask(task_id, extra)
+            if reward is not None:
+                self.subtask_claimed.emit(sub.title, reward)
             self._emit_state_changed()
             return
         elif action == "subtask_claim":
@@ -368,7 +369,7 @@ class TaskDialog(QDialog):
             sub = task.find_subtask(extra)
             if sub is None:
                 return
-            reward = self.manager.claim_subtask_reward(task_id, extra)
+            reward = self.manager.complete_and_claim_subtask(task_id, extra)
             if reward is not None:
                 self.subtask_claimed.emit(sub.title, reward)
             self._emit_state_changed()

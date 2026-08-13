@@ -173,7 +173,7 @@ class GoalTreePanel(QWidget):
         self._subgoal_min_spin.setValue(default_min)
         self._subgoal_min_spin.setPrefix("最少 ")
         self._subgoal_min_spin.setSuffix(" 分")
-        self._subgoal_min_spin.setToolTip("新目标需运行的最短时间（完成后可领取）")
+        self._subgoal_min_spin.setToolTip("新目标需运行的最短时间（达标后可完成领奖）")
         self._subgoal_min_spin.setFixedWidth(96)
         add_row.addWidget(self._subgoal_min_spin)
 
@@ -638,6 +638,8 @@ class GoalTreePanel(QWidget):
             sub.is_container(),
             sub.is_claimable(),
             sub.can_claim_pending(),
+            sub.can_finish(),
+            sub.is_legacy_progress(),
             sub.time_target_met(),
             task.current_subtask_id,
             task.status,

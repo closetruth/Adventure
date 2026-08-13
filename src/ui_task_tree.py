@@ -353,22 +353,16 @@ def build_subtask_action_buttons(
 
     is_current = is_active and sub.id == current_id and not sub.done
 
-    if is_active and sub.is_leaf() and (sub.can_claim_pending() or sub.is_claimable()):
-        if callbacks.on_claim is not None:
-            btn = _make_action_btn("↓", tooltip="领取奖励", primary=True, parent=wrap)
-            _connect_callback(btn, callbacks.on_claim)
-            lay.addWidget(btn)
-
-    if sub.is_leaf() and not sub.done and not sub.rewards_claimed:
+    if sub.is_leaf() and not sub.done:
         if is_current:
             if callbacks.on_pause is not None:
                 btn = _make_action_btn("||", tooltip="暂停整个目标", parent=wrap)
                 _connect_callback(btn, callbacks.on_pause)
                 lay.addWidget(btn)
-        if is_active and sub.time_target_met() and callbacks.on_complete is not None:
-            btn = _make_action_btn("✓", tooltip="完成", parent=wrap)
-            _connect_callback(btn, callbacks.on_complete)
-            lay.addWidget(btn)
+    if is_active and sub.is_leaf() and sub.can_finish() and callbacks.on_complete is not None:
+        btn = _make_action_btn("✓", tooltip="完成并领取", parent=wrap)
+        _connect_callback(btn, callbacks.on_complete)
+        lay.addWidget(btn)
 
     if sub.is_container() and not sub.is_claimable():
         if is_active and not (sub.done and sub.rewards_claimed) and callbacks.on_add_child is not None:
@@ -435,17 +429,7 @@ def append_subtask_detail_actions(
 
     is_current = is_active and sub.id == current_id and not sub.done
 
-    if is_active and (sub.can_claim_pending() or sub.is_claimable()):
-        if callbacks.on_claim is not None:
-            btn = _make_detail_action_btn(
-                "领取",
-                object_name="Primary",
-                tooltip="领取奖励",
-            )
-            _connect_callback(btn, callbacks.on_claim)
-            layout.addWidget(btn)
-
-    if not sub.done and not sub.rewards_claimed:
+    if not sub.done:
         if is_current:
             if callbacks.on_pause is not None:
                 btn = _make_detail_action_btn(
@@ -463,15 +447,7 @@ def append_subtask_detail_actions(
             )
             _connect_callback(btn, callbacks.on_focus)
             layout.addWidget(btn)
-        if is_active and sub.time_target_met() and callbacks.on_complete is not None:
-            btn = _make_detail_action_btn(
-                "完成",
-                object_name="Ghost",
-                tooltip="标记完成",
-            )
-            _connect_callback(btn, callbacks.on_complete)
-            layout.addWidget(btn)
-        if can_modify and callbacks.on_decompose is not None:
+        if can_modify and not sub.is_legacy_progress() and callbacks.on_decompose is not None:
             btn = _make_detail_action_btn(
                 "分解",
                 object_name="Ghost",
@@ -479,6 +455,15 @@ def append_subtask_detail_actions(
             )
             _connect_callback(btn, callbacks.on_decompose)
             layout.addWidget(btn)
+
+    if is_active and sub.can_finish() and callbacks.on_complete is not None:
+        btn = _make_detail_action_btn(
+            "完成",
+            object_name="Primary",
+            tooltip="完成并领取奖励",
+        )
+        _connect_callback(btn, callbacks.on_complete)
+        layout.addWidget(btn)
 
     if not (sub.done and sub.rewards_claimed) and callbacks.on_delete is not None:
         btn = _make_detail_action_btn(

@@ -41,9 +41,12 @@ class Reward:
         return self.gold_is_crit() or self.diamond_is_crit()
 
 
+LEGACY_TITLE_SUFFIX = "（原进度）"
+
+
 @dataclass
 class Subtask:
-    """目标下的子项（可嵌套）：叶子节点时长达标后完成，点击领取才进背包。"""
+    """目标下的子项（可嵌套）：叶子时长达标后点完成，奖励同时进背包。"""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     title: str = ""
     target_seconds: float = 600.0
@@ -54,6 +57,7 @@ class Subtask:
     pending_rewards: List[Reward] = field(default_factory=list)
     done: bool = False
     rewards_claimed: bool = False
+    is_legacy: bool = False
     created_at: Optional[float] = field(default_factory=time.time)
     completed_at: Optional[float] = None
     children: List["Subtask"] = field(default_factory=list)
@@ -99,6 +103,17 @@ class Subtask:
     def time_target_met(self) -> bool:
         return self.active_seconds >= self.target_seconds
 
+    def is_legacy_progress(self) -> bool:
+        return self.is_legacy or self.title.endswith(LEGACY_TITLE_SUFFIX)
+
+    def can_finish(self) -> bool:
+        """时长达标且尚未领完（含旧档已完成未领取）。"""
+        if not self.is_leaf() or self.rewards_claimed:
+            return False
+        if self.done:
+            return True
+        return self.time_target_met()
+
     def rollup_operations(self) -> int:
         """文件夹式汇总：叶子返回自身，分组返回子孙叶子合计。"""
         if self.is_leaf():
@@ -141,9 +156,13 @@ class Subtask:
         else:
             target_seconds = 600.0
         children = [cls.from_dict(c) for c in data.get("children", [])]
+        title = data.get("title", "")
+        is_legacy = bool(data.get("is_legacy", False)) or str(title).endswith(
+            LEGACY_TITLE_SUFFIX
+        )
         return cls(
             id=data.get("id", uuid.uuid4().hex[:8]),
-            title=data.get("title", ""),
+            title=title,
             target_seconds=max(1.0, target_seconds),
             active_seconds=float(data.get("active_seconds", 0)),
             operations=int(data.get("operations", 0)),
@@ -152,6 +171,7 @@ class Subtask:
             pending_rewards=pending,
             done=bool(data.get("done", False)),
             rewards_claimed=bool(data.get("rewards_claimed", False)),
+            is_legacy=is_legacy,
             created_at=data.get("created_at"),
             completed_at=data.get("completed_at"),
             children=children,
@@ -282,7 +302,9 @@ class Task:
         """按展开状态遍历可见子目标（顶层始终可见）。"""
 
         def walk(nodes: List[Subtask], depth: int) -> Iterator[Tuple[int, Subtask]]:
-            for node in nodes:
+            for node in sorted(
+                nodes, key=lambda s: float(s.created_at or 0), reverse=True
+            ):
                 yield depth, node
                 if node.is_container() and node.id in expanded_ids:
                     yield from walk(node.children, depth + 1)
@@ -332,8 +354,10 @@ class Task:
         return sub
 
     def has_unclaimed_subtasks(self) -> bool:
-        """子目标仍有 pending 或未领取的完成奖励时，不可完成父目标。"""
-        for s in self.iter_subtasks():
+        """叶子未完成，或仍有 pending / 未领取完成奖时，不可完成父目标。"""
+        for s in self.iter_leaves():
+            if not s.done:
+                return True
             if s.rewards_claimed:
                 continue
             if s.is_claimable() or s.pending_rewards:
