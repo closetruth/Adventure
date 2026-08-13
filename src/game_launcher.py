@@ -4,15 +4,22 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from .game_protocol import GameResult, GameSession
+from .game_protocol import (
+    SLOT_JACKPOT_SEED,
+    SLOT_JACKPOT_SETTING,
+    GameResult,
+    GameSession,
+)
 from .models import AppState
 from .ui_text import format_amount
 
 logger = logging.getLogger(__name__)
 
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 ENTRY_GOLD_COST = 10
 GRID_GAME_ENTRY_GOLD_COST = 12
@@ -110,32 +117,51 @@ def can_start_game(state: AppState, game_key: str) -> Tuple[bool, str]:
     return True, ""
 
 
-def _format_proc_error(proc: subprocess.CompletedProcess[str]) -> str:
+@dataclass
+class StartedGame:
+    """已扣入场费、已拉起子进程，等待结算。"""
+    game_key: str
+    session: GameSession
+    result_path: Path
+    cmd: List[str]
+    cwd: str
+
+
+def _format_proc_error_text(stdout: str, stderr: str, returncode: int) -> str:
     chunks = []
-    if proc.stderr and proc.stderr.strip():
-        chunks.append(proc.stderr.strip())
-    if proc.stdout and proc.stdout.strip():
-        chunks.append(proc.stdout.strip())
+    if stderr and stderr.strip():
+        chunks.append(stderr.strip())
+    if stdout and stdout.strip():
+        chunks.append(stdout.strip())
     if chunks:
         return "\n".join(chunks)[:800]
-    return f"退出码 {proc.returncode}"
+    return f"退出码 {returncode}"
 
 
-def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[GameResult]]:
+def prepare_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[StartedGame]]:
+    """扣入场费并写 session；不阻塞。失败时不扣费。"""
     ok, msg = can_start_game(state, game_key)
     if not ok:
         return False, msg, None
 
-    # 扣除入场费
     need = entry_gold_cost(game_key)
     before_gold = state.inventory.gold
     state.inventory.gold = max(0, state.inventory.gold - need)
-    logger.info("游戏启动(%s): 扣除入场费 %d gold (%.1f→%.1f)",
-                game_key, need, before_gold, state.inventory.gold)
+    logger.info(
+        "游戏启动(%s): 扣除入场费 %d gold (%.1f→%.1f)",
+        game_key, need, before_gold, state.inventory.gold,
+    )
 
+    jackpot = 0.0
+    if game_key == "slot":
+        jackpot = float(state.settings.get(SLOT_JACKPOT_SETTING, SLOT_JACKPOT_SEED))
+        if jackpot <= 0:
+            jackpot = SLOT_JACKPOT_SEED
+        state.settings[SLOT_JACKPOT_SETTING] = round(jackpot, 1)
     session = GameSession.create(
         gold=state.inventory.gold,
         diamond=state.inventory.diamond,
+        jackpot=jackpot,
     )
     in_path = session.write()
     result_path = session.result_path()
@@ -143,43 +169,68 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
         result_path.unlink()
 
     cmd = build_game_command(game_key, in_path)
-    cwd = str(project_root())
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except OSError as e:
-        return False, f"启动失败：{e}\n命令：{' '.join(cmd)}", None
+    return True, "", StartedGame(
+        game_key=game_key,
+        session=session,
+        result_path=result_path,
+        cmd=cmd,
+        cwd=str(project_root()),
+    )
 
-    if proc.returncode != 0 and not result_path.exists():
-        detail = _format_proc_error(proc)
-        logger.error("游戏(%s) 启动失败 (rc=%d): %s", game_key, proc.returncode, detail[:200])
-        return False, f"游戏未能正常启动。\n{detail}\n\n命令：{' '.join(cmd)}", None
+
+def spawn_game_process(started: StartedGame) -> subprocess.Popen:
+    flags = _CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    return subprocess.Popen(
+        started.cmd,
+        cwd=started.cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=flags,
+    )
+
+
+def collect_game_result(
+    state: AppState,
+    started: StartedGame,
+    returncode: int,
+    *,
+    stdout: str = "",
+    stderr: str = "",
+) -> Tuple[bool, str, Optional[GameResult]]:
+    result_path = started.result_path
+    if returncode != 0 and not result_path.exists():
+        detail = _format_proc_error_text(stdout, stderr, returncode)
+        logger.error(
+            "游戏(%s) 启动失败 (rc=%d): %s",
+            started.game_key, returncode, detail[:200],
+        )
+        return False, f"游戏未能正常启动。\n{detail}\n\n命令：{' '.join(started.cmd)}", None
 
     result = GameResult.read(result_path)
     if result is None:
-        detail = _format_proc_error(proc) if proc.returncode != 0 else ""
+        detail = _format_proc_error_text(stdout, stderr, returncode) if returncode != 0 else ""
         extra = f"\n{detail}" if detail else ""
-        logger.warning("游戏(%s) 未能读取结算文件", game_key)
+        logger.warning("游戏(%s) 未能读取结算文件", started.game_key)
         return False, f"未读取到游戏结算文件。{extra}", None
 
-    if result.session_id and result.session_id != session.session_id:
+    if result.session_id and result.session_id != started.session.session_id:
         return False, "结算会话不匹配，已忽略。", None
 
     state.inventory.gold = max(0, state.inventory.gold + result.gold_delta)
     state.inventory.diamond = max(0, state.inventory.diamond + result.diamond_delta)
-    logger.info("游戏(%s) 结算: gold_delta=%+.1f diamond_delta=%+.1f waves=%d",
-                game_key, result.gold_delta, result.diamond_delta, result.waves_cleared)
-    if game_key == "pet":
+    logger.info(
+        "游戏(%s) 结算: gold_delta=%+.1f diamond_delta=%+.1f waves=%d",
+        started.game_key, result.gold_delta, result.diamond_delta, result.waves_cleared,
+    )
+    if started.game_key == "pet":
         state.settings["pet_best_round"] = max(
             int(state.settings.get("pet_best_round", 0)),
             int(result.waves_cleared),
         )
+    if started.game_key == "slot":
+        jp = result.jackpot if result.jackpot > 0 else SLOT_JACKPOT_SEED
+        state.settings[SLOT_JACKPOT_SETTING] = round(float(jp), 1)
+        logger.info("老虎机奖池结算: %.1f", state.settings[SLOT_JACKPOT_SETTING])
 
     tip = result.message or "游戏结束"
     if result.gold_delta or result.diamond_delta:
@@ -191,8 +242,19 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
             sign = "+" if result.diamond_delta > 0 else ""
             parts.append(f"钻石 {sign}{format_amount(result.diamond_delta)}")
         tip = f"{tip}\n（{', '.join(parts)}）"
-
     return True, tip, result
+
+
+def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[GameResult]]:
+    ok, msg, started = prepare_game(state, game_key)
+    if not ok or started is None:
+        return False, msg, None
+    try:
+        proc = spawn_game_process(started)
+    except OSError as e:
+        return False, f"启动失败：{e}\n命令：{' '.join(started.cmd)}", None
+    returncode = proc.wait()
+    return collect_game_result(state, started, returncode)
 
 
 def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
@@ -206,5 +268,5 @@ def launch_pixel_tactics(state: AppState) -> Tuple[bool, str, Optional[GameResul
 
 
 def launch_slot_machine(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
-    """启动金币老虎机（固定 8 把，只结算金币）。"""
+    """启动金币老虎机（入场换筹码，可调下注，只结算金币）。"""
     return _launch_game(state, "slot")

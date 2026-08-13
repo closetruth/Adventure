@@ -10,6 +10,12 @@ from typing import Optional
 
 from .storage import get_data_dir
 
+# 老虎机真奖池（跨局）。7 三连 = 倍数 + 奖池；抽成来自下注，不另印钞。
+SLOT_JACKPOT_SEED = 2.0
+SLOT_JACKPOT_CAP = 50.0
+SLOT_JACKPOT_CONTRIB = 0.15
+SLOT_JACKPOT_SETTING = "slot_jackpot"
+
 
 def _sessions_dir() -> Path:
     d = get_data_dir() / "game_sessions"
@@ -23,14 +29,26 @@ class GameSession:
     gold: float
     diamond: float
     created_at: float = 0.0
+    jackpot: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.created_at:
             self.created_at = time.time()
 
     @classmethod
-    def create(cls, gold: float, diamond: float) -> "GameSession":
-        return cls(session_id=uuid.uuid4().hex[:16], gold=gold, diamond=diamond)
+    def create(
+        cls,
+        gold: float,
+        diamond: float,
+        *,
+        jackpot: float = 0.0,
+    ) -> "GameSession":
+        return cls(
+            session_id=uuid.uuid4().hex[:16],
+            gold=gold,
+            diamond=diamond,
+            jackpot=float(jackpot),
+        )
 
     def session_path(self) -> Path:
         return _sessions_dir() / f"{self.session_id}_in.json"
@@ -53,6 +71,7 @@ class GameSession:
             gold=float(data["gold"]),
             diamond=float(data["diamond"]),
             created_at=float(data.get("created_at", 0)),
+            jackpot=float(data.get("jackpot", 0)),
         )
 
 
@@ -63,6 +82,7 @@ class GameResult:
     diamond_delta: float = 0.0
     waves_cleared: int = 0
     message: str = ""
+    jackpot: float = 0.0
 
     @classmethod
     def read(cls, path: Path) -> Optional["GameResult"]:
@@ -77,6 +97,7 @@ class GameResult:
                 diamond_delta=float(data.get("diamond_delta", 0)),
                 waves_cleared=int(data.get("waves_cleared", 0)),
                 message=str(data.get("message", "")),
+                jackpot=float(data.get("jackpot", 0)),
             )
         except (json.JSONDecodeError, OSError, KeyError, TypeError):
             return None

@@ -491,6 +491,7 @@ class AppState:
         "diamond_min": 0.01,
         "diamond_max": 0.1,
         "pet_best_round": 0,
+        "slot_jackpot": 2.0,
         "subtask_default_target_minutes": 10,
         "subtask_completion_bonus_gold": 0.5,
     })
