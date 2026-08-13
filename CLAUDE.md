@@ -23,10 +23,13 @@ fix_game.bat
 
 REM Build redistributable .exe
 build.bat
+
+REM Run unit tests (31 tests, stdlib unittest, offscreen UI regression included)
+.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 - **Python 3.12 or 3.13** recommended. Python 3.14 **must** use `pygame-ce`, not the official `pygame` wheel (requirements.txt already pins `pygame-ce`).
-- No test suite exists in this repo — verify changes by running the app manually.
+- Test suite lives in `tests/` (stdlib `unittest`, no deps). `tests/test_widget_smoke.py` runs offscreen (`QT_QPA_PLATFORM=offscreen`) and guards the "clicking the goal tree resizes the window" regression. Always run the suite after touching `src/models.py`, `src/task_manager.py`, `src/reward_system.py`, `src/storage.py`, or widget geometry.
 
 ## Architecture
 

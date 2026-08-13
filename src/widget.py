@@ -408,6 +408,8 @@ class FloatingWidget(QWidget):
         self.setWindowFlags(flags)
         self.setFixedWidth(308)
         self.setMinimumHeight(600)
+        # 高度上限：内容再多也只在窗口内滚动，不让布局把窗口越顶越高
+        self.setMaximumHeight(760)
         self.resize(308, 680)
 
         self._op_tracker = OpRateTracker(window_sec=60.0)
@@ -549,7 +551,8 @@ class FloatingWidget(QWidget):
         self.subgoals_scroll.setObjectName("SubGoalScroll")
         self.subgoals_scroll.setFrameShape(QFrame.NoFrame)
         self.subgoals_scroll.setWidgetResizable(False)
-        self.subgoals_scroll.setMinimumHeight(280)
+        # 最小高度保持在窗口 600 预算内，避免固定部分(顶栏+全局+按钮)把窗口顶高
+        self.subgoals_scroll.setMinimumHeight(160)
         self.subgoals_scroll.setSizePolicy(
             QSizePolicy.Expanding,
             QSizePolicy.Expanding,
@@ -643,6 +646,9 @@ class FloatingWidget(QWidget):
 
         self.goal_detail_panel = QWidget()
         self.goal_detail_panel.setObjectName("GoalDetailPanel")
+        # 面板内容随选中变化；忽略其垂直尺寸贡献，让外层布局分配面板高度，
+        # 否则点击目标树后详情面板的最小高度会把整个悬浮窗顶高
+        self.goal_detail_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         detail_lay = QVBoxLayout(self.goal_detail_panel)
         detail_lay.setContentsMargins(8, 6, 8, 6)
         detail_lay.setSpacing(4)
@@ -659,6 +665,7 @@ class FloatingWidget(QWidget):
         detail_lay.addWidget(self.goal_detail_stats)
 
         self.goal_detail_btn_row = QWidget()
+        self.goal_detail_btn_row.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.goal_detail_btn_lay = QHBoxLayout(self.goal_detail_btn_row)
         self.goal_detail_btn_lay.setContentsMargins(0, 0, 0, 0)
         self.goal_detail_btn_lay.setSpacing(6)
@@ -1413,6 +1420,18 @@ class FloatingWidget(QWidget):
             )
 
         self.goal_detail_btn_lay.addStretch(1)
+
+        # 统一按钮高度：不同选中状态按钮组高度不同时，行高变化会改变
+        # 详情面板的最小高度，进而把悬浮窗顶高
+        row_h = self._detail_btn_row_height()
+        for i in range(self.goal_detail_btn_lay.count()):
+            item = self.goal_detail_btn_lay.itemAt(i)
+            if item is not None and isinstance(item.widget(), QPushButton):
+                item.widget().setFixedHeight(row_h)
+
+    def _detail_btn_row_height(self) -> int:
+        """详情面板按钮固定高度（含 QSS padding 与边框）。"""
+        return 30
 
     def _apply_tree_selection_ui(
         self,
