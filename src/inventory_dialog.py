@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .game_protocol import SLOT_JACKPOT_SEED, SLOT_JACKPOT_SETTING
 from .models import AppState, TaskStatus
 from .ui_styles import (
     ACCENT,
@@ -144,13 +145,10 @@ class InventoryDialog(QDialog):
         gl3.setContentsMargins(14, 12, 14, 12)
         gl3.setSpacing(6)
         gl3.addWidget(QLabel("老虎机"))
-        sub3 = QLabel(
-            "三轴三连：BAR / 金 / 7。入场费 10 金币，一局固定 8 把后结算。"
-            "只赌金币，钻石不动。"
-        )
-        sub3.setObjectName("StatLine")
-        sub3.setWordWrap(True)
-        gl3.addWidget(sub3)
+        self.lbl_slot_desc = QLabel()
+        self.lbl_slot_desc.setObjectName("StatLine")
+        self.lbl_slot_desc.setWordWrap(True)
+        gl3.addWidget(self.lbl_slot_desc)
         self.btn_play_slot = QPushButton("开始老虎机")
         self.btn_play_slot.setObjectName("Primary")
         self.btn_play_slot.setCursor(Qt.PointingHandCursor)
@@ -217,6 +215,15 @@ class InventoryDialog(QDialog):
         )
         best_round = int(s.settings.get("pet_best_round", 0))
         self.lbl_ops.setText(f"全局操作数：{s.total_operations}  ｜  小动物最高回合：{best_round}")
+        jp = float(s.settings.get(SLOT_JACKPOT_SETTING, SLOT_JACKPOT_SEED))
+        if jp <= 0:
+            jp = SLOT_JACKPOT_SEED
+        self.lbl_slot_desc.setText(
+            "入场 10 金币换成筹码。每把可下注 1 / 2 / 5，"
+            "三连：BAR x2 / 金 x6 / 7 x6+奖池，最多 8 把。"
+            f"当前奖池 {format_amount(jp)} 金（跨局累计，下注 15% 进池）。"
+            "Esc 带走剩余。只赌金币，钻石不动。"
+        )
         self._refresh_roll_history()
 
     def _refresh_roll_history(self) -> None:

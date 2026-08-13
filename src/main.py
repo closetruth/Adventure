@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import logging
 import signal
+import subprocess
 import sys
+from typing import Optional
 
 from PySide6.QtCore import QLockFile, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -33,9 +35,10 @@ from PySide6.QtWidgets import (
 )
 
 from .game_launcher import (
-    launch_pet_arena,
-    launch_pixel_tactics,
-    launch_slot_machine,
+    StartedGame,
+    collect_game_result,
+    prepare_game,
+    spawn_game_process,
 )
 from .input_monitor import InputMonitor
 from .power_monitor import PowerMonitor
@@ -95,6 +98,12 @@ class Application(QObject):
         self.widget.request_quit.connect(self.quit)
         self.widget.subtask_claimed.connect(self._on_subtask_claimed)
         self.widget.state_changed.connect(self._on_widget_state_changed)
+        self._game_proc: Optional[subprocess.Popen] = None
+        self._pending_game: Optional[StartedGame] = None
+        self._game_title = ""
+        self._game_poll = QTimer(self)
+        self._game_poll.setInterval(250)
+        self._game_poll.timeout.connect(self._poll_game_process)
 
         # 桥接全局输入事件
         self.bridge = OpBridge()
@@ -336,43 +345,61 @@ class Application(QObject):
         self._inv_dialog.activateWindow()
 
     def play_pet_arena(self) -> None:
-        """暂停主窗交互感，启动 pygame 子进程并结算。"""
-        ok, msg, _result = launch_pet_arena(self.state)
-        self._safe_save()
-        self.widget.refresh()
-        if self._inv_dialog is not None and self._inv_dialog.isVisible():
-            self._inv_dialog.refresh()
-        if ok:
-            logger.info("宠物竞技场结算: %s", msg.replace('\n', ' '))
-            QMessageBox.information(self.widget, "竞技场结算", msg)
-        else:
-            logger.warning("宠物竞技场失败: %s", msg)
-            QMessageBox.warning(self.widget, "无法开始", msg)
+        self._start_game_async("pet", "竞技场")
 
     def play_pixel_tactics(self) -> None:
-        ok, msg, _result = launch_pixel_tactics(self.state)
-        self._safe_save()
-        self.widget.refresh()
-        if self._inv_dialog is not None and self._inv_dialog.isVisible():
-            self._inv_dialog.refresh()
-        if ok:
-            logger.info("像素战场结算: %s", msg.replace('\n', ' '))
-            QMessageBox.information(self.widget, "像素战场结算", msg)
-        else:
-            logger.warning("像素战场失败: %s", msg)
-            QMessageBox.warning(self.widget, "无法开始", msg)
+        self._start_game_async("grid", "像素战场")
 
     def play_slot_machine(self) -> None:
-        ok, msg, _result = launch_slot_machine(self.state)
+        self._start_game_async("slot", "老虎机")
+
+    def _start_game_async(self, game_key: str, title: str) -> None:
+        if self._game_proc is not None:
+            QMessageBox.information(self.widget, title, "已有游戏在进行中。")
+            return
+        ok, msg, started = prepare_game(self.state, game_key)
+        if not ok or started is None:
+            QMessageBox.warning(self.widget, "无法开始", msg)
+            return
+        try:
+            proc = spawn_game_process(started)
+        except OSError as e:
+            QMessageBox.warning(
+                self.widget, "无法开始", f"启动失败：{e}\n命令：{' '.join(started.cmd)}",
+            )
+            return
+        self._pending_game = started
+        self._game_proc = proc
+        self._game_title = title
+        self._safe_save()
+        self.widget.refresh()
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+        self._game_poll.start()
+
+    def _poll_game_process(self) -> None:
+        proc = self._game_proc
+        started = self._pending_game
+        if proc is None or started is None:
+            self._game_poll.stop()
+            return
+        rc = proc.poll()
+        if rc is None:
+            return
+        self._game_poll.stop()
+        self._game_proc = None
+        self._pending_game = None
+        title = self._game_title or "游戏"
+        ok, msg, _result = collect_game_result(self.state, started, rc)
         self._safe_save()
         self.widget.refresh()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()
         if ok:
-            logger.info("老虎机结算: %s", msg.replace('\n', ' '))
-            QMessageBox.information(self.widget, "老虎机结算", msg)
+            logger.info("%s结算: %s", title, msg.replace("\n", " "))
+            QMessageBox.information(self.widget, f"{title}结算", msg)
         else:
-            logger.warning("老虎机失败: %s", msg)
+            logger.warning("%s失败: %s", title, msg)
             QMessageBox.warning(self.widget, "无法开始", msg)
 
     # ---------- 退出 ----------
