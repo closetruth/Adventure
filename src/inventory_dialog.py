@@ -57,12 +57,13 @@ QPushButton#Primary:hover {{ background-color: {ACCENT_HOVER}; }}
 class InventoryDialog(QDialog):
     request_play_game = Signal()
     request_play_grid_game = Signal()
+    request_play_slot_game = Signal()
 
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
         self.state = state
         self.setWindowTitle("奖励背包 - Adventure")
-        self.resize(420, 560)
+        self.resize(420, 680)
         self.setStyleSheet(INVENTORY_DIALOG_QSS)
         self._build()
         self.refresh()
@@ -136,6 +137,26 @@ class InventoryDialog(QDialog):
         self.btn_play_grid.clicked.connect(self.request_play_grid_game.emit)
         gl2.addWidget(self.btn_play_grid, alignment=Qt.AlignRight)
         v.addWidget(grid_games)
+
+        slot_games = QFrame()
+        slot_games.setObjectName("Card")
+        gl3 = QVBoxLayout(slot_games)
+        gl3.setContentsMargins(14, 12, 14, 12)
+        gl3.setSpacing(6)
+        gl3.addWidget(QLabel("老虎机"))
+        sub3 = QLabel(
+            "三轴三连：BAR / 金 / 7。入场费 10 金币，一局固定 8 把后结算。"
+            "只赌金币，钻石不动。"
+        )
+        sub3.setObjectName("StatLine")
+        sub3.setWordWrap(True)
+        gl3.addWidget(sub3)
+        self.btn_play_slot = QPushButton("开始老虎机")
+        self.btn_play_slot.setObjectName("Primary")
+        self.btn_play_slot.setCursor(Qt.PointingHandCursor)
+        self.btn_play_slot.clicked.connect(self.request_play_slot_game.emit)
+        gl3.addWidget(self.btn_play_slot, alignment=Qt.AlignRight)
+        v.addWidget(slot_games)
 
         v.addStretch(1)
 
