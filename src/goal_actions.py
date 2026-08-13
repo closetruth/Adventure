@@ -17,7 +17,7 @@ def try_complete_goal(parent: QWidget, manager: TaskManager, task_id: str) -> bo
         QMessageBox.information(
             parent,
             "提示",
-            "请先完成并领取所有目标的奖励，再完成目标。",
+            "请先完成所有子目标，再完成此目标。",
         )
         return False
     reward = manager.complete(task_id)

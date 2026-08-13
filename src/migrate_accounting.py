@@ -4,11 +4,11 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from .models import AppState, Subtask, Task
+from .models import LEGACY_TITLE_SUFFIX, AppState, Subtask, Task
 
 logger = logging.getLogger(__name__)
 
-LEGACY_SUFFIX = "（原进度）"
+LEGACY_SUFFIX = LEGACY_TITLE_SUFFIX
 
 
 def subtask_has_stored_progress(sub: Subtask) -> bool:
@@ -61,6 +61,7 @@ def detach_subtask_progress_to_legacy(
         pending_rewards=list(sub.pending_rewards),
         done=sub.done,
         rewards_claimed=sub.rewards_claimed,
+        is_legacy=True,
         created_at=sub.created_at,
         completed_at=sub.completed_at,
     )
@@ -80,6 +81,7 @@ def detach_task_progress_to_legacy(task: Task) -> Optional[Subtask]:
         earned_gold=task.earned_gold,
         earned_diamond=task.earned_diamond,
         pending_rewards=list(task.pending_rewards),
+        is_legacy=True,
         created_at=task.created_at,
     )
     task.operations = 0

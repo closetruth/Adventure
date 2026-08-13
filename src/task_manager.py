@@ -13,6 +13,10 @@ from .power_monitor import PowerMonitor
 logger = logging.getLogger(__name__)
 
 
+def _newest_first(nodes: List[Subtask]) -> List[Subtask]:
+    return sorted(nodes, key=lambda s: float(s.created_at or 0), reverse=True)
+
+
 class TaskManager:
     def __init__(
         self,
@@ -35,7 +39,8 @@ class TaskManager:
         return list(self.state.tasks)
 
     def by_status(self, status: TaskStatus) -> List[Task]:
-        return [t for t in self.state.tasks if t.status == status]
+        items = [t for t in self.state.tasks if t.status == status]
+        return sorted(items, key=lambda t: float(t.created_at or 0), reverse=True)
 
     def get(self, task_id: str) -> Optional[Task]:
         for t in self.state.tasks:
@@ -120,7 +125,7 @@ class TaskManager:
         expanded = self.expanded_subtask_ids(task.id)
 
         def walk(nodes: List[Subtask], depth: int) -> Iterator[Tuple[int, Subtask]]:
-            for node in nodes:
+            for node in _newest_first(nodes):
                 yield depth, node
                 if node.is_container() and node.id in expanded:
                     yield from walk(node.children, depth + 1)
@@ -316,7 +321,7 @@ class TaskManager:
             parent = self._get_subtask(t, parent_subtask_id)
             if parent is None:
                 return None
-            parent.children.append(sub)
+            parent.children.insert(0, sub)
             self._subtask_expanded.setdefault(task_id, set()).add(parent_subtask_id)
             if t.current_subtask_id == parent_subtask_id:
                 self._sync_current_subtask(t)
@@ -325,7 +330,7 @@ class TaskManager:
                 legacy = detach_task_progress_to_legacy(t)
                 if legacy is not None:
                     t.subtasks.append(legacy)
-            t.subtasks.append(sub)
+            t.subtasks.insert(0, sub)
             if t.status == TaskStatus.ACTIVE and t.current_subtask_id is None:
                 self._sync_current_subtask(t)
         logger.info(
@@ -361,7 +366,7 @@ class TaskManager:
         return t.can_complete_sub(sub)
 
     def claim_subtask_reward(self, task_id: str, subtask_id: str) -> Optional[Reward]:
-        """领取子任务奖励：pending → 背包；叶子完成奖另加固定金。"""
+        """领取子任务奖励：pending → 背包；已完成叶子另加固定金。"""
         t = self.get(task_id)
         if not t:
             return None
@@ -373,11 +378,14 @@ class TaskManager:
         if sub.is_claimable():
             total = sub.pending_summary()
             total.gold += self._completion_bonus()
+            self.state.inventory.add(total)
+            sub.pending_rewards.clear()
+            sub.rewards_claimed = True
         else:
             total = sub.pending_summary()
-        self.state.inventory.add(total)
-        sub.pending_rewards.clear()
-        sub.rewards_claimed = True
+            self.state.inventory.add(total)
+            sub.pending_rewards.clear()
+            # 未完成时只领 pending，不打 claimed，之后仍可完成并领完成奖
         logger.info("领取子目标「%s」(task_id=%s) gold=%.1f diamond=%.1f",
                     sub.title, task_id, total.gold, total.diamond)
         return total
@@ -393,7 +401,7 @@ class TaskManager:
         if not t or t.status == TaskStatus.COMPLETED:
             return False
         sub = self._get_subtask(t, subtask_id)
-        if sub is None or sub.done or not sub.is_leaf():
+        if sub is None or sub.done or not sub.is_leaf() or sub.is_legacy_progress():
             return False
         titles = [(x or "").strip() for x in child_titles if (x or "").strip()]
         if not titles:
@@ -406,7 +414,7 @@ class TaskManager:
         new_children: List[Subtask] = []
         for title in titles:
             new_children.append(Subtask(title=title, target_seconds=target_seconds))
-        sub.children = ([legacy] if legacy is not None else []) + new_children
+        sub.children = new_children + ([legacy] if legacy is not None else [])
 
         first_user_child = new_children[0] if new_children else None
         if was_focused and first_user_child is not None:
@@ -461,17 +469,16 @@ class TaskManager:
     def complete_and_claim_subtask(
         self, task_id: str, subtask_id: str,
     ) -> Optional[Reward]:
-        """已可领则直接领；时长达标则 mark done 后立即领取。"""
+        """完成并领奖：时长达标则 mark done，再把 pending + 完成奖打进背包。"""
         t = self.get(task_id)
         if not t:
             return None
         sub = self._get_subtask(t, subtask_id)
-        if not sub:
+        if not sub or not sub.is_leaf():
             return None
-        if sub.is_claimable() or sub.can_claim_pending():
-            return self.claim_subtask_reward(task_id, subtask_id)
         if not sub.done and t.can_complete_sub(sub):
             self._mark_subtask_done(t, sub)
+        if sub.is_claimable():
             return self.claim_subtask_reward(task_id, subtask_id)
         return None
 

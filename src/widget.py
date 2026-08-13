@@ -622,7 +622,7 @@ class FloatingWidget(QWidget):
         self.subgoal_min_spin.setValue(default_min)
         self.subgoal_min_spin.setPrefix("最少 ")
         self.subgoal_min_spin.setSuffix(" 分")
-        self.subgoal_min_spin.setToolTip("新目标需运行的最短时间（完成后可领取）")
+        self.subgoal_min_spin.setToolTip("新目标需运行的最短时间（达标后可完成领奖）")
         self.subgoal_min_spin.setFixedWidth(96)
         self.subgoal_min_spin.valueChanged.connect(self._on_subtask_min_changed)
         add_sub_row.addWidget(self.subgoal_min_spin)
@@ -834,15 +834,12 @@ class FloatingWidget(QWidget):
             inner.setValue(value)
 
     def _widget_goals(self) -> list[Task]:
-        active = self.state.active_task()
-        paused = self.manager.by_status(TaskStatus.PAUSED)
-        goals: list[Task] = []
-        if active is not None:
-            goals.append(active)
-        goals.extend(
-            t for t in paused if active is None or t.id != active.id
-        )
-        return goals
+        goals = [
+            t
+            for t in self.state.tasks
+            if t.status in (TaskStatus.ACTIVE, TaskStatus.PAUSED)
+        ]
+        return sorted(goals, key=lambda t: float(t.created_at or 0), reverse=True)
 
     @staticmethod
     def _sub_line_key(task_id: str, sub_id: str) -> str:
@@ -1088,6 +1085,8 @@ class FloatingWidget(QWidget):
             sub.is_container(),
             sub.is_claimable(),
             sub.can_claim_pending(),
+            sub.can_finish(),
+            sub.is_legacy_progress(),
             sub.time_target_met(),
             task.current_subtask_id,
             task.status,
@@ -1908,8 +1907,13 @@ class FloatingWidget(QWidget):
         task = self.manager.get(task_id)
         if task is None or task.status == TaskStatus.COMPLETED:
             return
-        if self.manager.confirm_manual_complete_subtask(task_id, subtask_id):
-            self._request_state_sync()
+        sub = task.find_subtask(subtask_id)
+        if sub is None:
+            return
+        reward = self.manager.complete_and_claim_subtask(task_id, subtask_id)
+        if reward is not None:
+            self.subtask_claimed.emit(sub.title, reward)
+        self._request_state_sync()
 
     def _on_sub_claim(self, task_id: str, subtask_id: str) -> None:
         task = self.manager.get(task_id)

@@ -565,11 +565,11 @@ def format_tree_detail_html(
         format_subgoal_runtime_html(sub),
     ]
     parts.extend(_format_created_completed_html(sub.created_at, sub.completed_at))
-    if sub.is_claimable():
+    if sub.can_finish():
         pending = sub.pending_summary()
         parts.append(
             f'<span style="color:{_COLOR_CLAIM};font-weight:700">'
-            f"可领 金{format_amount(pending.gold + completion_bonus)} "
+            f"完成可领 金{format_amount(pending.gold + completion_bonus)} "
             f"钻{format_amount(pending.diamond)}</span>"
         )
     elif sub.can_claim_pending():
