@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 ENTRY_GOLD_COST = 10
 GRID_GAME_ENTRY_GOLD_COST = 12
+SLOT_GAME_ENTRY_GOLD_COST = 10
 
 
 def project_root() -> Path:
@@ -35,10 +36,19 @@ def python_for_subprocess() -> str:
     return str(exe)
 
 
+def entry_gold_cost(game_key: str) -> int:
+    if game_key == "grid":
+        return GRID_GAME_ENTRY_GOLD_COST
+    if game_key == "slot":
+        return SLOT_GAME_ENTRY_GOLD_COST
+    return ENTRY_GOLD_COST
+
+
 def game_script_path(game_key: str) -> Path:
     mapping = {
         "pet": "pet_arena.py",
         "grid": "pixel_tactics.py",
+        "slot": "slot_machine.py",
     }
     return project_root() / "games" / mapping.get(game_key, "pet_arena.py")
 
@@ -67,8 +77,12 @@ def build_game_command(game_key: str, session_in: Path) -> List[str]:
     if script.exists():
         return [py, str(script), session_str]
 
-    module = "games.pet_arena" if game_key == "pet" else "games.pixel_tactics"
-    return [py, "-m", module, session_str]
+    modules = {
+        "pet": "games.pet_arena",
+        "grid": "games.pixel_tactics",
+        "slot": "games.slot_machine",
+    }
+    return [py, "-m", modules.get(game_key, "games.pet_arena"), session_str]
 
 
 def can_start_game(state: AppState, game_key: str) -> Tuple[bool, str]:
@@ -82,7 +96,7 @@ def can_start_game(state: AppState, game_key: str) -> Tuple[bool, str]:
             "  .venv\\Scripts\\python.exe -m pip install pygame-ce\n"
             "推荐用 Python 3.12 重建环境：install.bat",
         )
-    need = ENTRY_GOLD_COST if game_key == "pet" else GRID_GAME_ENTRY_GOLD_COST
+    need = entry_gold_cost(game_key)
     if state.inventory.gold < need:
         return (
             False,
@@ -113,7 +127,7 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
         return False, msg, None
 
     # 扣除入场费
-    need = ENTRY_GOLD_COST if game_key == "pet" else GRID_GAME_ENTRY_GOLD_COST
+    need = entry_gold_cost(game_key)
     before_gold = state.inventory.gold
     state.inventory.gold = max(0, state.inventory.gold - need)
     logger.info("游戏启动(%s): 扣除入场费 %d gold (%.1f→%.1f)",
@@ -161,10 +175,11 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
     state.inventory.diamond = max(0, state.inventory.diamond + result.diamond_delta)
     logger.info("游戏(%s) 结算: gold_delta=%+.1f diamond_delta=%+.1f waves=%d",
                 game_key, result.gold_delta, result.diamond_delta, result.waves_cleared)
-    state.settings["pet_best_round"] = max(
-        int(state.settings.get("pet_best_round", 0)),
-        int(result.waves_cleared),
-    )
+    if game_key == "pet":
+        state.settings["pet_best_round"] = max(
+            int(state.settings.get("pet_best_round", 0)),
+            int(result.waves_cleared),
+        )
 
     tip = result.message or "游戏结束"
     if result.gold_delta or result.diamond_delta:
@@ -188,3 +203,8 @@ def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
 def launch_pixel_tactics(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
     """启动像素格子战场（类金铲铲）。"""
     return _launch_game(state, "grid")
+
+
+def launch_slot_machine(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
+    """启动金币老虎机（固定 8 把，只结算金币）。"""
+    return _launch_game(state, "slot")

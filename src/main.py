@@ -32,7 +32,11 @@ from PySide6.QtWidgets import (
     QTextEdit,
 )
 
-from .game_launcher import launch_pet_arena, launch_pixel_tactics
+from .game_launcher import (
+    launch_pet_arena,
+    launch_pixel_tactics,
+    launch_slot_machine,
+)
 from .input_monitor import InputMonitor
 from .power_monitor import PowerMonitor
 from .inventory_dialog import InventoryDialog
@@ -325,6 +329,7 @@ class Application(QObject):
             self._inv_dialog = InventoryDialog(self.state, parent=self.widget)
             self._inv_dialog.request_play_game.connect(self.play_pet_arena)
             self._inv_dialog.request_play_grid_game.connect(self.play_pixel_tactics)
+            self._inv_dialog.request_play_slot_game.connect(self.play_slot_machine)
         self._inv_dialog.refresh()
         self._inv_dialog.show()
         self._inv_dialog.raise_()
@@ -355,6 +360,19 @@ class Application(QObject):
             QMessageBox.information(self.widget, "像素战场结算", msg)
         else:
             logger.warning("像素战场失败: %s", msg)
+            QMessageBox.warning(self.widget, "无法开始", msg)
+
+    def play_slot_machine(self) -> None:
+        ok, msg, _result = launch_slot_machine(self.state)
+        self._safe_save()
+        self.widget.refresh()
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+        if ok:
+            logger.info("老虎机结算: %s", msg.replace('\n', ' '))
+            QMessageBox.information(self.widget, "老虎机结算", msg)
+        else:
+            logger.warning("老虎机失败: %s", msg)
             QMessageBox.warning(self.widget, "无法开始", msg)
 
     # ---------- 退出 ----------
