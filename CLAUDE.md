@@ -79,7 +79,7 @@ Folder-style accounting: parent task `earned_*` / display totals sync from subta
 | Module | Role |
 |--------|------|
 | `src/main.py` | `Application` class: wires everything — Qt app, tray, widget, input monitor, timers, dialogs |
-| `src/widget.py` | `FloatingWidget`: frameless topmost window, **directory-style goal tree**, detail panel, roll bar; deferred refresh via `QTimer.singleShot(0)`; `_refreshing` reentrancy guard |
+| `src/widget.py` | `FloatingWidget`: frameless topmost window, drag handles, global stats section, roll bar/toast, right-click menu; delegates the goal tree to `GoalTreeArea` |
 | `src/task_manager.py` | `TaskManager`: task/subtask CRUD, `focus_subtask` / `start_subtask` / `pause` / `decompose_subtask` / `delete_subtask`; `_subtask_expanded` (in-memory UI only) |
 | `src/reward_system.py` | `maybe_roll(state)`, `reshuffle_roll_params`, random 6–14 op cycles, `RollRuntime` migration |
 | `src/input_monitor.py` | `InputMonitor`: QTimer + GetAsyncKeyState polling with key/button dedup (pynput hook fallback for non-Windows) |
@@ -89,6 +89,8 @@ Folder-style accounting: parent task `earned_*` / display totals sync from subta
 | `src/migrate_accounting.py` | Flat-task → nested subtask migration; `detach_subtask_progress_to_legacy` for decompose |
 
 ### UI helpers
+
+- `src/ui_goal_tree_area.py` — `GoalTreeArea`: the whole goal-tree region (scroll tree, row build, selection/hover chrome, detail panel, subtask actions, add-subgoal row, geometry sync). `FloatingWidget` owns the window frame only; tree state lives here. Exposes `refresh` / `refresh_stats` and emits `state_changed` / `subtask_claimed`.
 
 - `src/ui_task_tree.py` — `TreeRow`, `build_subtask_action_buttons`, `append_subtask_detail_actions`, `_connect_callback` (wraps `QPushButton.clicked` so `checked` is not passed to user callbacks).
 - `src/ui_goal_tree_panel.py` — `GoalTreePanel`: shared goal tree embedded in `TaskCard` (`task_dialog.py`).

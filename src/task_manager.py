@@ -28,8 +28,6 @@ class TaskManager:
         self._active_time = ActiveTimeTracker()
         self._subtask_expanded: dict[str, Set[str]] = {}
         for t in state.tasks:
-            if t.subtasks:
-                t.sync_earned_from_subtasks()
             if t.status == TaskStatus.ACTIVE:
                 self._sync_current_subtask(t)
                 self.sync_subtask_expand_to_focus(t)
@@ -494,7 +492,6 @@ class TaskManager:
         self._prune_subtask_expanded(t, subtask_id)
         logger.info("删除子目标「%s」(task_id=%s)", sub.title, task_id)
         self._sync_current_subtask(t)
-        self._sync_task_earned_from_subtasks(t)
         return True
 
     def tick_active_time(self) -> bool:
@@ -512,9 +509,6 @@ class TaskManager:
         else:
             active.active_seconds += seconds
         return False
-
-    def _sync_task_earned_from_subtasks(self, task: Task) -> None:
-        task.sync_earned_from_subtasks()
 
     def _apply_roll_to_task(self, task: Task, reward: Reward) -> None:
         task.pending_rewards.append(reward)
