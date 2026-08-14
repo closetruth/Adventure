@@ -39,7 +39,7 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
         manager.create("健身")
         manager.create("读书笔记整理与知识体系构建复盘总结")
         for t in state.tasks:
-            widget._expanded_goal_ids.add(t.id)
+            widget.goal_tree._expanded_goal_ids.add(t.id)
         widget.refresh()
         widget.show()
         _app.processEvents()
@@ -59,17 +59,18 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
 
     def test_click_tree_rows_does_not_resize_window(self):
         widget = self.widget
+        tree = widget.goal_tree
         before_h = widget.height()
         self.assertLessEqual(
             widget.minimumSizeHint().height(),
             600,
             "窗口最小高度超过 600：布局会把窗口顶高（点击目标树回归）",
         )
-        self.assertGreater(len(widget._tree_row_widgets), 0, "测试前提：应有子目标行")
+        self.assertGreater(len(tree._tree_row_widgets), 0, "测试前提：应有子目标行")
 
         # 点击行 + 根行往返多次（完整走选择/详情面板重建链路）
-        rows = list(widget._tree_row_widgets.values())
-        roots = list(widget._goal_root_rows.values())
+        rows = list(tree._tree_row_widgets.values())
+        roots = list(tree._goal_root_rows.values())
         for _ in range(3):
             for row in rows:
                 QTest.mouseClick(row, Qt.LeftButton)

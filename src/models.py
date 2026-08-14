@@ -339,11 +339,6 @@ class Task:
         """展示用累计奖励（文件夹式 rollup）。"""
         return self.rollup_earned()
 
-    def sync_earned_from_subtasks(self) -> None:
-        """有子树时展示走 rollup，不再镜像写入父字段。"""
-        if not self.subtasks:
-            return
-
     def current_subtask(self) -> Optional[Subtask]:
         """当前聚焦的叶子子目标（仅 current_subtask_id 指向的未完成叶子）。"""
         if not self.current_subtask_id:
