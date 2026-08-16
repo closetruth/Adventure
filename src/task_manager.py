@@ -26,6 +26,7 @@ class TaskManager:
         self.state = state
         self.power_monitor = power_monitor or PowerMonitor()
         self._active_time = ActiveTimeTracker()
+        self._last_activity_mono = time.monotonic()
         self._subtask_expanded: dict[str, Set[str]] = {}
         for t in state.tasks:
             if t.status == TaskStatus.ACTIVE:
@@ -494,11 +495,20 @@ class TaskManager:
         self._sync_current_subtask(t)
         return True
 
+    def note_activity(self) -> None:
+        """记录一次键盘/鼠标活动，用于空闲停表判定。"""
+        self._last_activity_mono = time.monotonic()
+
+    def _is_idle(self) -> bool:
+        minutes = float(self.state.settings.get("idle_pause_minutes", 10))
+        if minutes <= 0:
+            return False
+        return (time.monotonic() - self._last_activity_mono) >= minutes * 60.0
+
     def tick_active_time(self) -> bool:
-        """每秒调用：累加聚焦叶子或扁平目标时长（关屏不计）。"""
-        seconds = self._active_time.tick(
-            counting_enabled=self.power_monitor.should_count_time(),
-        )
+        """每秒调用：累加聚焦叶子或扁平目标时长（关屏 / 空闲不计）。"""
+        counting = self.power_monitor.should_count_time() and not self._is_idle()
+        seconds = self._active_time.tick(counting_enabled=counting)
         active = self.state.active_task()
         if active is None or seconds <= 0:
             return False

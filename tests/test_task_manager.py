@@ -129,8 +129,10 @@ class TaskManagerFlowTests(unittest.TestCase):
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=10)
         m.focus_subtask(t.id, sub.id)
+        m.note_activity()
+        # 每次 tick：_is_idle 与 ActiveTimeTracker 各取一次 monotonic
         with mock.patch(
-            "src.active_time.time.monotonic", side_effect=[100.0, 101.0]
+            "time.monotonic", side_effect=[100.0, 100.0, 101.0, 101.0]
         ):
             m.tick_active_time()  # 首 tick 只初始化
             m.tick_active_time()
@@ -140,12 +142,28 @@ class TaskManagerFlowTests(unittest.TestCase):
         state, m = _make()
         t = m.create("甲")
         m.pause(t.id)
+        m.note_activity()
         with mock.patch(
-            "src.active_time.time.monotonic", side_effect=[100.0, 101.0]
+            "time.monotonic", side_effect=[100.0, 100.0, 101.0, 101.0]
         ):
             m.tick_active_time()
             m.tick_active_time()
         self.assertEqual(t.active_seconds, 0.0)
+
+    def test_tick_active_time_skips_when_idle(self):
+        state, m = _make()
+        t = m.create("甲")
+        sub = m.add_subtask(t.id, "A", target_minutes=10)
+        m.focus_subtask(t.id, sub.id)
+        state.settings["idle_pause_minutes"] = 10
+        # 上次活动在 0，之后已超过 10 分钟
+        m._last_activity_mono = 0.0
+        with mock.patch(
+            "time.monotonic", side_effect=[700.0, 700.0, 701.0, 701.0]
+        ):
+            m.tick_active_time()
+            m.tick_active_time()
+        self.assertEqual(sub.active_seconds, 0.0)
 
 
 if __name__ == "__main__":
