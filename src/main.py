@@ -270,6 +270,7 @@ class Application(QObject):
     def _on_operation(self) -> None:
         if self._typing_in_app():
             return
+        self.manager.note_activity()
         self.state.total_operations += 1
         reward = maybe_roll(self.state)
         if reward is not None:
