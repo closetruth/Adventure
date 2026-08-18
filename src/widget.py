@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QCursor, QGuiApplication, QMouseEvent, QPalette
 from PySide6.QtWidgets import (
     QFrame,
@@ -28,12 +28,13 @@ from .storage import save_state
 from .task_manager import TaskManager
 from .ui_goal_tree_area import GoalTreeArea
 from .ui_roll_bar import SegmentedRollBar
-from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_DETAIL_QSS
 from .ui_text import (
     format_global_summary_html,
     format_roll_history_lines_html,
     format_roll_toast_html,
 )
+from .ui_widget_qss import WIDGET_STYLESHEET
+from .ui_window_drag import DragHandleBar, SystemMoveFilter
 from .win_utils import (
     WM_ENTERSIZEMOVE,
     WM_EXITSIZEMOVE,
@@ -46,293 +47,6 @@ from .win_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class DragHandleBar(QWidget):
-    """顶栏拖动手柄：交给系统拖动，不用 QWidget.move()。"""
-
-    def __init__(self, window: QWidget, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._window = window
-        self.setObjectName("DragHandle")
-        self.setCursor(Qt.SizeAllCursor)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.LeftButton:
-            begin = getattr(self._window, "begin_user_move", None)
-            if callable(begin):
-                begin()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-
-class WindowDragHelper(QObject):
-    """全局区左键拖动：同样只走系统拖动。"""
-
-    def __init__(self, window: QWidget) -> None:
-        super().__init__(window)
-        self._window = window
-
-    def attach(self, root: QWidget) -> None:
-        root.installEventFilter(self)
-        for child in root.findChildren(QWidget):
-            if isinstance(child, (QPushButton,)):
-                continue
-            child.installEventFilter(self)
-
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.MouseButtonPress:
-            me = event
-            if isinstance(me, QMouseEvent) and me.button() == Qt.LeftButton:
-                begin = getattr(self._window, "begin_user_move", None)
-                if callable(begin):
-                    begin()
-                return True
-        return False
-
-
-WIDGET_STYLESHEET = """
-QWidget#WidgetWindow {
-    background-color: #1c1c26;
-}
-QWidget#WidgetRoot {
-    background-color: #1c1c26;
-    border-radius: 12px;
-    border: 1px solid #3a3f52;
-}
-QLabel { color: #f5f5f7; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"; }
-QWidget#DragHandle { background: transparent; }
-QLabel#Title { font-size: 15px; font-weight: 700; background: transparent; }
-QLabel#Subtle { color: #d0d4e0; font-size: 12px; }
-QLabel#SectionTitle {
-    font-size: 12px; font-weight: 700; color: #b8c0d4;
-    padding-bottom: 2px;
-}
-QLabel#GlobalSummary { font-size: 11px; font-weight: 500; }
-QLabel#RollHistCap { color: #a8b0c4; font-size: 10px; }
-QLabel#RollHist { color: #b8c0d4; font-size: 9px; line-height: 1.25; }
-QLabel#TaskTitle { font-size: 14px; font-weight: 700; color: #ffffff; }
-QWidget#SubGoalRow {
-    background-color: #1a1b24;
-    border-radius: 6px;
-    border: 1px solid #2a2d38;
-}
-QWidget#SubGoalRow[nested="true"] {
-    border-left: 3px solid #3a4a68;
-    background-color: #181a22;
-}
-QWidget#SubGoalRow[current="true"] {
-    background-color: #152038;
-    border: 1px solid #3a5080;
-}
-QWidget#SubGoalRow[claimable="true"] {
-    background-color: #241e14;
-    border: 1px solid #6a5020;
-}
-QWidget#SubGoalPinned {
-    background-color: #152038;
-    border-radius: 6px;
-    border: 1px solid #3a5080;
-}
-QPushButton#SubClaimBtn {
-    background-color: #3a5cff;
-    border-color: #3a5cff;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 4px 10px;
-    min-height: 22px;
-}
-QPushButton#SubClaimBtn:hover { background-color: #4d6dff; }
-QPushButton#GoalAddBtn {
-    font-size: 12px;
-    padding: 4px 10px;
-    background-color: #252833;
-    border: 1px solid #404558;
-    color: #b8c8e8;
-}
-QPushButton#GoalAddBtn:hover {
-    background-color: #303448;
-}
-QPushButton#SubActionBtn {
-    background-color: #252833;
-    border: 1px solid #404558;
-    color: #a8c4ff;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 8px;
-    min-height: 20px;
-    border-radius: 5px;
-}
-QPushButton#SubActionBtn:hover { background-color: #303448; border-color: #5a6a90; }
-QPushButton#SubFoldBtn {
-    background-color: #252833;
-    border: 1px solid #404558;
-    color: #c8ceda;
-    font-size: 11px;
-    font-weight: 700;
-    padding: 2px 6px;
-    min-width: 20px;
-    min-height: 20px;
-    border-radius: 5px;
-}
-QPushButton#SubFoldBtn:hover { background-color: #303448; border-color: #5a6a90; }
-QPushButton#SubDelBtn {
-    font-size: 11px;
-    padding: 3px 8px;
-    min-height: 20px;
-    border-radius: 5px;
-    color: #a87070;
-    background-color: #252833;
-    border: 1px solid #503838;
-}
-QPushButton#SubDelBtn:hover {
-    color: #d09090;
-    background-color: #302525;
-    border-color: #704040;
-}
-QPushButton#Primary {
-    background-color: #3a5cff;
-    border: 1px solid #3a5cff;
-    color: #ffffff;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 10px;
-    min-height: 22px;
-    border-radius: 5px;
-}
-QPushButton#Primary:hover { background-color: #4d6dff; border-color: #4d6dff; }
-QPushButton#Ghost {
-    background-color: transparent;
-    color: #b8bfd0;
-    border: 1px solid #404558;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 10px;
-    min-height: 22px;
-    border-radius: 5px;
-}
-QPushButton#Ghost:hover { background-color: #252833; color: #e8eaf0; }
-QPushButton#Danger {
-    color: #d09090;
-    border: 1px solid #503838;
-    background: #2a2222;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 10px;
-    min-height: 22px;
-    border-radius: 5px;
-}
-QPushButton#Danger:hover {
-    background-color: #3a2828;
-    border-color: #704040;
-    color: #ffb0b0;
-}
-QScrollArea#SubGoalScroll { background-color: #1c1c26; border: none; }
-QWidget#SubGoalViewport { background-color: #1c1c26; }
-QWidget#SubGoalContainer { background-color: #1c1c26; }
-QScrollBar#SubGoalHBar:horizontal {
-    height: 10px;
-    background-color: #1c1c26;
-    border: none;
-    margin: 4px 4px 0 4px;
-}
-QScrollBar#SubGoalHBar::groove:horizontal {
-    background-color: #1c1c26;
-    border: none;
-    height: 10px;
-    border-radius: 5px;
-}
-QScrollBar#SubGoalHBar::sub-page:horizontal,
-QScrollBar#SubGoalHBar::add-page:horizontal {
-    background-color: #1c1c26;
-    border: none;
-}
-QScrollBar#SubGoalHBar::handle:horizontal {
-    background-color: #e8e8e8;
-    min-width: 64px;
-    border-radius: 5px;
-    margin: 0;
-    border: none;
-}
-QScrollBar#SubGoalHBar::handle:horizontal:hover {
-    background-color: #ffffff;
-}
-QScrollBar#SubGoalHBar::handle:horizontal:disabled {
-    background-color: #5a5a62;
-}
-QScrollBar#SubGoalHBar::add-line:horizontal,
-QScrollBar#SubGoalHBar::sub-line:horizontal {
-    width: 0;
-    height: 0;
-    border: none;
-    background: none;
-}
-QScrollArea#SubGoalScroll QScrollBar:vertical {
-    width: 10px;
-    background-color: #1c1c26;
-    border: none;
-    margin: 2px 2px 2px 0;
-}
-QScrollArea#SubGoalScroll QScrollBar::groove:vertical {
-    background-color: #1c1c26;
-    border: none;
-    width: 10px;
-    border-radius: 5px;
-}
-QScrollArea#SubGoalScroll QScrollBar::sub-page:vertical,
-QScrollArea#SubGoalScroll QScrollBar::add-page:vertical {
-    background-color: #1c1c26;
-    border: none;
-}
-QScrollArea#SubGoalScroll QScrollBar::handle:vertical {
-    background-color: #e8e8e8;
-    min-height: 40px;
-    border-radius: 5px;
-    margin: 0;
-    border: none;
-}
-QScrollArea#SubGoalScroll QScrollBar::handle:vertical:hover {
-    background-color: #ffffff;
-}
-QScrollArea#SubGoalScroll QScrollBar::handle:vertical:disabled {
-    background-color: #5a5a62;
-}
-QScrollArea#SubGoalScroll QScrollBar::add-line:vertical,
-QScrollArea#SubGoalScroll QScrollBar::sub-line:vertical {
-    width: 0;
-    height: 0;
-    border: none;
-    background: none;
-}
-QWidget#SubGoalActions { background: transparent; }
-QPushButton {
-    background-color: #2a2d3a;
-    color: #f5f5f7;
-    border: 1px solid #404558;
-    border-radius: 8px;
-    padding: 6px 10px;
-    font-size: 12px;
-}
-QPushButton:hover { background-color: #343848; }
-QPushButton:pressed { background-color: #222530; }
-QPushButton#CloseBtn, QPushButton#MinBtn {
-    background-color: transparent;
-    border: none;
-    padding: 0px 6px;
-    font-size: 14px;
-    color: #c0c4d0;
-}
-QPushButton#CloseBtn:hover { color: #ff7474; }
-QLabel#RollToast {
-    font-size: 12px;
-    font-weight: 700;
-    padding: 2px 0;
-    background: transparent;
-}
-QLabel#RollToast[toast="miss"] { color: #8a909e; }
-QFrame#Divider { background-color: #2a2d38; max-height: 1px; min-height: 1px; }
-""" + TREE_DETAIL_QSS + GOAL_TREE_PANEL_QSS
 
 
 class FloatingWidget(QWidget):
@@ -468,7 +182,7 @@ class FloatingWidget(QWidget):
         global_lay.addLayout(hist_row)
 
         v.addWidget(self.global_section)
-        self._drag_helper = WindowDragHelper(self)
+        self._drag_helper = SystemMoveFilter(self, self)
         self._drag_helper.attach(self.global_section)
 
         divider = QFrame()
@@ -505,7 +219,7 @@ class FloatingWidget(QWidget):
         lbl.setObjectName("SectionTitle")
         return lbl
 
-    # ---------- 右键菜单（拖动见 DragHandleBar / WindowDragHelper）----------
+    # ---------- 右键菜单（拖动见 ui_window_drag）----------
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.RightButton:
             self._show_context_menu()
@@ -605,6 +319,21 @@ class FloatingWidget(QWidget):
             ops_1min=ops_1min,
         )
 
+    def _paint_global_stats(self) -> None:
+        ops_1min = self._op_tracker.count_recent()
+        self._set_html(
+            self.global_summary,
+            self._format_global_summary_html(ops_1min),
+        )
+
+    def _paint_roll_history(self) -> None:
+        self._set_html(
+            self.roll_history_lbl,
+            format_roll_history_lines_html(
+                self.state.roll_history, limit=3, compact=True,
+            ),
+        )
+
     def _update_roll_bar(self) -> None:
         rt = self.state.roll_runtime
         progress, span = roll_progress(self.state)
@@ -669,32 +398,24 @@ class FloatingWidget(QWidget):
         QTimer.singleShot(600, lambda: self.roll_bar.set_flash(True))
         QTimer.singleShot(900, _off)
 
-    def refresh_light(self, *, roll_changed: bool = False, reward: Optional[Reward] = None) -> None:
-        """按键后的轻量刷新：跳过未变化字段，开奖历史仅在开奖时更新。"""
-        s = self.state
-        ops_1min = self._op_tracker.count_recent()
-
-        self._set_html(
-            self.global_summary,
-            self._format_global_summary_html(ops_1min),
-        )
-
+    def refresh_stats(self, *, roll_changed: bool = False, reward: Optional[Reward] = None) -> None:
+        """按键后的轻量刷新：只改数字，不重建目标树。"""
+        self._paint_global_stats()
         self._update_roll_bar()
 
         if roll_changed:
-            self._set_html(
-                self.roll_history_lbl,
-                format_roll_history_lines_html(
-                    s.roll_history, limit=3, compact=True,
-                ),
-            )
+            self._paint_roll_history()
             if reward is not None:
                 self.show_roll_result(reward)
 
+        since = self.state.since_roll
         self.goal_tree.refresh_stats(
-            since_gold=s.since_roll.gold,
-            since_diamond=s.since_roll.diamond,
+            since_gold=since.gold,
+            since_diamond=since.diamond,
         )
+
+    # 兼容旧调用名
+    refresh_light = refresh_stats
 
     # ---------- 刷新 ----------
     def refresh(self) -> None:
@@ -707,27 +428,17 @@ class FloatingWidget(QWidget):
             self._refreshing = False
 
     def _refresh(self) -> None:
-        s = self.state
-        ops_1min = self._op_tracker.count_recent()
-
-        self._set_html(
-            self.global_summary,
-            self._format_global_summary_html(ops_1min),
-        )
-
+        self._paint_global_stats()
         self._update_roll_bar()
-
-        self._set_html(
-            self.roll_history_lbl,
-            format_roll_history_lines_html(
-                s.roll_history, limit=3, compact=True,
-            ),
-        )
-
+        self._paint_roll_history()
+        since = self.state.since_roll
         self.goal_tree.refresh(
-            since_gold=s.since_roll.gold,
-            since_diamond=s.since_roll.diamond,
+            since_gold=since.gold,
+            since_diamond=since.diamond,
         )
+
+    def is_user_moving(self) -> bool:
+        return self._window_dragging
 
     def begin_user_move(self) -> None:
         """交给系统拖动；Windows 上不用 QWidget.move()。"""
@@ -756,19 +467,14 @@ class FloatingWidget(QWidget):
     def _refresh_runtime(self) -> None:
         """仅刷新与时间相关的字段，避免整窗口频繁重绘。"""
         self.manager.tick_active_time()
-        if self._window_dragging:
+        if self.is_user_moving():
             return
         if QGuiApplication.mouseButtons() != Qt.MouseButton.NoButton:
             return
-        self._tick_count = getattr(self, '_tick_count', 0) + 1
+        self._tick_count = getattr(self, "_tick_count", 0) + 1
         if self._tick_count % 60 == 0:
             logger.debug("运行中 (ops=%d)", self.state.total_operations)
-        ops_1min = self._op_tracker.count_recent()
-
-        self._set_html(
-            self.global_summary,
-            self._format_global_summary_html(ops_1min),
-        )
+        self._paint_global_stats()
 
         if self.state.active_task() is None:
             return

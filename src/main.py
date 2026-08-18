@@ -243,7 +243,7 @@ class Application(QObject):
 
     def _flush_ui(self) -> None:
         # 鼠标按着时不刷新：避免 press→重建/polish 把点击吃掉
-        if getattr(self.widget, "_window_dragging", False):
+        if self.widget.is_user_moving():
             self._ui_flush_timer.start()
             return
         if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
@@ -253,7 +253,7 @@ class Application(QObject):
         reward = self._pending_roll_reward if roll_changed else None
         self._roll_changed = False
         self._pending_roll_reward = None
-        self.widget.refresh_light(roll_changed=roll_changed, reward=reward)
+        self.widget.refresh_stats(roll_changed=roll_changed, reward=reward)
         if self._task_dialog is not None and self._task_dialog.isVisible():
             self._task_dialog.refresh_stats()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():

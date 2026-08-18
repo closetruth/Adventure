@@ -123,14 +123,14 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
             "展开后顶层目标应仍可见",
         )
 
-    def test_refresh_light_does_not_rebuild_tree(self):
+    def test_refresh_stats_does_not_rebuild_tree(self):
         """按键轻量刷新不得销毁树行，否则点击会落到已删除控件上。"""
         widget = self.widget
         tree = widget.goal_tree
         before = {key: id(row) for key, row in tree._tree_row_widgets.items()}
         self.assertTrue(before, "测试前提：应有子目标行")
         widget.note_operation()
-        widget.refresh_light()
+        widget.refresh_stats()
         _app.processEvents()
         after = {key: id(row) for key, row in tree._tree_row_widgets.items()}
         self.assertEqual(before, after)
@@ -141,7 +141,7 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
             w = item.widget() if item is not None else None
             if w is not None:
                 btn_ids.append(id(w))
-        widget.refresh_light()
+        widget.refresh_stats()
         _app.processEvents()
         after_btns = []
         for i in range(lay.count()):
@@ -163,7 +163,7 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
         QTest.mouseRelease(handle, Qt.LeftButton, pos=QPoint(8, 8))
         widget.end_user_move()
         _app.processEvents()
-        self.assertFalse(widget._window_dragging)
+        self.assertFalse(widget.is_user_moving())
         self.assertIsNone(QWidget.mouseGrabber())
 
         row = next(iter(widget.goal_tree._tree_row_widgets.values()))

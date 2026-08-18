@@ -263,26 +263,6 @@ def apply_goal_block_ui(
     )
 
 
-def apply_goal_block_state(block: QWidget, *, is_running: bool) -> None:
-    """设置目标块容器的运行/暂停 QSS 属性。"""
-    apply_goal_block_ui(
-        block,
-        is_running=is_running,
-        selected=bool(block.property("selected")),
-        focused=bool(block.property("focused")),
-    )
-
-
-def apply_goal_block_selection(block: QWidget, *, selected: bool) -> None:
-    """设置目标块选中描边（四边边框高亮）。"""
-    apply_goal_block_ui(
-        block,
-        is_running=bool(block.property("current")),
-        selected=selected,
-        focused=bool(block.property("focused")),
-    )
-
-
 def apply_goal_root_row_state(row: QWidget, *, is_running: bool) -> None:
     """设置目标根行属性（块级高亮由 GoalBlock 承担，根行保持透明）。"""
     _apply_widget_properties(row, current=is_running, paused=not is_running)
