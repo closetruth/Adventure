@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import logging
 import random
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Optional
 
 from .models import Reward
+from .paths import project_root
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +26,6 @@ _SOUND_EXTS = (".wav", ".ogg", ".mp3")
 _GOLD_STEM = "roll_gold"
 _DIAMOND_SUBDIR = "diamond"
 _MIXER_RETRY_COOLDOWN = 300.0
-
-
-def project_root() -> Path:
-    """Return project root in dev mode and bundle mode."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent.parent
 
 
 def _sounds_base() -> Path:

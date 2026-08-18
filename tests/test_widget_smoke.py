@@ -208,5 +208,29 @@ class RollBarPaintRegressionTest(unittest.TestCase):
         bar.deleteLater()
 
 
+class RollBarInitRegressionTest(unittest.TestCase):
+    """回归：启动时进度条必须用存档进度，不能停在默认 0/10。"""
+
+    def test_create_uses_saved_roll_progress(self):
+        from src.models import AppState
+        from src.power_monitor import PowerMonitor
+        from src.reward_system import roll_progress
+        from src.task_manager import TaskManager
+
+        state = AppState()
+        state.total_operations = 4
+        state.last_roll_at = 0
+        state.roll_runtime.next_roll_at = 10
+        state.roll_runtime.roll_span = 10
+        widget = FloatingWidget(state, TaskManager(state, PowerMonitor()))
+        progress, span = roll_progress(state)
+        self.assertEqual(progress, 4)
+        self.assertEqual(widget.roll_bar._progress, progress)
+        self.assertEqual(widget.roll_bar._span, span)
+        self.assertTrue(widget.roll_bar._chance_label)
+        widget.close()
+        widget.deleteLater()
+
+
 if __name__ == "__main__":
     unittest.main()
