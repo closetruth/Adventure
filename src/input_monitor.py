@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import ctypes
 import logging
-import sys
 import threading
 import time
 from typing import Callable, Optional
@@ -20,6 +19,8 @@ from typing import Callable, Optional
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication
+
+from .win_utils import is_windows
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +51,6 @@ _POLL_INTERVAL_MS = 50
 
 # 休眠唤醒检测阈值（秒）：间隔超此值视为刚唤醒，清脏状态
 _SLEEP_GAP_SEC = 1.5
-
-
-def _is_win() -> bool:
-    return sys.platform.startswith("win")
 
 
 class InputMonitor:
@@ -92,11 +89,11 @@ class InputMonitor:
     def available(self) -> bool:
         """当前模式是否可用。"""
         if self._method == "poll":
-            return _is_win()
+            return is_windows()
         if self._method == "hook":
             return _PYNPUT_AVAILABLE
         # auto
-        if _is_win():
+        if is_windows():
             return True
         return _PYNPUT_AVAILABLE
 
@@ -110,7 +107,7 @@ class InputMonitor:
             self._running = True
 
         use_poll = (self._method == "poll") or (
-            self._method == "auto" and _is_win()
+            self._method == "auto" and is_windows()
         )
 
         if use_poll:

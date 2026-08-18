@@ -88,7 +88,7 @@ class GoalTreeArea(QWidget):
         self._geometry_syncing = False
 
         self._build_ui()
-        self._refresh()
+        self.refresh()
 
     # ---------- UI ----------
     def _build_ui(self) -> None:
@@ -250,35 +250,29 @@ class GoalTreeArea(QWidget):
     def refresh(
         self,
         *,
-        since_gold: float = 0.0,
-        since_diamond: float = 0.0,
+        since_gold: float | None = None,
+        since_diamond: float | None = None,
     ) -> None:
         """全量刷新（结构变化时）。"""
+        since = self.state.since_roll
         self._apply_task_section(
             self.state.active_task(),
-            since_gold=since_gold,
-            since_diamond=since_diamond,
+            since_gold=since.gold if since_gold is None else since_gold,
+            since_diamond=since.diamond if since_diamond is None else since_diamond,
         )
 
     def refresh_stats(
         self,
         *,
-        since_gold: float = 0.0,
-        since_diamond: float = 0.0,
+        since_gold: float | None = None,
+        since_diamond: float | None = None,
     ) -> None:
         """轻量刷新：只改统计文本，不重建树/按钮。"""
+        since = self.state.since_roll
         self._refresh_task_ops_ui(
-            since_gold=since_gold,
-            since_diamond=since_diamond,
+            since_gold=since.gold if since_gold is None else since_gold,
+            since_diamond=since.diamond if since_diamond is None else since_diamond,
             allow_action_rebuild=False,
-        )
-
-    def _refresh(self) -> None:
-        active = self.state.active_task()
-        self._apply_task_section(
-            active,
-            since_gold=self.state.since_roll.gold,
-            since_diamond=self.state.since_roll.diamond,
         )
 
     @staticmethod
@@ -375,7 +369,7 @@ class GoalTreeArea(QWidget):
 
     def _flush_local_refresh(self) -> None:
         self._local_refresh_pending = False
-        self._refresh()
+        self.refresh()
 
     def _measure_subgoals_content_size(self) -> tuple[int, int]:
         """按子控件 sizeHint 累加，避免布局未激活时 minimumSize 变成 1px 把树裁没。"""
