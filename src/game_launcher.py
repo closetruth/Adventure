@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 
 from .game_protocol import GameResult, GameSession
 from .models import AppState
+from .paths import project_root
 from .ui_text import format_amount
 
 logger = logging.getLogger(__name__)
@@ -16,13 +17,6 @@ logger = logging.getLogger(__name__)
 
 ENTRY_GOLD_COST = 10
 GRID_GAME_ENTRY_GOLD_COST = 12
-
-
-def project_root() -> Path:
-    """项目根目录；打包后为 exe 所在目录。"""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent.parent
 
 
 def python_for_subprocess() -> str:

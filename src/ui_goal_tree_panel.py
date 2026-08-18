@@ -6,11 +6,9 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QPushButton,
-    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -18,15 +16,24 @@ from PySide6.QtWidgets import (
 
 from .models import AppState, Subtask, Task, TaskStatus
 from .task_manager import TaskManager
+from .ui_goal_tree_shared import (
+    completion_bonus_gold,
+    goal_detail_actions_signature,
+    make_empty_subtasks_hint,
+    make_goal_block,
+    make_goal_root_row,
+    make_tree_node_row,
+    prompt_decompose_titles,
+    visible_subtask_structure,
+    wrap_indented_subtask_row,
+)
+from .ui_qt import clear_layout, drain_layout_widgets, set_label_html, set_label_text
 from .ui_task_tree import (
-    TREE_INDENT_PX,
     SubtaskActionCallbacks,
     TreeRow,
     append_subtask_detail_actions,
     apply_goal_block_ui,
-    apply_goal_root_row_state,
     apply_subtask_block_ui,
-    build_subtask_action_buttons,
 )
 from .ui_text import (
     format_amount,
@@ -35,8 +42,6 @@ from .ui_text import (
     format_tree_detail_html,
     format_tree_node_html,
 )
-
-SUBGOAL_INDENT_PX = TREE_INDENT_PX
 
 
 class GoalTreePanel(QWidget):
@@ -220,19 +225,11 @@ class GoalTreePanel(QWidget):
 
     def _structure_signature(self) -> tuple:
         expanded = frozenset(self.manager.expanded_subtask_ids(self.task.id))
-        if self._goal_expanded:
-            sub_part = tuple(
-                (
-                    s.id,
-                    s.title,
-                    s.done,
-                    s.rewards_claimed,
-                    s.is_container(),
-                )
-                for _, s in self.manager.iter_visible_subtasks(self.task)
-            )
-        else:
-            sub_part = ()
+        sub_part = (
+            visible_subtask_structure(self.manager, self.task)
+            if self._goal_expanded
+            else ()
+        )
         return (
             self.task.id,
             self.task.title,
@@ -250,23 +247,7 @@ class GoalTreePanel(QWidget):
         self._tree_row_widgets.clear()
         self._subtask_blocks.clear()
         self._goal_detail_actions_sig = None
-        while self._tree_layout.count():
-            item = self._tree_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.hide()
-                widget.deleteLater()
-
-    @staticmethod
-    def _clear_layout(layout) -> None:
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.hide()
-                widget.deleteLater()
-            elif item.layout() is not None:
-                GoalTreePanel._clear_layout(item.layout())
+        drain_layout_widgets(self._tree_layout)
 
     def _rebuild_tree(
         self,
@@ -282,12 +263,7 @@ class GoalTreePanel(QWidget):
         editable = self._editable
         root_selected = not self._selected_subtask_id
 
-        block = QWidget()
-        block.setObjectName("GoalBlock")
-        block.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
-        block_layout = QVBoxLayout(block)
-        block_layout.setContentsMargins(0, 0, 0, 0)
-        block_layout.setSpacing(0)
+        block, block_layout = make_goal_block()
 
         root_row, root_line = self._make_goal_root_row(selected=root_selected)
         self._goal_root_row = root_row
@@ -300,11 +276,7 @@ class GoalTreePanel(QWidget):
             active_path = task.active_focus_path_ids() if editable else frozenset()
 
             if not task.subtasks and is_running:
-                hint = QLabel("添加目标后开始累计奖励")
-                hint.setObjectName("SubGoalList")
-                hint.setWordWrap(True)
-                hint.setContentsMargins(22, 0, 4, 0)
-                block_layout.addWidget(hint)
+                block_layout.addWidget(make_empty_subtasks_hint())
             else:
                 for depth, sub in self.manager.iter_visible_subtasks(task):
                     key = sub.id
@@ -318,32 +290,13 @@ class GoalTreePanel(QWidget):
                     )
                     self._subgoal_line_labels[key] = line
                     self._tree_row_widgets[key] = row
-
-                    sub_block = QWidget()
-                    sub_block.setObjectName("SubtaskBlock")
-                    sub_block.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
-                    apply_subtask_block_ui(
-                        sub_block,
+                    sub_block, indent_wrap = wrap_indented_subtask_row(
+                        row,
+                        depth=depth + 1,
                         selected=sub.id == self._selected_subtask_id,
                         focused=sub.id in active_path,
                     )
-                    sub_block_layout = QVBoxLayout(sub_block)
-                    sub_block_layout.setContentsMargins(0, 0, 0, 0)
-                    sub_block_layout.setSpacing(0)
-                    sub_block_layout.addWidget(row)
                     self._subtask_blocks[key] = sub_block
-
-                    indent_wrap = QWidget()
-                    indent_wrap.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
-                    indent_lay = QHBoxLayout(indent_wrap)
-                    indent_lay.setContentsMargins(
-                        (depth + 1) * SUBGOAL_INDENT_PX,
-                        0,
-                        0,
-                        0,
-                    )
-                    indent_lay.setSpacing(0)
-                    indent_lay.addWidget(sub_block)
                     block_layout.addWidget(indent_wrap)
 
         self._goal_block = block
@@ -357,46 +310,13 @@ class GoalTreePanel(QWidget):
         self._apply_selection_ui(since_gold=since_gold, since_diamond=since_diamond)
 
     def _make_goal_root_row(self, *, selected: bool) -> tuple[TreeRow, QLabel]:
-        task = self.task
-        is_running = task.status == TaskStatus.ACTIVE
-        row = TreeRow()
-        row.setObjectName("GoalRootRow")
-        row.setCursor(Qt.PointingHandCursor)
-        row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        apply_goal_root_row_state(row, is_running=is_running)
-        row.set_row_selected(selected)
-
-        row_lay = QHBoxLayout(row)
-        row_lay.setContentsMargins(4, 3, 4, 3)
-        row_lay.setSpacing(4)
-
-        has_children = bool(task.subtasks) or is_running
-        if has_children:
-            btn_fold = QPushButton("v" if self._goal_expanded else ">")
-            btn_fold.setObjectName("TreeFoldBtn")
-            btn_fold.setCursor(Qt.PointingHandCursor)
-            btn_fold.setFixedSize(18, 18)
-            btn_fold.clicked.connect(self._on_goal_toggle_fold)
-            row_lay.addWidget(btn_fold, 0, Qt.AlignVCenter)
-
-        line = QLabel(
-            format_goal_root_line_html(
-                task,
-                selected=selected,
-                is_running=is_running,
-                muted=task.status == TaskStatus.PAUSED,
-            )
+        return make_goal_root_row(
+            self.task,
+            selected=selected,
+            expanded=self._goal_expanded,
+            on_fold=self._on_goal_toggle_fold,
+            on_select=lambda: self._on_tree_select("", editable=False),
         )
-        line.setObjectName("TaskTitle")
-        line.setWordWrap(False)
-        line.setTextFormat(Qt.RichText)
-        line.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
-        row_lay.addWidget(line, 0)
-
-        row.selected.connect(lambda: self._on_tree_select("", editable=False))
-        row.style().unpolish(row)
-        row.style().polish(row)
-        return row, line
 
     def _make_tree_node_row(
         self,
@@ -409,79 +329,30 @@ class GoalTreePanel(QWidget):
         current_id: Optional[str],
     ) -> tuple[TreeRow, QLabel]:
         task = self.task
-        row = TreeRow()
-        row.setObjectName("TreeNodeRow")
-        row.setCursor(Qt.PointingHandCursor)
-        row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        if depth > 0:
-            row.setProperty("nested", True)
-        row.set_row_selected(selected)
-
-        row_lay = QHBoxLayout(row)
-        row_lay.setContentsMargins(4, 3, 4, 3)
-        row_lay.setSpacing(4)
-
-        if sub.is_container():
-            expanded = self.manager.is_subtask_expanded(task.id, sub.id)
-            btn_fold = QPushButton("v" if expanded else ">")
-            btn_fold.setObjectName("TreeFoldBtn")
-            btn_fold.setCursor(Qt.PointingHandCursor)
-            btn_fold.setFixedSize(18, 18)
-            btn_fold.clicked.connect(
-                lambda _c=False, sid=sub.id: self._emit_toggle_fold(sid)
-            )
-            row_lay.addWidget(btn_fold, 0, Qt.AlignVCenter)
-
-        show_stats = selected or is_current
-        line = QLabel(
-            format_tree_node_html(
-                sub,
-                selected=selected,
-                is_current=is_current,
-                expanded=self.manager.is_subtask_expanded(task.id, sub.id),
-                show_stats=show_stats,
-            )
-        )
-        line.setObjectName("SubGoalList")
-        line.setWordWrap(False)
-        line.setTextFormat(Qt.RichText)
-        line.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
-        row_lay.addWidget(line, 0)
-
-        callbacks = SubtaskActionCallbacks(
-            on_claim=lambda sid=sub.id: self.action.emit(
-                task.id, "subtask_claim", sid,
-            ),
-            on_focus=lambda sid=sub.id: self.action.emit(
-                task.id, "subtask_focus", sid,
-            ),
-            on_pause=lambda: self.action.emit(task.id, "subtask_pause", ""),
-            on_complete=lambda sid=sub.id: self.action.emit(
-                task.id, "subtask_confirm_done", sid,
-            ),
-            on_decompose=lambda sid=sub.id: self._prompt_decompose(sid),
-            on_delete=lambda sid=sub.id: self.action.emit(
-                task.id, "subtask_delete", sid,
-            ),
-            on_add_child=lambda sid=sub.id: self.set_add_parent(sid),
-        )
-        actions = build_subtask_action_buttons(
+        return make_tree_node_row(
+            self.manager,
+            task,
             sub,
-            task_status=task.status,
+            depth=depth,
+            selected=selected,
+            is_current=is_current,
             current_id=current_id,
-            callbacks=callbacks,
-            parent=row,
+            callbacks=SubtaskActionCallbacks(
+                on_claim=lambda: self.action.emit(task.id, "subtask_claim", sub.id),
+                on_focus=lambda: self.action.emit(task.id, "subtask_focus", sub.id),
+                on_pause=lambda: self.action.emit(task.id, "subtask_pause", ""),
+                on_complete=lambda: self.action.emit(
+                    task.id, "subtask_confirm_done", sub.id,
+                ),
+                on_decompose=lambda: self._prompt_decompose(sub.id),
+                on_delete=lambda: self.action.emit(task.id, "subtask_delete", sub.id),
+                on_add_child=lambda: self.set_add_parent(sub.id),
+            ),
+            on_fold=lambda: self._emit_toggle_fold(sub.id),
+            on_select=lambda: self._on_tree_select(
+                sub.id, sub=sub, editable=editable,
+            ),
         )
-        row.set_actions_widget(actions)
-        row_lay.addWidget(actions, 0, Qt.AlignVCenter)
-        row.set_row_focused(is_current)
-
-        row.selected.connect(
-            lambda s=sub, e=editable: self._on_tree_select(s.id, sub=s, editable=e)
-        )
-        row.style().unpolish(row)
-        row.style().polish(row)
-        return row, line
 
     def _on_goal_toggle_fold(self) -> None:
         self._goal_expanded = not self._goal_expanded
@@ -562,13 +433,14 @@ class GoalTreePanel(QWidget):
         active_path = task.active_focus_path_ids() if editable else frozenset()
 
         if not stats_only and self._goal_root_line is not None:
-            self._goal_root_line.setText(
+            set_label_html(
+                self._goal_root_line,
                 format_goal_root_line_html(
                     task,
                     selected=not self._selected_subtask_id,
                     is_running=task.status == TaskStatus.ACTIVE,
                     muted=task.status == TaskStatus.PAUSED,
-                )
+                ),
             )
 
         for sid, sub_line in self._subgoal_line_labels.items():
@@ -580,18 +452,16 @@ class GoalTreePanel(QWidget):
             if stats_only and not (is_selected or is_current):
                 continue
             show_stats = is_selected or is_current
-            sub_line.setText(
+            set_label_html(
+                sub_line,
                 format_tree_node_html(
                     sub,
                     selected=is_selected,
                     is_current=is_current,
                     expanded=self.manager.is_subtask_expanded(task.id, sub.id),
                     show_stats=show_stats,
-                )
+                ),
             )
-
-    def _subtask_completion_bonus(self) -> float:
-        return float(self.state.settings.get("subtask_completion_bonus_gold", 0.5))
 
     def _format_detail_stats_html(
         self,
@@ -606,7 +476,7 @@ class GoalTreePanel(QWidget):
             sub,
             since_roll_gold=since_gold,
             since_roll_diamond=since_diamond,
-            completion_bonus=self._subtask_completion_bonus(),
+            completion_bonus=completion_bonus_gold(self.state),
         )
         if sub is None and task.status == TaskStatus.COMPLETED:
             settlement = (
@@ -616,34 +486,6 @@ class GoalTreePanel(QWidget):
             )
             html = f"{html}<br>{settlement}"
         return html
-
-    @staticmethod
-    def _goal_detail_actions_signature(
-        task: Task,
-        sub: Subtask | None,
-    ) -> tuple:
-        if sub is None:
-            return ("goal", task.id, task.status, bool(
-                task.subtasks
-                and task.status == TaskStatus.ACTIVE
-                and task.current_subtask() is None
-            ))
-        return (
-            "sub",
-            task.id,
-            sub.id,
-            sub.done,
-            sub.rewards_claimed,
-            sub.is_leaf(),
-            sub.is_container(),
-            sub.is_claimable(),
-            sub.can_claim_pending(),
-            sub.can_finish(),
-            sub.is_legacy_progress(),
-            sub.time_target_met(),
-            task.current_subtask_id,
-            task.status,
-        )
 
     def _refresh_detail_panel(
         self,
@@ -659,21 +501,22 @@ class GoalTreePanel(QWidget):
             sub = task.find_subtask(self._selected_subtask_id)
 
         title_text = sub.title if sub is not None else task.title
-        self._detail_title.setText(title_text)
-        self._detail_stats.setText(
+        set_label_text(self._detail_title, title_text)
+        set_label_html(
+            self._detail_stats,
             self._format_detail_stats_html(
                 task,
                 sub,
                 since_gold=since_gold,
                 since_diamond=since_diamond,
-            )
+            ),
         )
 
-        actions_sig = self._goal_detail_actions_signature(task, sub)
+        actions_sig = goal_detail_actions_signature(task, sub)
         if actions_sig == self._goal_detail_actions_sig:
             return
         self._goal_detail_actions_sig = actions_sig
-        self._clear_layout(self._detail_btn_lay)
+        clear_layout(self._detail_btn_lay)
 
         if sub is None:
             if task.status == TaskStatus.PAUSED:
@@ -757,15 +600,7 @@ class GoalTreePanel(QWidget):
         self._add_context.hide()
 
     def _prompt_decompose(self, subtask_id: str) -> None:
-        text, ok = QInputDialog.getText(
-            self,
-            "分解目标",
-            "子项名称（多个用逗号分隔）：",
-            text="子项1, 子项2",
-        )
-        if not ok:
-            return
-        titles = [p.strip() for p in text.replace("，", ",").split(",") if p.strip()]
+        titles = prompt_decompose_titles(self)
         if not titles:
             return
         self.action.emit(

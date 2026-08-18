@@ -27,6 +27,7 @@ from .reward_system import roll_progress
 from .storage import save_state
 from .task_manager import TaskManager
 from .ui_goal_tree_area import GoalTreeArea
+from .ui_qt import make_section_title, set_label_html, set_label_text
 from .ui_roll_bar import SegmentedRollBar
 from .ui_text import (
     format_global_summary_html,
@@ -92,6 +93,10 @@ class FloatingWidget(QWidget):
         self._drag_end_timer.timeout.connect(self.end_user_move)
 
         self._build_ui()
+        # 控件默认是 0/10；立刻用存档进度画一次，否则要等第一次按键才刷新
+        self._paint_global_stats()
+        self._paint_roll_history()
+        self._update_roll_bar()
 
         # 自动刷新 (用于 active 任务的计时显示)
         self._tick = QTimer(self)
@@ -146,7 +151,7 @@ class FloatingWidget(QWidget):
         global_lay = QVBoxLayout(self.global_section)
         global_lay.setContentsMargins(0, 0, 0, 0)
         global_lay.setSpacing(6)
-        global_lay.addWidget(self._make_section_title("全局"))
+        global_lay.addWidget(make_section_title("全局"))
 
         self.global_summary = QLabel("")
         self.global_summary.setObjectName("GlobalSummary")
@@ -212,12 +217,6 @@ class FloatingWidget(QWidget):
         """记录一次全局操作（用于近1分钟计数）。"""
         self._op_tracker.record()
         self.roll_bar.pulse_operation()
-
-    @staticmethod
-    def _make_section_title(text: str) -> QLabel:
-        lbl = QLabel(text)
-        lbl.setObjectName("SectionTitle")
-        return lbl
 
     # ---------- 右键菜单（拖动见 ui_window_drag）----------
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -302,14 +301,6 @@ class FloatingWidget(QWidget):
         save_state(self.state)
         logger.info("开奖音效: %s", checked)
 
-    def _set_text(self, label: QLabel, text: str) -> None:
-        if label.text() != text:
-            label.setText(text)
-
-    def _set_html(self, label: QLabel, html: str) -> None:
-        if label.text() != html:
-            label.setText(html)
-
     def _format_global_summary_html(self, ops_1min: int) -> str:
         s = self.state
         return format_global_summary_html(
@@ -321,13 +312,13 @@ class FloatingWidget(QWidget):
 
     def _paint_global_stats(self) -> None:
         ops_1min = self._op_tracker.count_recent()
-        self._set_html(
+        set_label_html(
             self.global_summary,
             self._format_global_summary_html(ops_1min),
         )
 
     def _paint_roll_history(self) -> None:
-        self._set_html(
+        set_label_html(
             self.roll_history_lbl,
             format_roll_history_lines_html(
                 self.state.roll_history, limit=3, compact=True,
@@ -378,7 +369,7 @@ class FloatingWidget(QWidget):
         self.roll_toast.setTextFormat(
             Qt.PlainText if kind == "miss" else Qt.RichText
         )
-        self._set_text(self.roll_toast, text)
+        set_label_text(self.roll_toast, text)
         self.roll_toast.show()
 
         if self._roll_toast_timer is None:
@@ -475,6 +466,7 @@ class FloatingWidget(QWidget):
         if self._tick_count % 60 == 0:
             logger.debug("运行中 (ops=%d)", self.state.total_operations)
         self._paint_global_stats()
+        self._update_roll_bar()
 
         if self.state.active_task() is None:
             return
