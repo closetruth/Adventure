@@ -1,7 +1,7 @@
 """悬浮窗样式。树节点样式见 ui_task_tree.TREE_QSS / GOAL_TREE_PANEL_QSS。"""
 from __future__ import annotations
 
-from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_DETAIL_QSS
+from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_QSS
 
 WIDGET_STYLESHEET = """
 QWidget#WidgetWindow {
@@ -165,4 +165,4 @@ QLabel#RollToast {
 }
 QLabel#RollToast[toast="miss"] { color: #8a909e; }
 QFrame#Divider { background-color: #2a2d38; max-height: 1px; min-height: 1px; }
-""" + TREE_DETAIL_QSS + GOAL_TREE_PANEL_QSS
+""" + TREE_QSS + GOAL_TREE_PANEL_QSS

@@ -26,7 +26,7 @@ from .ui_confirm import ask_yes_no
 from .ui_goal_tree_panel import GoalTreePanel
 from .ui_qt import make_divider, make_section_title
 from .ui_styles import DARK_BASE_QSS
-from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_DETAIL_QSS
+from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_QSS
 from .ui_text import format_duration
 
 DIALOG_STYLESHEET = DARK_BASE_QSS + """
@@ -75,7 +75,7 @@ QLabel#SectionTitle {
 }
 QLabel#Note { color: #9aa0b4; font-size: 12px; line-height: 1.4; }
 QLabel#EmptyHint { color: #6e7588; font-size: 13px; padding: 40px 20px; }
-""" + TREE_DETAIL_QSS + GOAL_TREE_PANEL_QSS
+""" + TREE_QSS + GOAL_TREE_PANEL_QSS
 
 
 class TaskCard(QFrame):

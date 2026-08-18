@@ -27,7 +27,7 @@
 | **稀有落点** | 像抽闪卡 | `add_roll_point` 小概率 `rare=True`，大一圈 + 金边；可选略增连通半径 | `models.py`, `reward_system.py`, `ui_roll_bar.py` | 低 |
 | **数字跳动** | 看金币涨很爽 | Toast 或 global summary 金币从旧值滚动到新值 | `widget.py` | 中 |
 | **簇内连线加强** | 「连起来了」更直观 | 将满时连线变亮、略粗；已部分实现，可加强动画 | `ui_roll_bar.py` | 低 |
-| **since_roll 脉动** | 本周期掉落累积有盼头 | 上次开奖后 pending 金/钻变化时 chip 闪一下 | `ui_task_stats.py`, `widget.py` | 低 |
+| **since_roll 脉动** | 本周期掉落累积有盼头 | 上次开奖后 pending 金/钻变化时 chip 闪一下 | `widget.py` | 低 |
 
 ---
 
@@ -125,7 +125,7 @@
 | 开奖音效 | `sfx.py`, `sound_on_roll_hit` |
 | 操作速率 | `op_tracker.py` |
 | 子任务进度 | `Task.subtask_progress`, `ui_text.py` |
-| 本周期掉落展示 | `since_roll`, `ui_task_stats.py` |
+| 本周期掉落展示 | `since_roll`, `ui_text.py` |
 | 持久化 | `storage.py` → `%APPDATA%\Adventure\data.json` |
 
 ---

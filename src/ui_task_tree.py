@@ -85,27 +85,6 @@ QFrame#GoalRootRow[paused="true"] {
     background-color: transparent;
     border: none;
 }
-QLabel#StatusBadge {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 1px 6px;
-    border-radius: 4px;
-}
-QLabel#StatusBadge[status="active"] {
-    background: rgba(110, 231, 160, 0.14);
-    color: #6ee7a0;
-    border: 1px solid rgba(110, 231, 160, 0.35);
-}
-QLabel#StatusBadge[status="paused"] {
-    background: rgba(245, 200, 66, 0.12);
-    color: #f5c842;
-    border: 1px solid rgba(245, 200, 66, 0.35);
-}
-QLabel#StatusBadge[status="completed"] {
-    background: rgba(94, 200, 242, 0.12);
-    color: #5ec8f2;
-    border: 1px solid rgba(94, 200, 242, 0.35);
-}
 QPushButton#TreeFoldBtn {
     background: transparent;
     border: none;
@@ -206,9 +185,6 @@ QPushButton#GoalPauseBtn:hover, QPushButton#GoalResumeBtn:hover {
 }
 """
 
-# 兼容旧引用
-TREE_DETAIL_QSS = TREE_QSS
-
 
 def _apply_widget_properties(widget: QWidget, **props) -> bool:
     """仅在 QSS 属性变化时 unpolish/polish，避免热路径把点击吃掉。"""
@@ -266,20 +242,6 @@ def apply_goal_block_ui(
 def apply_goal_root_row_state(row: QWidget, *, is_running: bool) -> None:
     """设置目标根行属性（块级高亮由 GoalBlock 承担，根行保持透明）。"""
     _apply_widget_properties(row, current=is_running, paused=not is_running)
-
-
-def make_goal_status_badge(status: TaskStatus) -> QLabel:
-    text = {
-        TaskStatus.ACTIVE: "进行中",
-        TaskStatus.PAUSED: "已暂停",
-        TaskStatus.COMPLETED: "已完成",
-    }.get(status, str(status))
-    badge = QLabel(text)
-    badge.setObjectName("StatusBadge")
-    badge.setProperty("status", status.value)
-    badge.style().unpolish(badge)
-    badge.style().polish(badge)
-    return badge
 
 
 @dataclass
@@ -473,7 +435,6 @@ class TreeRow(QWidget):
     """可单击选中的树行；悬停/选中时显示行尾操作。"""
 
     selected = Signal()
-    activated = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -531,15 +492,3 @@ class TreeRow(QWidget):
                 child = child.parentWidget()
             self.selected.emit()
         super().mousePressEvent(event)
-
-    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.LeftButton:
-            child = self.childAt(event.position().toPoint())
-            while child is not None and child is not self:
-                if isinstance(child, QPushButton):
-                    super().mouseDoubleClickEvent(event)
-                    return
-                child = child.parentWidget()
-            self.selected.emit()
-            self.activated.emit()
-        super().mouseDoubleClickEvent(event)
