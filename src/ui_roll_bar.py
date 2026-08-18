@@ -1,4 +1,4 @@
-"""彩色分段开奖进度条。"""
+"""开奖进度条控件。"""
 from __future__ import annotations
 
 from typing import List
@@ -6,6 +6,54 @@ from typing import List
 from PySide6.QtCore import Qt, QRectF, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
+
+
+class EasedProgressBar(QWidget):
+    """非分段的小型平滑进度条，视觉进度先快后慢。"""
+
+    def __init__(self, parent=None, *, exponent: float = 2.2):
+        super().__init__(parent)
+        self._progress = 0
+        self._span = 10
+        self._exponent = max(1.0, exponent)
+        self.setMinimumHeight(7)
+        self.setMaximumHeight(7)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_progress(self, progress: int, span: int) -> None:
+        span = max(1, span)
+        progress = max(0, min(progress, span))
+        if self._progress == progress and self._span == span:
+            return
+        self._progress = progress
+        self._span = span
+        self.update()
+
+    def _eased_fraction(self) -> float:
+        raw = self._progress / max(1, self._span)
+        # 幂函数 ease-out：前段增长更快，尾段更平缓。
+        return 1.0 - pow(1.0 - raw, self._exponent)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        radius = h / 2
+
+        track = QRectF(0, 0, w, h)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 22))
+        painter.drawRoundedRect(track, radius, radius)
+
+        fill_w = max(0.0, min(w, w * self._eased_fraction()))
+        if fill_w > 0:
+            fill = QRectF(0, 0, fill_w, h)
+            painter.setBrush(QColor("#7aa2ff"))
+            painter.drawRoundedRect(fill, radius, radius)
+
+        painter.end()
 
 
 class SegmentedRollBar(QWidget):

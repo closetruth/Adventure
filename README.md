@@ -186,7 +186,7 @@ build.bat
 
 ## 开奖音效（可选）
 
-将音效放进 `assets/sounds/`（支持 `.wav` / `.ogg` / `.mp3`）：
+将音效放进 `assets/sounds/`（`.wav` / `.ogg` / `.mp3` / `.m4a` / `.aac`，由 Qt Multimedia 播放；扩展名写成 `.mp3` 的 AAC 也能播）：
 
 | 路径 | 用途 |
 |------|------|
@@ -235,7 +235,7 @@ Adventure/
     ├── op_tracker.py      # 近 1 分钟操作计数（仅内存）
     ├── active_time.py     # 活跃时长累计
     ├── power_monitor.py   # 关屏不计时
-    ├── sfx.py             # 开奖音效
+    ├── sfx.py             # 开奖音效（Qt Multimedia）
     ├── models.py          # 数据模型
     ├── storage.py         # JSON 持久化
     ├── game_launcher.py   # 启动游戏子进程
