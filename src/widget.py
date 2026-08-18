@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QObject, Qt, QPoint, QTimer, Signal
-from PySide6.QtGui import QAction, QCursor, QMouseEvent
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QCursor, QGuiApplication, QMouseEvent, QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -35,53 +35,44 @@ from .ui_text import (
     format_roll_toast_html,
 )
 from .win_utils import (
+    WM_ENTERSIZEMOVE,
+    WM_EXITSIZEMOVE,
     is_windows,
     pin_window_to_all_desktops,
+    prepare_overlay_hwnd,
     set_startup,
     unpin_window_from_all_desktops,
+    win32_message_id,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class DragHandleBar(QWidget):
-    """顶栏拖动手柄：拖动移动顶层窗口。"""
+    """顶栏拖动手柄：交给系统拖动，不用 QWidget.move()。"""
 
     def __init__(self, window: QWidget, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._window = window
-        self._drag_offset: QPoint | None = None
         self.setObjectName("DragHandle")
         self.setCursor(Qt.SizeAllCursor)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton:
-            self._drag_offset = (
-                event.globalPosition().toPoint() - self._window.frameGeometry().topLeft()
-            )
+            begin = getattr(self._window, "begin_user_move", None)
+            if callable(begin):
+                begin()
             event.accept()
-        else:
-            super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
-            self._window.move(event.globalPosition().toPoint() - self._drag_offset)
-            event.accept()
-        else:
-            super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        self._drag_offset = None
-        super().mouseReleaseEvent(event)
+            return
+        super().mousePressEvent(event)
 
 
 class WindowDragHelper(QObject):
-    """为全局区等区域安装拖动：左键拖动移动顶层窗口。"""
+    """全局区左键拖动：同样只走系统拖动。"""
 
     def __init__(self, window: QWidget) -> None:
         super().__init__(window)
         self._window = window
-        self._drag_offset: QPoint | None = None
 
     def attach(self, root: QWidget) -> None:
         root.installEventFilter(self)
@@ -94,32 +85,21 @@ class WindowDragHelper(QObject):
         if event.type() == QEvent.Type.MouseButtonPress:
             me = event
             if isinstance(me, QMouseEvent) and me.button() == Qt.LeftButton:
-                self._drag_offset = (
-                    me.globalPosition().toPoint()
-                    - self._window.frameGeometry().topLeft()
-                )
+                begin = getattr(self._window, "begin_user_move", None)
+                if callable(begin):
+                    begin()
                 return True
-        elif event.type() == QEvent.Type.MouseMove:
-            me = event
-            if (
-                isinstance(me, QMouseEvent)
-                and self._drag_offset is not None
-                and me.buttons() & Qt.LeftButton
-            ):
-                self._window.move(
-                    me.globalPosition().toPoint() - self._drag_offset
-                )
-                return True
-        elif event.type() == QEvent.Type.MouseButtonRelease:
-            self._drag_offset = None
         return False
 
 
 WIDGET_STYLESHEET = """
+QWidget#WidgetWindow {
+    background-color: #1c1c26;
+}
 QWidget#WidgetRoot {
-    background-color: rgba(28, 28, 38, 235);
-    border-radius: 14px;
-    border: 1px solid rgba(255,255,255,30);
+    background-color: #1c1c26;
+    border-radius: 12px;
+    border: 1px solid #3a3f52;
 }
 QLabel { color: #f5f5f7; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"; }
 QWidget#DragHandle { background: transparent; }
@@ -327,15 +307,15 @@ QScrollArea#SubGoalScroll QScrollBar::sub-line:vertical {
 }
 QWidget#SubGoalActions { background: transparent; }
 QPushButton {
-    background-color: rgba(255,255,255,18);
+    background-color: #2a2d3a;
     color: #f5f5f7;
-    border: 1px solid rgba(255,255,255,30);
+    border: 1px solid #404558;
     border-radius: 8px;
     padding: 6px 10px;
     font-size: 12px;
 }
-QPushButton:hover { background-color: rgba(255,255,255,36); }
-QPushButton:pressed { background-color: rgba(255,255,255,12); }
+QPushButton:hover { background-color: #343848; }
+QPushButton:pressed { background-color: #222530; }
 QPushButton#CloseBtn, QPushButton#MinBtn {
     background-color: transparent;
     border: none;
@@ -351,7 +331,7 @@ QLabel#RollToast {
     background: transparent;
 }
 QLabel#RollToast[toast="miss"] { color: #8a909e; }
-QFrame#Divider { background-color: rgba(255,255,255,18); max-height: 1px; min-height: 1px; }
+QFrame#Divider { background-color: #2a2d38; max-height: 1px; min-height: 1px; }
 """ + TREE_DETAIL_QSS + GOAL_TREE_PANEL_QSS
 
 
@@ -371,7 +351,12 @@ class FloatingWidget(QWidget):
 
         self.setWindowTitle("Adventure")
         self.setObjectName("WidgetWindow")
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # 不透明顶层窗：避免 WS_EX_LAYERED 点穿。圆角只是视觉，HWND 仍是矩形。
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
+        pal = self.palette()
+        pal.setColor(QPalette.ColorRole.Window, QColor("#1c1c26"))
+        self.setPalette(pal)
         flags = (
             Qt.FramelessWindowHint
             | Qt.Tool
@@ -387,6 +372,10 @@ class FloatingWidget(QWidget):
         self._op_tracker = OpRateTracker(window_sec=60.0)
         self._roll_toast_timer: Optional[QTimer] = None
         self._refreshing = False
+        self._window_dragging = False
+        self._drag_end_timer = QTimer(self)
+        self._drag_end_timer.setSingleShot(True)
+        self._drag_end_timer.timeout.connect(self.end_user_move)
 
         self._build_ui()
 
@@ -404,7 +393,7 @@ class FloatingWidget(QWidget):
         root.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(root)
 
         v = QVBoxLayout(root)
@@ -573,6 +562,7 @@ class FloatingWidget(QWidget):
             flags &= ~Qt.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.show()
+        prepare_overlay_hwnd(int(self.winId()))
         save_state(self.state)
         logger.info("窗口置顶: %s", checked)
 
@@ -583,6 +573,7 @@ class FloatingWidget(QWidget):
             pin_window_to_all_desktops(hwnd)
         else:
             unpin_window_from_all_desktops(hwnd)
+        prepare_overlay_hwnd(hwnd)
         save_state(self.state)
         logger.info("固定所有桌面: %s", checked)
 
@@ -700,7 +691,7 @@ class FloatingWidget(QWidget):
             if reward is not None:
                 self.show_roll_result(reward)
 
-        self.goal_tree.refresh(
+        self.goal_tree.refresh_stats(
             since_gold=s.since_roll.gold,
             since_diamond=s.since_roll.diamond,
         )
@@ -738,9 +729,37 @@ class FloatingWidget(QWidget):
             since_diamond=s.since_roll.diamond,
         )
 
+    def begin_user_move(self) -> None:
+        """交给系统拖动；Windows 上不用 QWidget.move()。"""
+        self._window_dragging = True
+        self._drag_end_timer.start(2000)
+        handle = self.windowHandle()
+        if handle is None:
+            return
+        try:
+            handle.startSystemMove()
+        except Exception:
+            logger.debug("startSystemMove 失败", exc_info=True)
+
+    def end_user_move(self) -> None:
+        self._drag_end_timer.stop()
+        grabber = QWidget.mouseGrabber()
+        if grabber is not None:
+            grabber.releaseMouse()
+        self._window_dragging = False
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if self._window_dragging:
+            self._drag_end_timer.start(400)
+
     def _refresh_runtime(self) -> None:
         """仅刷新与时间相关的字段，避免整窗口频繁重绘。"""
         self.manager.tick_active_time()
+        if self._window_dragging:
+            return
+        if QGuiApplication.mouseButtons() != Qt.MouseButton.NoButton:
+            return
         self._tick_count = getattr(self, '_tick_count', 0) + 1
         if self._tick_count % 60 == 0:
             logger.debug("运行中 (ops=%d)", self.state.total_operations)
@@ -762,11 +781,19 @@ class FloatingWidget(QWidget):
 
     def nativeEvent(self, eventType, message):
         self.manager.power_monitor.handle_native_event(eventType, message)
+        msg_id = win32_message_id(eventType, message)
+        if msg_id == WM_ENTERSIZEMOVE:
+            self._window_dragging = True
+            self._drag_end_timer.start(2000)
+        elif msg_id == WM_EXITSIZEMOVE:
+            self.end_user_move()
         return super().nativeEvent(eventType, message)
 
     # ---------- 显示时初始化窗口属性 ----------
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.manager.power_monitor.install_on(self)
+        hwnd = int(self.winId())
         if self.state.settings.get("pin_all_desktops", True):
-            pin_window_to_all_desktops(int(self.winId()))
+            pin_window_to_all_desktops(hwnd)
+        prepare_overlay_hwnd(hwnd)
