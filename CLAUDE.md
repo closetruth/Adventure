@@ -96,7 +96,6 @@ Folder-style accounting: parent task `earned_*` / display totals sync from subta
 - `src/ui_goal_tree_panel.py` — `GoalTreePanel`: shared goal tree embedded in `TaskCard` (`task_dialog.py`).
 - `src/goal_actions.py` — `try_complete_goal`, `try_delete_goal` with confirmation.
 - `src/ui_confirm.py` — `ask_yes_no`: topmost styled confirm dialog.
-- `src/ui_task_stats.py` — `TaskRewardStrip`: the big-number chips (task ops, pending gold/diamond, 1-min rate, since-roll) on the floating widget.
 - `src/ui_text.py` — formatting functions: amounts (max 1 decimal), durations, tree node HTML. **No emoji** — intentional, because Windows default fonts render them as tofu.
 - `src/ui_roll_bar.py` — `SegmentedRollBar`: colored segment roll progress widget.
 - `src/op_tracker.py` — `OpRateTracker`: sliding 60s window of operation timestamps (in-memory only, not persisted).
@@ -125,6 +124,6 @@ Key tunables: `roll_interval`, `roll_chance` / `gold_chance`, `gold_min`/`gold_m
 
 - All `src/` files use `from __future__ import annotations` for deferred evaluation.
 - Type hints throughout (`from typing import Optional, List, Dict, ...`).
-- Qt stylesheets are module-level constants (e.g. `WIDGET_STYLESHEET`, `TASK_STATS_QSS`).
+- Qt stylesheets are module-level constants (e.g. `WIDGET_STYLESHEET` in `ui_widget_qss.py`).
 - String formatting uses f-strings; `%APPDATA%` resolved via `os.environ`.
 - Games are in `games/` and import `pygame-ce`; they receive session data via CLI arg, not stdin.

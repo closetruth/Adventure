@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Iterable, List
+from typing import TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:
     from .models import Reward, RollHistoryEntry, Subtask, Task
@@ -20,15 +20,6 @@ def format_duration(seconds: float) -> str:
     if m > 0:
         return f"{m}m {s}s"
     return f"{s}s"
-
-
-def format_duration_compact(seconds: float, target_seconds: float) -> str:
-    """悬浮窗子目标行：短时长，如 3/10m。"""
-    sec = int(max(0, seconds))
-    tgt = int(max(1, target_seconds))
-    m_sec = sec // 60
-    m_tgt = max(1, (tgt + 59) // 60)
-    return f"{m_sec}/{m_tgt}m"
 
 
 def _html_escape(text: str) -> str:
@@ -435,15 +426,6 @@ def format_goal_root_line_html(
     return "  ".join(parts)
 
 
-def format_active_since_roll_html(since_gold: float, since_diamond: float) -> str:
-    """运行中目标下方的 since-roll 一行。"""
-    text = format_since_roll(since_gold, since_diamond)
-    return (
-        f'<span style="{_font(11)}color:{_COLOR_MUTED}">本轮 </span>'
-        f'<span style="color:#ffe599;font-weight:700">{_html_escape(text)}</span>'
-    )
-
-
 def _format_inline_stats_html(operations: int, active_seconds: float) -> str:
     """树行标题后的紧凑统计：仅操作与运行时间。"""
     duration = format_duration(active_seconds)
@@ -601,18 +583,6 @@ def format_amount(value: float) -> str:
     return f"{v:.1f}"
 
 
-def format_pending(gold: float, diamond: float) -> str:
-    """待领取奖励一行文案。"""
-    parts = []
-    if gold:
-        parts.append(f"金币 {format_amount(gold)}")
-    if diamond:
-        parts.append(f"钻石 {format_amount(diamond)}")
-    if not parts:
-        return "待领 无"
-    return "待领 " + " · ".join(parts)
-
-
 def format_reward_gain(gold: float, diamond: float) -> str:
     """完成任务时的奖励说明。"""
     parts = []
@@ -623,18 +593,6 @@ def format_reward_gain(gold: float, diamond: float) -> str:
     if not parts:
         return "无奖励"
     return "、".join(parts)
-
-
-def format_since_roll(gold: float, diamond: float) -> str:
-    """上次开奖获得的奖励（单行）。"""
-    parts = []
-    if gold:
-        parts.append(f"金币 {format_amount(gold)}")
-    if diamond:
-        parts.append(f"钻石 {format_amount(diamond)}")
-    if not parts:
-        return "未获得"
-    return " · ".join(parts)
 
 
 def format_roll_history_line(
@@ -681,21 +639,3 @@ def format_roll_history_line(
         ts = time.strftime("%m-%d %H:%M", time.localtime(entry.at))
         return f"{ts}  {text}"
     return text
-
-
-def format_roll_history_lines(
-    entries: Iterable["RollHistoryEntry"],
-    *,
-    limit: int | None = None,
-    include_time: bool = False,
-    compact: bool = False,
-) -> List[str]:
-    items = list(entries)
-    if limit is not None:
-        items = items[:limit]
-    if not items:
-        return ["暂无开奖记录"]
-    return [
-        format_roll_history_line(e, include_time=include_time, compact=compact)
-        for e in items
-    ]

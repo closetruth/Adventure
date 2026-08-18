@@ -285,7 +285,6 @@ class GoalTreePanel(QWidget):
                         depth=depth + 1,
                         selected=sub.id == self._selected_subtask_id,
                         is_current=sub.id in active_path,
-                        editable=editable,
                         current_id=current_id,
                     )
                     self._subgoal_line_labels[key] = line
@@ -315,7 +314,7 @@ class GoalTreePanel(QWidget):
             selected=selected,
             expanded=self._goal_expanded,
             on_fold=self._on_goal_toggle_fold,
-            on_select=lambda: self._on_tree_select("", editable=False),
+            on_select=lambda: self._on_tree_select(""),
         )
 
     def _make_tree_node_row(
@@ -325,7 +324,6 @@ class GoalTreePanel(QWidget):
         depth: int,
         selected: bool,
         is_current: bool,
-        editable: bool,
         current_id: Optional[str],
     ) -> tuple[TreeRow, QLabel]:
         task = self.task
@@ -349,9 +347,7 @@ class GoalTreePanel(QWidget):
                 on_add_child=lambda: self.set_add_parent(sub.id),
             ),
             on_fold=lambda: self._emit_toggle_fold(sub.id),
-            on_select=lambda: self._on_tree_select(
-                sub.id, sub=sub, editable=editable,
-            ),
+            on_select=lambda: self._on_tree_select(sub.id),
         )
 
     def _on_goal_toggle_fold(self) -> None:
@@ -362,13 +358,7 @@ class GoalTreePanel(QWidget):
     def _emit_toggle_fold(self, subtask_id: str) -> None:
         self.action.emit(self.task.id, "subtask_toggle_fold", subtask_id)
 
-    def _on_tree_select(
-        self,
-        subtask_id: str,
-        *,
-        sub: Subtask | None = None,
-        editable: bool = False,
-    ) -> None:
+    def _on_tree_select(self, subtask_id: str) -> None:
         self._selected_subtask_id = subtask_id
         since = self.state.since_roll
         self._apply_selection_ui(
@@ -383,10 +373,7 @@ class GoalTreePanel(QWidget):
         since_diamond: float = 0.0,
     ) -> None:
         self._apply_selection_chrome()
-        self._refresh_tree_labels(
-            since_gold=since_gold,
-            since_diamond=since_diamond,
-        )
+        self._refresh_tree_labels()
         self._refresh_detail_panel(since_gold=since_gold, since_diamond=since_diamond)
 
     def _apply_selection_chrome(self) -> None:
@@ -421,13 +408,7 @@ class GoalTreePanel(QWidget):
                 focused=bool(self.task.active_focus_path_ids()),
             )
 
-    def _refresh_tree_labels(
-        self,
-        *,
-        since_gold: float = 0.0,
-        since_diamond: float = 0.0,
-        stats_only: bool = False,
-    ) -> None:
+    def _refresh_tree_labels(self, *, stats_only: bool = False) -> None:
         task = self.task
         editable = self._editable
         active_path = task.active_focus_path_ids() if editable else frozenset()

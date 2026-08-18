@@ -579,13 +579,7 @@ class GoalTreeArea(QWidget):
                     hovered=task.id == self._hovered_goal_id,
                 )
 
-    def _refresh_tree_labels(
-        self,
-        *,
-        since_gold: float = 0.0,
-        since_diamond: float = 0.0,
-        stats_only: bool = False,
-    ) -> None:
+    def _refresh_tree_labels(self, *, stats_only: bool = False) -> None:
         width_changed = False
         for task in self._widget_goals():
             editable = task.status == TaskStatus.ACTIVE
@@ -673,11 +667,7 @@ class GoalTreeArea(QWidget):
         allow_action_rebuild: bool = False,
     ) -> None:
         """按键/计时后仅刷新统计文本，默认不重建按钮。"""
-        self._refresh_tree_labels(
-            since_gold=since_gold,
-            since_diamond=since_diamond,
-            stats_only=True,
-        )
+        self._refresh_tree_labels(stats_only=True)
         if not self._selected_task_id or not self.goal_detail_panel.isVisible():
             return
         task = self.manager.get(self._selected_task_id)
@@ -855,24 +845,13 @@ class GoalTreeArea(QWidget):
         since_diamond: float = 0.0,
     ) -> None:
         self._apply_tree_selection_chrome()
-        self._refresh_tree_labels(
-            since_gold=since_gold,
-            since_diamond=since_diamond,
-            stats_only=False,
-        )
+        self._refresh_tree_labels(stats_only=False)
         self._refresh_goal_detail_panel(
             since_gold=since_gold,
             since_diamond=since_diamond,
         )
 
-    def _on_tree_select(
-        self,
-        task_id: str,
-        subtask_id: str = "",
-        *,
-        sub: Subtask | None = None,
-        editable: bool = False,
-    ) -> None:
+    def _on_tree_select(self, task_id: str, subtask_id: str = "") -> None:
         self._selected_task_id = task_id
         self._selected_subtask_id = subtask_id
         since = self.state.since_roll
@@ -892,7 +871,7 @@ class GoalTreeArea(QWidget):
             selected=selected,
             expanded=self._is_goal_expanded(task.id),
             on_fold=lambda: self._on_goal_toggle_fold(task.id),
-            on_select=lambda: self._on_tree_select(task.id, editable=False),
+            on_select=lambda: self._on_tree_select(task.id),
             pin_label=True,
         )
 
@@ -904,7 +883,6 @@ class GoalTreeArea(QWidget):
         depth: int,
         selected: bool,
         is_current: bool,
-        editable: bool,
     ) -> tuple[TreeRow, QLabel]:
         return make_tree_node_row(
             self.manager,
@@ -924,9 +902,7 @@ class GoalTreeArea(QWidget):
                 on_add_child=lambda: self._on_sub_add_child(sub.id),
             ),
             on_fold=lambda: self._on_sub_toggle_fold(task.id, sub.id),
-            on_select=lambda: self._on_tree_select(
-                task.id, sub.id, sub=sub, editable=editable,
-            ),
+            on_select=lambda: self._on_tree_select(task.id, sub.id),
             pin_label=True,
         )
 
@@ -1070,7 +1046,6 @@ class GoalTreeArea(QWidget):
                                 and sub.id == self._selected_subtask_id
                             ),
                             is_current=sub.id in active_path,
-                            editable=editable,
                         )
                         self._subgoal_line_labels[key] = line
                         self._tree_row_widgets[key] = row

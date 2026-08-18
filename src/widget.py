@@ -405,9 +405,6 @@ class FloatingWidget(QWidget):
             since_diamond=since.diamond,
         )
 
-    # 兼容旧调用名
-    refresh_light = refresh_stats
-
     # ---------- 刷新 ----------
     def refresh(self) -> None:
         if self._refreshing:

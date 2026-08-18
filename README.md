@@ -219,6 +219,7 @@ Adventure/
 └── src/
     ├── main.py            # Qt 应用、托盘、操作事件管线
     ├── widget.py          # 悬浮窗、文件夹式目标列表、详情区
+    ├── ui_goal_tree_area.py  # 悬浮窗目标树区域
     ├── ui_roll_bar.py     # 彩色分段开奖进度条
     ├── ui_task_tree.py    # 树行、行尾按钮、GoalBlock QSS
     ├── ui_goal_tree_panel.py  # 任务管理对话框内嵌目标树
@@ -226,7 +227,6 @@ Adventure/
     ├── ui_confirm.py      # 置顶确认框
     ├── task_dialog.py     # 任务管理
     ├── inventory_dialog.py# 背包与开奖历史
-    ├── ui_task_stats.py   # 任务统计条组件
     ├── ui_text.py         # 金额与历史文案格式化
     ├── task_manager.py    # 任务/子目标 CRUD、聚焦、分解
     ├── reward_system.py   # 内置随机开奖、10 分钟重抽参数
