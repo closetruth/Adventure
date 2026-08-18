@@ -140,9 +140,15 @@ class SfxPlayer(QObject):
             if gold is not None:
                 self._play_path(_GOLD_KEY, gold)
         if reward.diamond > 0:
-            diamond = self._pick_random_diamond_path()
-            if diamond is not None:
-                self._play_path(self._diamond_slot_key(diamond), diamond)
+            self.play_random_diamond()
+
+    def play_random_diamond(self) -> None:
+        """从 diamond/ 里随机播一条；无文件或关闭音效时 no-op。"""
+        if not self.capable():
+            return
+        diamond = self._pick_random_diamond_path()
+        if diamond is not None:
+            self._play_path(self._diamond_slot_key(diamond), diamond)
 
     def shutdown(self) -> None:
         if self._prewarm_timer is not None:

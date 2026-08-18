@@ -91,6 +91,7 @@ class Application(QObject):
         self.widget.request_quit.connect(self.quit)
         self.widget.subtask_claimed.connect(self._on_subtask_claimed)
         self.widget.state_changed.connect(self._on_widget_state_changed)
+        self.widget.ease_point_reached.connect(self.sfx.play_random_diamond)
 
         # 桥接全局输入事件
         self.bridge = OpBridge()

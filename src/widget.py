@@ -58,6 +58,7 @@ class FloatingWidget(QWidget):
     request_quit = Signal()
     subtask_claimed = Signal(str, object)  # (title, Reward)
     state_changed = Signal()
+    ease_point_reached = Signal()
 
     def __init__(self, state: AppState, manager: TaskManager):
         super().__init__()
@@ -162,6 +163,7 @@ class FloatingWidget(QWidget):
         bar_row = QVBoxLayout()
         bar_row.setSpacing(3)
         self.roll_progress_bar = EasedProgressBar()
+        self.roll_progress_bar.point_reached.connect(self.ease_point_reached)
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
         self.roll_bar = SegmentedRollBar()
@@ -327,12 +329,26 @@ class FloatingWidget(QWidget):
             ),
         )
 
+    def _running_goal_units(self) -> Optional[int]:
+        """正在运行的目标：1 秒 = 1，约 10 次操作 = 1。无 ACTIVE 时返回 None。"""
+        active = self.state.active_task()
+        if active is None:
+            return None
+        if active.subtasks:
+            sub = active.current_subtask()
+            if sub is None:
+                return None
+            return int(sub.active_seconds) + int(sub.operations) // 10
+        return int(active.active_seconds) + int(active.operations) // 10
+
     def _update_roll_bar(self) -> None:
         rt = self.state.roll_runtime
         progress, span = roll_progress(self.state)
         remaining = max(0, span - progress)
         near_full_steps = remaining if 0 < remaining <= 4 else 0
-        self.roll_progress_bar.set_progress(progress, span)
+        units = self._running_goal_units()
+        if units is not None:
+            self.roll_progress_bar.set_progress(units)
         chance_label = (
             f"金 {rt.gold_chance:.0%}  钻 {rt.diamond_chance:.0%}"
         )
