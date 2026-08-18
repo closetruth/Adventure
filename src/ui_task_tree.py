@@ -210,6 +210,27 @@ QPushButton#GoalPauseBtn:hover, QPushButton#GoalResumeBtn:hover {
 TREE_DETAIL_QSS = TREE_QSS
 
 
+def _apply_widget_properties(widget: QWidget, **props) -> bool:
+    """仅在 QSS 属性变化时 unpolish/polish，避免热路径把点击吃掉。"""
+    changed = False
+    for key, value in props.items():
+        current = widget.property(key)
+        if isinstance(value, bool):
+            if current is None and not value:
+                continue
+            if bool(current) == value:
+                continue
+        elif current == value:
+            continue
+        widget.setProperty(key, value)
+        changed = True
+    if changed:
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+    return changed
+
+
 def apply_subtask_block_ui(
     block: QWidget,
     *,
@@ -217,17 +238,12 @@ def apply_subtask_block_ui(
     focused: bool,
 ) -> None:
     """设置子目标块选中/聚焦 QSS 属性。"""
-    block.setProperty("selected", selected)
-    block.setProperty("focused", focused)
-    block.style().unpolish(block)
-    block.style().polish(block)
+    _apply_widget_properties(block, selected=selected, focused=focused)
 
 
 def apply_goal_block_hover(block: QWidget, *, hovered: bool) -> None:
     """设置目标块悬停 QSS 属性。"""
-    block.setProperty("hovered", hovered)
-    block.style().unpolish(block)
-    block.style().polish(block)
+    _apply_widget_properties(block, hovered=hovered)
 
 
 def apply_goal_block_ui(
@@ -238,12 +254,13 @@ def apply_goal_block_ui(
     focused: bool,
 ) -> None:
     """设置目标块运行/选中/子目标聚焦 QSS 属性。"""
-    block.setProperty("current", is_running)
-    block.setProperty("paused", not is_running)
-    block.setProperty("selected", selected)
-    block.setProperty("focused", focused)
-    block.style().unpolish(block)
-    block.style().polish(block)
+    _apply_widget_properties(
+        block,
+        current=is_running,
+        paused=not is_running,
+        selected=selected,
+        focused=focused,
+    )
 
 
 def apply_goal_block_state(block: QWidget, *, is_running: bool) -> None:
@@ -251,8 +268,8 @@ def apply_goal_block_state(block: QWidget, *, is_running: bool) -> None:
     apply_goal_block_ui(
         block,
         is_running=is_running,
-        selected=block.property("selected") or False,
-        focused=block.property("focused") or False,
+        selected=bool(block.property("selected")),
+        focused=bool(block.property("focused")),
     )
 
 
@@ -260,18 +277,15 @@ def apply_goal_block_selection(block: QWidget, *, selected: bool) -> None:
     """设置目标块选中描边（四边边框高亮）。"""
     apply_goal_block_ui(
         block,
-        is_running=block.property("current") or False,
+        is_running=bool(block.property("current")),
         selected=selected,
-        focused=block.property("focused") or False,
+        focused=bool(block.property("focused")),
     )
 
 
 def apply_goal_root_row_state(row: QWidget, *, is_running: bool) -> None:
     """设置目标根行属性（块级高亮由 GoalBlock 承担，根行保持透明）。"""
-    row.setProperty("current", is_running)
-    row.setProperty("paused", not is_running)
-    row.style().unpolish(row)
-    row.style().polish(row)
+    _apply_widget_properties(row, current=is_running, paused=not is_running)
 
 
 def make_goal_status_badge(status: TaskStatus) -> QLabel:
@@ -501,6 +515,8 @@ class TreeRow(QWidget):
         self._sync_actions_visible()
 
     def set_row_focused(self, focused: bool) -> None:
+        if bool(self.property("subcurrent")) == focused:
+            return
         self.setProperty("subcurrent", focused)
         self.style().unpolish(self)
         self.style().polish(self)

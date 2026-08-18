@@ -1,10 +1,9 @@
 """彩色分段开奖进度条。"""
 from __future__ import annotations
 
-import time
 from typing import List
 
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import Qt, QRectF, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -20,7 +19,10 @@ class SegmentedRollBar(QWidget):
         self._chance_label = ""
         self._flash = False
         self._near_full_steps = 0
-        self._op_flash_until = 0.0
+        self._op_flash = False
+        self._op_flash_timer = QTimer(self)
+        self._op_flash_timer.setSingleShot(True)
+        self._op_flash_timer.timeout.connect(self._end_op_flash)
         self.setMinimumHeight(18)
         self.setMaximumHeight(18)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -59,14 +61,16 @@ class SegmentedRollBar(QWidget):
             self.update()
 
     def pulse_operation(self) -> None:
-        self._op_flash_until = time.monotonic() + 0.18
-        self.update()
+        """按键闪光：用定时器收尾，禁止在 paintEvent 里再 update（半透明置顶窗会卡死）。"""
+        if not self._op_flash:
+            self._op_flash = True
+            self.update()
+        self._op_flash_timer.start(180)
 
-    def _op_flash_active(self) -> bool:
-        active = time.monotonic() < self._op_flash_until
-        if not active and self._op_flash_until:
-            self._op_flash_until = 0.0
-        return active
+    def _end_op_flash(self) -> None:
+        if self._op_flash:
+            self._op_flash = False
+            self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -75,7 +79,7 @@ class SegmentedRollBar(QWidget):
         w = self.width()
         h = self.height()
         radius = h / 2
-        op_flash = self._op_flash_active()
+        op_flash = self._op_flash
 
         bg = QColor(255, 255, 255, 16)
         border = QColor(255, 255, 255, 28)
@@ -138,5 +142,3 @@ class SegmentedRollBar(QWidget):
         painter.drawText(QRectF(0, 0, w, h), Qt.AlignCenter, main_text)
 
         painter.end()
-        if op_flash:
-            self.update()

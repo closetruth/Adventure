@@ -6,6 +6,7 @@
 备选模式（非 Windows / 显式指定）：pynput 全局钩子。
 
 每次独立的按键按下 / 鼠标按下视为一次「操作」。
+点击本应用窗口本身不计入（避免 press→刷新 吃掉点击）。
 """
 from __future__ import annotations
 
@@ -17,6 +18,8 @@ import time
 from typing import Callable, Optional
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import QApplication
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +179,8 @@ class InputMonitor:
                     if is_down:
                         if vk not in self._buttons_down:
                             self._buttons_down.add(vk)
-                            self._count_op()
+                            if not self._cursor_over_app_window():
+                                self._count_op()
                     else:
                         self._buttons_down.discard(vk)
                 else:
@@ -222,9 +226,20 @@ class InputMonitor:
             else:
                 self._hook_buttons_down.discard(button)
                 return
+        # 钩子在后台线程，不能调 Qt GUI API 判断是否点在本窗
         self._count_op()
 
     # ---------- 共用 ----------
+    def _cursor_over_app_window(self) -> bool:
+        """光标在本进程顶层窗上时不计鼠标操作，避免 press→刷新吃掉点击。"""
+        app = QApplication.instance()
+        if app is None:
+            return False
+        try:
+            return app.topLevelAt(QCursor.pos()) is not None
+        except Exception:
+            return False
+
     def _count_op(self) -> None:
         try:
             self._on_op()

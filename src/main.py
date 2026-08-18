@@ -242,6 +242,13 @@ class Application(QObject):
         self._ui_flush_timer.start()
 
     def _flush_ui(self) -> None:
+        # 鼠标按着时不刷新：避免 press→重建/polish 把点击吃掉
+        if getattr(self.widget, "_window_dragging", False):
+            self._ui_flush_timer.start()
+            return
+        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+            self._ui_flush_timer.start()
+            return
         roll_changed = self._roll_changed
         reward = self._pending_roll_reward if roll_changed else None
         self._roll_changed = False

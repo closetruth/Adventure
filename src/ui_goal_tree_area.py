@@ -266,11 +266,11 @@ class GoalTreeArea(QWidget):
         since_gold: float = 0.0,
         since_diamond: float = 0.0,
     ) -> None:
-        """轻量刷新：仅选中/聚焦描边与统计文本（每 1s 定时器）。"""
-        self._apply_tree_selection_chrome()
+        """轻量刷新：只改统计文本，不重建树/按钮。"""
         self._refresh_task_ops_ui(
             since_gold=since_gold,
             since_diamond=since_diamond,
+            allow_action_rebuild=False,
         )
 
     def _refresh(self) -> None:
@@ -294,10 +294,12 @@ class GoalTreeArea(QWidget):
         doc.setHtml(label.text())
         return max(int(doc.idealWidth()) + 8, 0)
 
-    def _pin_tree_label_width(self, label: QLabel) -> None:
+    def _pin_tree_label_width(self, label: QLabel) -> bool:
         width = self._html_label_width(label)
         if label.minimumWidth() != width:
             label.setMinimumWidth(width)
+            return True
+        return False
 
     def _sync_subgoals_hbar(self, *_args) -> None:
         if not hasattr(self, "subgoals_hbar"):
@@ -376,10 +378,36 @@ class GoalTreeArea(QWidget):
         self._refresh()
 
     def _measure_subgoals_content_size(self) -> tuple[int, int]:
-        """由布局引擎测量内容尺寸：标签 minimumWidth 已钉死，
-        minimumSizeHint 自动包含行宽与总高，无需手工累加。"""
-        hint = self.subgoals_layout.minimumSize()
-        return max(hint.width(), 1), max(hint.height(), 1)
+        """按子控件 sizeHint 累加，避免布局未激活时 minimumSize 变成 1px 把树裁没。"""
+        self.subgoals_layout.activate()
+        spacing = max(self.subgoals_layout.spacing(), 0)
+        total_w = 1
+        total_h = 0
+        counted = 0
+        for i in range(self.subgoals_layout.count()):
+            item = self.subgoals_layout.itemAt(i)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is None or not widget.isVisible():
+                continue
+            hint = widget.minimumSizeHint()
+            if hint.width() <= 0 or hint.height() <= 0:
+                hint = widget.sizeHint()
+            total_w = max(
+                total_w,
+                hint.width(),
+                widget.minimumWidth(),
+                1,
+            )
+            total_h += max(hint.height(), 22)
+            counted += 1
+        if counted:
+            total_h += spacing * max(0, counted - 1)
+        else:
+            total_h = 1
+        row_floor = 22 * max(len(self._goal_blocks) + len(self._tree_row_widgets), 0)
+        return total_w, max(total_h, row_floor, 1)
 
     def _request_geometry_sync(self) -> None:
         """延迟几何同步，避免 Resize 事件重入卡死。"""
@@ -598,6 +626,7 @@ class GoalTreeArea(QWidget):
         since_diamond: float = 0.0,
         stats_only: bool = False,
     ) -> None:
+        width_changed = False
         for task in self._widget_goals():
             editable = task.status == TaskStatus.ACTIVE
             active_path = task.active_focus_path_ids() if editable else frozenset()
@@ -617,7 +646,8 @@ class GoalTreeArea(QWidget):
                             muted=task.status == TaskStatus.PAUSED,
                         ),
                     )
-                    self._pin_tree_label_width(line)
+                    if self._pin_tree_label_width(line):
+                        width_changed = True
 
             for sub_key, sub_line in self._subgoal_line_labels.items():
                 if not sub_key.startswith(f"{task.id}:"):
@@ -644,9 +674,11 @@ class GoalTreeArea(QWidget):
                         show_stats=show_stats,
                     ),
                 )
-                self._pin_tree_label_width(sub_line)
+                if self._pin_tree_label_width(sub_line):
+                    width_changed = True
 
-        self._sync_subgoals_container_geometry()
+        if width_changed:
+            self._sync_subgoals_container_geometry()
 
     def _subtask_completion_bonus(self) -> float:
         return float(self.state.settings.get("subtask_completion_bonus_gold", 0.5))
@@ -681,8 +713,9 @@ class GoalTreeArea(QWidget):
         *,
         since_gold: float = 0.0,
         since_diamond: float = 0.0,
+        allow_action_rebuild: bool = False,
     ) -> None:
-        """按键/计时后仅刷新统计文本，不重建树或按钮。"""
+        """按键/计时后仅刷新统计文本，默认不重建按钮。"""
         self._refresh_tree_labels(
             since_gold=since_gold,
             since_diamond=since_diamond,
@@ -696,16 +729,20 @@ class GoalTreeArea(QWidget):
         sub: Subtask | None = None
         if self._selected_subtask_id:
             sub = task.find_subtask(self._selected_subtask_id)
-        if self._goal_detail_actions_signature(task, sub) != self._goal_detail_actions_sig:
+        if (
+            allow_action_rebuild
+            and self._goal_detail_actions_signature(task, sub)
+            != self._goal_detail_actions_sig
+        ):
             self._refresh_goal_detail_panel(
                 since_gold=since_gold,
                 since_diamond=since_diamond,
             )
-        else:
-            self._refresh_goal_detail_stats_only(
-                since_gold=since_gold,
-                since_diamond=since_diamond,
-            )
+            return
+        self._refresh_goal_detail_stats_only(
+            since_gold=since_gold,
+            since_diamond=since_diamond,
+        )
 
     def _on_goal_toggle_fold(self, task_id: str) -> None:
         if task_id in self._expanded_goal_ids:
@@ -1103,6 +1140,7 @@ class GoalTreeArea(QWidget):
         self._refresh_task_ops_ui(
             since_gold=since_gold,
             since_diamond=since_diamond,
+            allow_action_rebuild=True,
         )
         self._sync_subgoals_container_geometry()
 
@@ -1255,6 +1293,7 @@ class GoalTreeArea(QWidget):
             since_diamond=since_diamond,
         )
         self._sync_subgoals_container_geometry()
+        self._request_geometry_sync()
 
     def _on_decompose(self, task_id: str, subtask_id: str) -> None:
         text, ok = QInputDialog.getText(
