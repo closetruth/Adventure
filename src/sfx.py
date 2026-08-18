@@ -1,31 +1,31 @@
-"""音效播放：使用 pygame.mixer，兼容 wav/ogg/mp3。
+"""开奖音效：全部用 Qt Multimedia（QMediaPlayer）。
 
-设计要点（避免卡顿/崩溃）：
-- 没有音效文件或用户关闭音效时，**完全不创建线程、不 import pygame**（零开销 no-op）。
-- 有音效文件时，所有 mixer 操作在专用后台线程串行执行，主线程只投递请求。
-- init 失败后进入冷却期，避免在无音频设备的机器上反复卡数秒。
+wav / ogg / mp3 / m4a / aac 同一条路径。主线程播放，不碰 pygame.mixer。
+没有音效文件或用户关闭音效时，不创建播放器。
 
-开奖音效：金币固定单文件 roll_gold；钻石从 assets/sounds/diamond/ 随机选一。
-金钻同时中奖时在同一 worker 内连续 play()，多通道同时响。
+金币固定 roll_gold；钻石从 assets/sounds/diamond/ 随机选一。
+金钻同时中奖时用两个独立 player 叠播。
 """
 from __future__ import annotations
 
 import logging
 import random
-import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Optional
+
+from PySide6.QtCore import QObject, QTimer, QUrl
+from PySide6.QtWidgets import QApplication
 
 from .models import Reward
 from .paths import project_root
 
 logger = logging.getLogger(__name__)
 
-_SOUND_EXTS = (".wav", ".ogg", ".mp3")
+_SOUND_EXTS = (".wav", ".ogg", ".mp3", ".m4a", ".aac")
 _GOLD_STEM = "roll_gold"
+_GOLD_KEY = "gold"
 _DIAMOND_SUBDIR = "diamond"
-_MIXER_RETRY_COOLDOWN = 300.0
+_PREWARM_DELAY_MS = 500
 
 
 def _sounds_base() -> Path:
@@ -56,82 +56,98 @@ def _probe_sound_files() -> bool:
     return _has_gold_sound() or bool(_iter_diamond_paths())
 
 
-class SfxPlayer:
-    """Play short UI sound effects when resources are available.
+def _qt_multimedia():
+    try:
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+    except ImportError:
+        return None
+    return QAudioOutput, QMediaPlayer
 
-    若未找到音效文件或用户关闭音效，所有公开方法均为即时 no-op，不会触碰 pygame/SDL。
-    """
 
-    def __init__(self, settings: dict):
+class SfxPlayer(QObject):
+    """主线程开奖音效。无文件或关闭音效时公开方法均为 no-op。"""
+
+    def __init__(self, settings: dict, parent: QObject | None = None) -> None:
+        super().__init__(parent)
         self._settings = settings
-        self._sounds: dict[str, object] = {}
-        self._diamond_paths: Optional[List[Path]] = None
-        self._mixer_ready = False
-        self._mixer_retry_after = 0.0
         self._has_files = _probe_sound_files()
-        self._executor: Optional[ThreadPoolExecutor] = None
+        self._qt_types = _qt_multimedia() if self._has_files else None
+        self._slots: dict[str, tuple[object, object]] = {}
+        self._slot_paths: dict[str, Path] = {}
+        self._diamond_paths: Optional[List[Path]] = None
+        self._diamond_bad_paths: set[str] = set()
+        self._prewarm_timer: Optional[QTimer] = None
 
         if not self._has_files:
-            logger.info("未发现音效文件，音效功能已禁用（不会初始化音频设备）")
-        elif self._enabled():
-            self._executor = ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix="sfx"
-            )
+            logger.info("未发现音效文件，音效功能已禁用")
+        elif self._qt_types is None:
+            logger.warning("QtMultimedia 不可用，开奖音效已禁用")
+        elif QApplication.instance() is None:
+            logger.warning("没有 QApplication，开奖音效已禁用")
+            self._qt_types = None
 
     def capable(self) -> bool:
-        """是否有音效文件且用户未关闭音效（可安全尝试播放）。"""
-        return self._has_files and self._enabled()
+        return (
+            self._has_files
+            and self._qt_types is not None
+            and QApplication.instance() is not None
+            and self._enabled()
+        )
 
-    # ---------- 主线程侧（非阻塞入口） ----------
     def _enabled(self) -> bool:
         return bool(self._settings.get("sound_enabled", True))
 
-    def _submit(self, fn, *args) -> None:
-        if self._executor is None:
-            return
-        try:
-            self._executor.submit(fn, *args)
-        except RuntimeError:  # 执行器已关闭
-            pass
-
-    def prewarm(self) -> None:
-        """后台预热 mixer 并预加载音效。"""
-        if not self.capable():
-            return
-        self._submit(self._prewarm_worker)
-
-    def invalidate(self) -> None:
-        """标记 mixer 失效（如休眠唤醒后），后台仅拆除，不重建。"""
-        if not self.capable():
-            return
-        self._submit(self._reset_mixer)
-
-    def play(self, stem: str) -> None:
-        if not self.capable():
-            return
-        self._submit(self._play_stem_worker, stem)
-
-    def play_roll_hit(self, reward: Reward) -> None:
-        if not self.capable():
-            return
-        if reward.gold <= 0 and reward.diamond <= 0:
-            return
-        self._submit(self._play_roll_hit_worker, reward)
-
-    def shutdown(self) -> None:
-        """退出时停止工作线程。"""
-        if self._executor is None:
-            return
-        self._executor.shutdown(wait=False, cancel_futures=True)
-        self._executor = None
-
-    # ---------- 工作线程侧（可能阻塞） ----------
     def _volume(self) -> float:
         try:
             value = float(self._settings.get("sound_volume", 0.8))
         except (TypeError, ValueError):
             return 0.8
         return max(0.0, min(1.0, value))
+
+    def prewarm(self) -> None:
+        """延迟预热，避免启动瞬间抢音频设备。"""
+        if not self.capable():
+            return
+        if self._prewarm_timer is None:
+            self._prewarm_timer = QTimer(self)
+            self._prewarm_timer.setSingleShot(True)
+            self._prewarm_timer.timeout.connect(self._prewarm_now)
+        self._prewarm_timer.start(_PREWARM_DELAY_MS)
+
+    def invalidate(self) -> None:
+        """休眠唤醒后丢掉旧 player，下次播放或预热再建。"""
+        self._drop_slots()
+        if self.capable():
+            self.prewarm()
+
+    def play(self, stem: str) -> None:
+        if not self.capable():
+            return
+        path = self._resolve_stem_path(stem)
+        if path is None:
+            logger.debug("音效文件缺失: %s", stem)
+            return
+        key = _GOLD_KEY if stem == _GOLD_STEM else stem
+        self._play_path(key, path)
+
+    def play_roll_hit(self, reward: Reward) -> None:
+        if not self.capable():
+            return
+        if reward.gold <= 0 and reward.diamond <= 0:
+            return
+        if reward.gold > 0:
+            gold = self._resolve_stem_path(_GOLD_STEM)
+            if gold is not None:
+                self._play_path(_GOLD_KEY, gold)
+        if reward.diamond > 0:
+            diamond = self._pick_random_diamond_path()
+            if diamond is not None:
+                self._play_path(self._diamond_slot_key(diamond), diamond)
+
+    def shutdown(self) -> None:
+        if self._prewarm_timer is not None:
+            self._prewarm_timer.stop()
+        self._drop_slots()
 
     def _resolve_stem_path(self, stem: str) -> Optional[Path]:
         for ext in _SOUND_EXTS:
@@ -140,130 +156,107 @@ class SfxPlayer:
                 return path
         return None
 
+    def _diamond_cache_key(self, path: Path) -> str:
+        return str(path.resolve())
+
+    def _diamond_slot_key(self, path: Path) -> str:
+        return f"diamond:{self._diamond_cache_key(path)}"
+
     def _list_diamond_paths(self) -> List[Path]:
         if self._diamond_paths is None:
             self._diamond_paths = _iter_diamond_paths()
-        return self._diamond_paths
+        return [
+            p for p in self._diamond_paths
+            if self._diamond_cache_key(p) not in self._diamond_bad_paths
+        ]
 
-    def _reset_mixer(self) -> None:
-        try:
-            import pygame
+    def _mark_diamond_bad(self, path: Path) -> None:
+        self._diamond_bad_paths.add(self._diamond_cache_key(path))
 
-            if pygame.mixer.get_init():
-                pygame.mixer.quit()
-        except Exception as exc:  # pragma: no cover - runtime fallback
-            logger.debug("pygame.mixer.quit 失败: %s", exc)
-        self._mixer_ready = False
-        self._sounds.clear()
-        self._diamond_paths = None
-
-    def _ensure_mixer(self) -> bool:
-        try:
-            import pygame
-
-            if pygame.mixer.get_init():
-                self._mixer_ready = True
-                return True
-
-            if time.time() < self._mixer_retry_after:
-                return False
-
-            self._mixer_ready = False
-            pygame.mixer.init()
-            self._mixer_ready = True
-            self._mixer_retry_after = 0.0
-            return True
-        except Exception as exc:  # pragma: no cover - runtime fallback
-            self._mixer_ready = False
-            self._mixer_retry_after = time.time() + _MIXER_RETRY_COOLDOWN
-            logger.warning(
-                "pygame.mixer 初始化失败（%.0fs 内不再重试）: %s",
-                _MIXER_RETRY_COOLDOWN,
-                exc,
-            )
-            return False
-
-    def _load_sound_path(self, sound_path: Path, *, cache_key: str) -> Optional[object]:
-        existing = self._sounds.get(cache_key)
-        if existing is not None:
-            return existing
-        if not self._ensure_mixer():
-            return None
-
-        try:
-            import pygame
-
-            sound = pygame.mixer.Sound(str(sound_path))
-            self._sounds[cache_key] = sound
-            logger.debug("已加载音效: %s", sound_path.name)
-            return sound
-        except Exception as exc:  # pragma: no cover - runtime fallback
-            header = ""
-            try:
-                raw = sound_path.read_bytes()[:12]
-                header = raw[:4].hex()
-                if raw[4:8] == b"ftyp":
-                    header = f"mp4/m4a(ftyp={raw[8:12]!r})"
-            except Exception:
-                pass
-            logger.warning(
-                "加载音效失败(%s): %s；请使用真正的 wav/ogg/mp3%s",
-                sound_path.name,
-                exc,
-                f"（当前文件头: {header}）" if header else "",
-            )
-            return None
-
-    def _load_sound_stem(self, stem: str) -> Optional[object]:
-        sound_path = self._resolve_stem_path(stem)
-        if sound_path is None:
-            logger.debug("音效文件缺失: %s", stem)
-            return None
-        return self._load_sound_path(sound_path, cache_key=stem)
-
-    def _pick_random_diamond_sound(self) -> Optional[object]:
+    def _pick_random_diamond_path(self) -> Optional[Path]:
         paths = self._list_diamond_paths()
         if not paths:
-            logger.debug("钻石音效目录为空: %s", _diamond_dir())
-            return None
-        path = random.choice(paths)
-        return self._load_sound_path(path, cache_key=str(path.resolve()))
-
-    def _try_play(self, sound: object) -> None:
-        sound.set_volume(self._volume())
-        sound.play()
-
-    def _play_sound_safe(self, sound: Optional[object], label: str) -> None:
-        if sound is None:
-            return
-        try:
-            self._try_play(sound)
-        except Exception as exc:  # pragma: no cover - runtime fallback
-            logger.warning("播放音效失败(%s)，尝试重建 mixer: %s", label, exc)
-            self._reset_mixer()
-            if label == _GOLD_STEM:
-                sound = self._load_sound_stem(_GOLD_STEM)
+            if self._diamond_paths:
+                logger.warning(
+                    "钻石音效均无法播放（%d 个文件），请检查 assets/sounds/diamond/",
+                    len(self._diamond_paths),
+                )
             else:
-                sound = self._pick_random_diamond_sound()
-            if sound is None:
-                return
-            try:
-                self._try_play(sound)
-            except Exception as retry_exc:  # pragma: no cover - runtime fallback
-                logger.warning("播放音效失败(%s): %s", label, retry_exc)
+                logger.debug("钻石音效目录为空: %s", _diamond_dir())
+            return None
+        return random.choice(paths)
 
-    def _prewarm_worker(self) -> None:
-        time.sleep(0.5)  # 给音频驱动缓冲时间，避免启动时初始化失败/卡顿
-        if not self._ensure_mixer():
+    def _ensure_slot(self, key: str, path: Path) -> Optional[tuple[object, object]]:
+        existing = self._slots.get(key)
+        if existing is not None:
+            return existing
+        if self._qt_types is None:
+            return None
+        QAudioOutput, QMediaPlayer = self._qt_types
+        player = QMediaPlayer(self)
+        output = QAudioOutput(self)
+        player.setAudioOutput(output)
+        player.setSource(QUrl.fromLocalFile(str(path.resolve())))
+        player.errorOccurred.connect(
+            lambda error, message, slot_key=key: self._on_player_error(
+                slot_key, error, message,
+            )
+        )
+        self._slots[key] = (player, output)
+        self._slot_paths[key] = path
+        logger.debug("已准备音效: %s", path.name)
+        return self._slots[key]
+
+    def _on_player_error(self, key: str, error: object, message: str) -> None:
+        path = self._slot_paths.get(key)
+        name = path.name if path is not None else key
+        logger.warning("播放音效失败(%s): %s %s", name, error, message)
+        if key.startswith("diamond:") and path is not None:
+            self._mark_diamond_bad(path)
+
+    def _stop_other_diamonds(self, keep_key: str) -> None:
+        for key, (player, _output) in self._slots.items():
+            if key.startswith("diamond:") and key != keep_key:
+                try:
+                    player.stop()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+
+    def _play_path(self, key: str, path: Path) -> None:
+        slot = self._ensure_slot(key, path)
+        if slot is None:
             return
-        self._load_sound_stem(_GOLD_STEM)
-        self._list_diamond_paths()
+        if key.startswith("diamond:"):
+            self._stop_other_diamonds(key)
+        player, output = slot
+        try:
+            output.setVolume(self._volume())  # type: ignore[attr-defined]
+            player.stop()  # type: ignore[attr-defined]
+            player.setPosition(0)  # type: ignore[attr-defined]
+            player.play()  # type: ignore[attr-defined]
+        except Exception as exc:
+            logger.warning("播放音效失败(%s): %s", path.name, exc)
 
-    def _play_stem_worker(self, stem: str) -> None:
-        self._play_sound_safe(self._load_sound_stem(stem), stem)
+    def _drop_slots(self) -> None:
+        for player, _output in self._slots.values():
+            try:
+                player.stop()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        self._slots.clear()
+        self._slot_paths.clear()
 
-    def _play_roll_hit_worker(self, reward: Reward) -> None:
-        if reward.gold > 0:
-            self._play_sound_safe(self._load_sound_stem(_GOLD_STEM), _GOLD_STEM)
-        if reward.diamond > 0:
-            self._play_sound_safe(self._pick_random_diamond_sound(), "diamond")
+    def _prewarm_now(self) -> None:
+        if not self.capable():
+            return
+        gold = self._resolve_stem_path(_GOLD_STEM)
+        if gold is not None:
+            self._ensure_slot(_GOLD_KEY, gold)
+        all_paths = _iter_diamond_paths()
+        self._diamond_paths = all_paths
+        ok = 0
+        for path in all_paths:
+            if self._ensure_slot(self._diamond_slot_key(path), path) is not None:
+                ok += 1
+        if all_paths:
+            logger.info("钻石音效预热: %d/%d", ok, len(all_paths))

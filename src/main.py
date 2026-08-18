@@ -81,7 +81,7 @@ class Application(QObject):
         self.sfx = SfxPlayer(self.state.settings)
         if self.sfx.capable():
             self.sfx.prewarm()
-            # 休眠唤醒后音频设备常失效；仅在有音效能力时监听并拆除 mixer
+            # 休眠唤醒后音频设备常失效；丢掉旧 QMediaPlayer，下次预热再建
             self._last_app_state: Qt.ApplicationState = Qt.ApplicationState.ApplicationActive
             self.qt_app.applicationStateChanged.connect(self._on_app_state_changed)
 
@@ -266,7 +266,7 @@ class Application(QObject):
             self.tray.showMessage("Adventure", text, QSystemTrayIcon.MessageIcon.Information, 2500)
 
     def _on_app_state_changed(self, state: Qt.ApplicationState) -> None:
-        # 仅在休眠唤醒时重建 mixer，避免点击悬浮窗获得焦点时误杀正在播放的音效
+        # 仅在休眠唤醒时丢掉旧播放器，避免点击悬浮窗获得焦点时误杀正在播放的音效
         if (
             state == Qt.ApplicationState.ApplicationActive
             and self._last_app_state == Qt.ApplicationState.ApplicationSuspended

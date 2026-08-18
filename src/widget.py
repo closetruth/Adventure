@@ -28,7 +28,7 @@ from .storage import save_state
 from .task_manager import TaskManager
 from .ui_goal_tree_area import GoalTreeArea
 from .ui_qt import make_section_title, set_label_html, set_label_text
-from .ui_roll_bar import SegmentedRollBar
+from .ui_roll_bar import EasedProgressBar, SegmentedRollBar
 from .ui_text import (
     format_global_summary_html,
     format_roll_history_lines_html,
@@ -161,6 +161,7 @@ class FloatingWidget(QWidget):
 
         bar_row = QVBoxLayout()
         bar_row.setSpacing(3)
+        self.roll_progress_bar = EasedProgressBar()
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
         self.roll_bar = SegmentedRollBar()
@@ -168,6 +169,7 @@ class FloatingWidget(QWidget):
         self.roll_toast.setObjectName("RollToast")
         self.roll_toast.setTextFormat(Qt.RichText)
         self.roll_toast.hide()
+        bar_row.addWidget(self.roll_progress_bar)
         bar_row.addWidget(cap)
         bar_row.addWidget(self.roll_bar)
         bar_row.addWidget(self.roll_toast)
@@ -330,6 +332,7 @@ class FloatingWidget(QWidget):
         progress, span = roll_progress(self.state)
         remaining = max(0, span - progress)
         near_full_steps = remaining if 0 < remaining <= 4 else 0
+        self.roll_progress_bar.set_progress(progress, span)
         chance_label = (
             f"金 {rt.gold_chance:.0%}  钻 {rt.diamond_chance:.0%}"
         )

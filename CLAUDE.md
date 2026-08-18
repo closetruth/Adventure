@@ -101,7 +101,7 @@ Folder-style accounting: parent task `earned_*` / display totals sync from subta
 - `src/op_tracker.py` — `OpRateTracker`: sliding 60s window of operation timestamps (in-memory only, not persisted).
 - `src/active_time.py` — `ActiveTimeTracker`: increments focused leaf or flat task `active_seconds` every 1s tick; paused tasks don't tick.
 - `src/power_monitor.py` — `should_count_time()`: false when display is off.
-- `src/sfx.py` — roll hit sound playback.
+- `src/sfx.py` — roll hit sounds via Qt Multimedia (`QMediaPlayer`).
 - `src/win_utils.py` — `pin_window_to_all_desktops` (pyvda), `set_startup` (registry Run key). Graceful no-ops on non-Windows.
 
 ### Game subprocess protocol
