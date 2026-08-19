@@ -186,14 +186,7 @@ build.bat
 
 ## 开奖音效（可选）
 
-将音效放进 `assets/sounds/`（`.wav` / `.ogg` / `.mp3` / `.m4a` / `.aac`，由 Qt Multimedia 播放；扩展名写成 `.mp3` 的 AAC 也能播）：
-
-| 路径 | 用途 |
-|------|------|
-| `roll_gold.wav` 等 | 中金币时播放的固定音效文件 |
-| `diamond/` 文件夹 | 中钻石时从该文件夹里**随机选一个**音效文件播放 |
-
-若同时中金币与钻石，两轨音效会**同时播放**。未放置任何音效文件时，程序不会初始化音频设备（零开销）。悬浮窗右键菜单可关闭「开奖音效」。
+将音效放进 `assets/sounds/`（`.wav` / `.ogg` / `.mp3` / `.m4a` / `.aac` / `.mp4`）。真 mp3/wav/ogg 直接播；其它格式启动时用本机 ffmpeg 转到 `%APPDATA%\Adventure\sfx_cache\`。`roll_gold.*` 中金币；`diamond/` 里随机一条中钻石或进度条到点。右键可关音效。
 
 ---
 
