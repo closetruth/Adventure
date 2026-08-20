@@ -5,7 +5,7 @@ import random
 from typing import List, Tuple
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QRadialGradient
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 # 每段 ease-out 指数：越大越「前冲后磨」。
@@ -18,6 +18,29 @@ _EASE_SPAN_MIN = 540
 _EASE_SPAN_STEP = 12
 _EASE_SPAN_RANGE = 15
 _EASE_CYCLES_PER_BLOCK = 15
+_BAR_H = 18
+_TRACK_H = 7
+_CHEST_SIZE = 13
+# 普通 / 罕见 / 稀有 / 史诗 / 传奇
+_RARITY_COMMON = 0
+_RARITY_UNCOMMON = 1
+_RARITY_RARE = 2
+_RARITY_EPIC = 3
+_RARITY_LEGEND = 4
+# body, lid, glow
+_RARITY_PALETTE = (
+    ("#8a7a68", "#6e6254", "#c8c0b4"),
+    ("#3d8f5a", "#2d6b44", "#7dcc96"),
+    ("#3d6ec9", "#2a4f96", "#7aa2ff"),
+    ("#7a4ad4", "#5a32a8", "#c9a0ff"),
+    ("#d4a017", "#b8860b", "#ffd56a"),
+)
+# 三个箱子各自独立抽；越靠后高档略多。
+_RARITY_WEIGHTS = (
+    (50, 28, 14, 6, 2),
+    (35, 28, 20, 12, 5),
+    (22, 25, 25, 18, 10),
+)
 
 
 def _ease_span_for_cycle(cycle_id: int) -> int:
@@ -53,6 +76,144 @@ def _cycle_checkpoints(span: int, cycle_id: int = 0) -> Tuple[float, float, floa
     return (p1, p2, 1.0)
 
 
+def _cycle_chest_rarities(span: int, cycle_id: int = 0) -> Tuple[int, int, int]:
+    """每个视觉周期三个箱子的稀有度，与检查点同样由 span+cycle 固定。"""
+    rng = random.Random(f"chest:{max(1, span)}:{int(cycle_id)}")
+    picks = []
+    for weights in _RARITY_WEIGHTS:
+        roll = rng.randrange(sum(weights))
+        acc = 0
+        rarity = _RARITY_COMMON
+        for idx, w in enumerate(weights):
+            acc += w
+            if roll < acc:
+                rarity = idx
+                break
+        picks.append(rarity)
+    return (picks[0], picks[1], picks[2])
+
+
+def _with_alpha(color: QColor, alpha: int) -> QColor:
+    out = QColor(color)
+    out.setAlpha(alpha)
+    return out
+
+
+def _draw_chest(
+    painter: QPainter,
+    cx: float,
+    cy: float,
+    size: float,
+    *,
+    reached: bool,
+    rarity: int,
+    flash_on: bool,
+    opened: bool = False,
+) -> None:
+    """关盖宝箱。外形随稀有度变化；opened 留给以后开箱。"""
+    del opened
+    rarity = max(0, min(_RARITY_LEGEND, int(rarity)))
+    body_hex, lid_hex, glow_hex = _RARITY_PALETTE[rarity]
+    glow = QColor(glow_hex)
+    tall = 0.96 if rarity == _RARITY_UNCOMMON else 0.88
+    w = size * (1.06 if rarity == _RARITY_LEGEND else 1.0)
+    h = size * tall
+    round_body = 2.4 if rarity == _RARITY_RARE else 1.6
+    round_lid = 2.6 if rarity == _RARITY_RARE else 1.8
+    body = QRectF(cx - w * 0.48, cy - h * 0.08, w * 0.96, h * 0.62)
+    lid = QRectF(cx - w * 0.5, cy - h * 0.42, w, h * 0.38)
+
+    if reached:
+        glow_mul = 1.9 if rarity == _RARITY_LEGEND else 1.55
+        radius = size * (glow_mul if flash_on else glow_mul - 0.35)
+        grad = QRadialGradient(cx, cy, radius)
+        glow.setAlpha(165 if flash_on else 80)
+        fade = QColor(glow)
+        fade.setAlpha(0)
+        grad.setColorAt(0.0, glow)
+        grad.setColorAt(1.0, fade)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(grad)
+        painter.drawEllipse(QRectF(cx - radius, cy - radius, radius * 2, radius * 2))
+        body_c = QColor(body_hex)
+        lid_c = QColor(lid_hex)
+        rim = _with_alpha(QColor(glow_hex), 230 if flash_on else 150)
+        accent = QColor(glow_hex)
+    else:
+        body_c = _with_alpha(QColor(body_hex), 96)
+        lid_c = _with_alpha(QColor(lid_hex), 110)
+        rim = QColor(255, 255, 255, 36)
+        accent = _with_alpha(QColor(glow_hex), 100)
+
+    painter.setPen(QPen(rim, 1.5 if rarity == _RARITY_EPIC else 0.9))
+    painter.setBrush(body_c)
+    painter.drawRoundedRect(body, round_body, round_body)
+    if rarity == _RARITY_EPIC:
+        painter.setPen(QPen(_with_alpha(QColor(glow_hex), 160 if reached else 70), 0.7))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(body.adjusted(0.9, 0.9, -0.9, -0.9), 1.2, 1.2)
+    painter.setPen(QPen(rim, 0.9))
+    painter.setBrush(lid_c)
+    painter.drawRoundedRect(lid, round_lid, round_lid)
+
+    if rarity == _RARITY_UNCOMMON:
+        band_w = max(1.0, w * 0.08)
+        iron = _with_alpha(QColor("#c9d4c4") if reached else QColor("#9aaa9a"), 200 if reached else 90)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(iron)
+        painter.drawRect(QRectF(body.left() + 1.4, body.top(), band_w, body.height()))
+        painter.drawRect(QRectF(body.right() - 1.4 - band_w, body.top(), band_w, body.height()))
+
+    if rarity == _RARITY_EPIC:
+        ridge = QPolygonF(
+            [
+                QPointF(cx - w * 0.16, lid.top() + 0.6),
+                QPointF(cx, lid.top() - h * 0.16),
+                QPointF(cx + w * 0.16, lid.top() + 0.6),
+            ]
+        )
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(accent)
+        painter.drawPolygon(ridge)
+
+    if rarity == _RARITY_LEGEND:
+        crown = QPolygonF(
+            [
+                QPointF(cx - w * 0.18, lid.top() + 0.4),
+                QPointF(cx - w * 0.06, lid.top() - h * 0.12),
+                QPointF(cx, lid.top() + 0.2),
+                QPointF(cx + w * 0.06, lid.top() - h * 0.18),
+                QPointF(cx + w * 0.18, lid.top() + 0.4),
+            ]
+        )
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(accent)
+        painter.drawPolygon(crown)
+
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(accent)
+    if rarity == _RARITY_RARE:
+        gw = max(1.4, w * 0.14)
+        gh = max(1.6, h * 0.16)
+        gem = QPolygonF(
+            [
+                QPointF(cx, cy - gh),
+                QPointF(cx + gw, cy),
+                QPointF(cx, cy + gh),
+                QPointF(cx - gw, cy),
+            ]
+        )
+        painter.drawPolygon(gem)
+    else:
+        latch_w = max(1.6, w * (0.22 if rarity == _RARITY_LEGEND else 0.16))
+        latch_h = max(2.2, h * 0.28)
+        painter.drawRoundedRect(
+            QRectF(cx - latch_w / 2, cy - latch_h * 0.15, latch_w, latch_h),
+            0.6,
+            0.6,
+        )
+
+
 def _segment_eased(raw: float, points: Tuple[float, float, float], exponent: float) -> float:
     """分段幂函数 ease-out：到每个点前都先快后慢。"""
     if raw <= 0.0:
@@ -84,13 +245,15 @@ class EasedProgressBar(QWidget):
         self._cycle_id = 0
         self._exponent = max(1.0, exponent)
         self._points = _cycle_checkpoints(self._span, self._cycle_id)
+        self._rarities = _cycle_chest_rarities(self._span, self._cycle_id)
+        self._opened = (False, False, False)
         self._have_baseline = False
         self._flash_on = True
         self._flash_timer = QTimer(self)
         self._flash_timer.setInterval(400)
         self._flash_timer.timeout.connect(self._toggle_dot_flash)
-        self.setMinimumHeight(9)
-        self.setMaximumHeight(9)
+        self.setMinimumHeight(_BAR_H)
+        self.setMaximumHeight(_BAR_H)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_progress(self, units: int) -> None:
@@ -99,13 +262,18 @@ class EasedProgressBar(QWidget):
         cycle_changed = span != self._span or cycle_id != self._cycle_id
         if cycle_changed:
             points = _cycle_checkpoints(span, cycle_id)
+            rarities = _cycle_chest_rarities(span, cycle_id)
+            opened = (False, False, False)
         else:
             points = self._points
+            rarities = self._rarities
+            opened = self._opened
         if (
             self._progress == progress
             and self._span == span
             and self._cycle_id == cycle_id
             and points == self._points
+            and rarities == self._rarities
         ):
             return
         old_eased = self._eased_fraction()
@@ -118,6 +286,8 @@ class EasedProgressBar(QWidget):
         self._span = span
         self._cycle_id = cycle_id
         self._points = points
+        self._rarities = rarities
+        self._opened = opened
         self._have_baseline = True
         self._sync_flash_timer()
         self.update()
@@ -167,10 +337,12 @@ class EasedProgressBar(QWidget):
 
         w = float(self.width())
         h = float(self.height())
-        radius = h / 2
-        inset = radius
+        track_h = min(_TRACK_H, h)
+        track_y = (h - track_h) / 2.0
+        radius = track_h / 2.0
+        inset = max(radius, _CHEST_SIZE * 0.62)
 
-        track = QRectF(0, 0, w, h)
+        track = QRectF(0, track_y, w, track_h)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(255, 255, 255, 22))
         painter.drawRoundedRect(track, radius, radius)
@@ -180,25 +352,23 @@ class EasedProgressBar(QWidget):
         fill_w = max(0.0, min(w, fill_w))
         if fill_w > 0:
             painter.setBrush(QColor("#7aa2ff"))
-            painter.drawRoundedRect(QRectF(0, 0, fill_w, h), radius, radius)
+            painter.drawRoundedRect(QRectF(0, track_y, fill_w, track_h), radius, radius)
 
-        base_r = max(2.2, h * 0.42)
-        for pt in self._points:
+        for i, pt in enumerate(self._points):
             cx = inset + pt * (w - 2 * inset)
             reached = eased + 1e-6 >= pt
-            dot_r = base_r
-            if reached:
-                if self._flash_on:
-                    painter.setPen(QPen(QColor("#ffffff"), 1.1))
-                    painter.setBrush(QColor("#c5d8ff"))
-                    dot_r = base_r + 0.8
-                else:
-                    painter.setPen(QPen(QColor("#7aa2ff"), 1.0))
-                    painter.setBrush(QColor("#7aa2ff"))
-            else:
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(QColor(255, 255, 255, 72))
-            painter.drawEllipse(QPointF(cx, h / 2), dot_r, dot_r)
+            rarity = self._rarities[i] if i < len(self._rarities) else _RARITY_COMMON
+            opened = self._opened[i] if i < len(self._opened) else False
+            _draw_chest(
+                painter,
+                cx,
+                h / 2.0,
+                _CHEST_SIZE,
+                reached=reached,
+                rarity=rarity,
+                flash_on=self._flash_on,
+                opened=opened,
+            )
 
         painter.end()
 
