@@ -398,14 +398,108 @@ class Task:
 
 
 @dataclass
+class ChestItem:
+    """未开宝箱（缓动条领取进背包；开箱兑奖后续再做）。"""
+    rarity: int = 0
+    obtained_at: float = field(default_factory=time.time)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "ChestItem":
+        return cls(
+            rarity=max(0, min(4, int(data.get("rarity", 0)))),
+            obtained_at=float(data.get("obtained_at", time.time())),
+        )
+
+    def to_dict(self) -> Dict:
+        return {"rarity": int(self.rarity), "obtained_at": float(self.obtained_at)}
+
+
+@dataclass
 class Inventory:
     """玩家全局背包。"""
     gold: float = 0.0
     diamond: float = 0.00
+    chests: List[ChestItem] = field(default_factory=list)
 
     def add(self, reward: Reward) -> None:
         self.gold += reward.gold
         self.diamond += reward.diamond
+
+    def add_chest(self, rarity: int) -> ChestItem:
+        item = ChestItem(rarity=max(0, min(4, int(rarity))))
+        self.chests.append(item)
+        return item
+
+    def chest_counts_by_rarity(self) -> Tuple[int, int, int, int, int]:
+        counts = [0, 0, 0, 0, 0]
+        for c in self.chests:
+            r = max(0, min(4, int(c.rarity)))
+            counts[r] += 1
+        return (counts[0], counts[1], counts[2], counts[3], counts[4])
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "Inventory":
+        raw_chests = data.get("chests", [])
+        chests: List[ChestItem] = []
+        if isinstance(raw_chests, list):
+            for item in raw_chests:
+                if isinstance(item, dict):
+                    chests.append(ChestItem.from_dict(item))
+        return cls(
+            gold=float(data.get("gold", 0)),
+            diamond=float(data.get("diamond", 0)),
+            chests=chests,
+        )
+
+    def to_dict(self) -> Dict:
+        return {
+            "gold": float(self.gold),
+            "diamond": float(self.diamond),
+            "chests": [c.to_dict() for c in self.chests],
+        }
+
+
+@dataclass
+class EaseChestsState:
+    """当前缓动条周期内三个宝箱的领取状态（防重启重复领）。"""
+    cycle_id: int = 0
+    claimed: Tuple[bool, bool, bool] = (False, False, False)
+    holding: bool = False  # 满格停住、等点第三箱
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "EaseChestsState":
+        raw = data.get("claimed", [False, False, False])
+        if not isinstance(raw, (list, tuple)):
+            raw = [False, False, False]
+        claimed = tuple(bool(raw[i]) if i < len(raw) else False for i in range(3))
+        return cls(
+            cycle_id=int(data.get("cycle_id", 0)),
+            claimed=(claimed[0], claimed[1], claimed[2]),
+            holding=bool(data.get("holding", False)),
+        )
+
+    def to_dict(self) -> Dict:
+        return {
+            "cycle_id": int(self.cycle_id),
+            "claimed": [bool(self.claimed[0]), bool(self.claimed[1]), bool(self.claimed[2])],
+            "holding": bool(self.holding),
+        }
+
+    def reset_for_cycle(self, cycle_id: int) -> None:
+        self.cycle_id = int(cycle_id)
+        self.claimed = (False, False, False)
+        self.holding = False
+
+    def mark_claimed(self, index: int) -> bool:
+        """标记领取；已领过返回 False。"""
+        if index < 0 or index > 2:
+            return False
+        if self.claimed[index]:
+            return False
+        claimed = list(self.claimed)
+        claimed[index] = True
+        self.claimed = (claimed[0], claimed[1], claimed[2])
+        return True
 
 
 @dataclass
@@ -495,6 +589,7 @@ class AppState:
     since_roll: RollAccum = field(default_factory=RollAccum)
     roll_history: List[RollHistoryEntry] = field(default_factory=list)
     roll_runtime: RollRuntime = field(default_factory=RollRuntime)
+    ease_chests: EaseChestsState = field(default_factory=EaseChestsState)
     settings: Dict = field(default_factory=lambda: {
         "pin_all_desktops": True,
         "always_on_top": True,
@@ -524,22 +619,29 @@ class AppState:
 
     def to_dict(self) -> Dict:
         return {
-            "inventory": asdict(self.inventory),
+            "inventory": self.inventory.to_dict(),
             "tasks": [t.to_dict() for t in self.tasks],
             "total_operations": self.total_operations,
             "last_roll_at": self.last_roll_at,
             "since_roll": asdict(self.since_roll),
             "roll_history": [e.to_dict() for e in self.roll_history],
             "roll_runtime": self.roll_runtime.to_dict(),
+            "ease_chests": self.ease_chests.to_dict(),
             "settings": self.settings,
         }
 
     @classmethod
     def from_dict(cls, data: Dict) -> "AppState":
-        inv = Inventory(**data.get("inventory", {}))
+        inv_raw = data.get("inventory", {})
+        inv = (
+            Inventory.from_dict(inv_raw)
+            if isinstance(inv_raw, dict)
+            else Inventory()
+        )
         tasks = [Task.from_dict(t) for t in data.get("tasks", [])]
         sr = data.get("since_roll", {})
         history = [RollHistoryEntry.from_dict(x) for x in data.get("roll_history", [])]
+        ease_raw = data.get("ease_chests", {})
         s = cls(
             inventory=inv,
             tasks=tasks,
@@ -551,6 +653,11 @@ class AppState:
             ),
             roll_history=history,
             roll_runtime=RollRuntime.from_dict(data.get("roll_runtime", {})),
+            ease_chests=(
+                EaseChestsState.from_dict(ease_raw)
+                if isinstance(ease_raw, dict)
+                else EaseChestsState()
+            ),
         )
         s.settings.update(data.get("settings", {}))
         return s
@@ -569,6 +676,17 @@ def validate_state_invariants(state: AppState) -> Optional[str]:
     for name, val in (("gold", inv.gold), ("diamond", inv.diamond)):
         if not math.isfinite(val) or val < 0:
             return f"inventory.{name} 非法"
+    for i, chest in enumerate(inv.chests):
+        if not isinstance(chest, ChestItem):
+            return f"inventory.chests[{i}] 类型非法"
+        if chest.rarity < 0 or chest.rarity > 4:
+            return f"inventory.chests[{i}] rarity 非法"
+        if not math.isfinite(chest.obtained_at):
+            return f"inventory.chests[{i}] obtained_at 非法"
+
+    ec = state.ease_chests
+    if not isinstance(ec.claimed, tuple) or len(ec.claimed) != 3:
+        return "ease_chests.claimed 非法"
 
     active_count = 0
     task_ids: set[str] = set()

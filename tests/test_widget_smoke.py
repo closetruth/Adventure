@@ -13,7 +13,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
@@ -230,6 +230,52 @@ class RollBarInitRegressionTest(unittest.TestCase):
         self.assertTrue(widget.roll_bar._chance_label)
         widget.close()
         widget.deleteLater()
+
+
+class EaseChestClickTests(unittest.TestCase):
+    """缓动条左键应能点到宝箱，不能被全局拖动滤镜吃掉。"""
+
+    def test_click_reached_chest_emits_claimed(self):
+        from src.ui_roll_bar import EasedProgressBar, _ease_span_for_cycle
+
+        bar = EasedProgressBar()
+        bar.resize(280, 18)
+        bar.show()
+        _app.processEvents()
+        bar.set_progress(_ease_span_for_cycle(0), freeze_at_end=True)
+        _app.processEvents()
+        got: list[int] = []
+        bar.chest_claimed.connect(lambda i, _r: got.append(i))
+        QTest.mouseClick(bar, Qt.LeftButton, pos=bar.chest_center_local(2))
+        _app.processEvents()
+        self.assertEqual(got, [2])
+        bar.close()
+        bar.deleteLater()
+
+    def test_move_filter_does_not_eat_eased_bar_clicks(self):
+        from src.ui_roll_bar import EasedProgressBar
+        from src.ui_window_drag import SystemMoveFilter
+
+        class Host:
+            def __init__(self) -> None:
+                self.moves = 0
+
+            def begin_user_move(self) -> None:
+                self.moves += 1
+
+        root = QWidget()
+        bar = EasedProgressBar(root)
+        bar.setGeometry(0, 0, 200, 18)
+        host = Host()
+        SystemMoveFilter(host).attach(root)
+        root.show()
+        bar.show()
+        _app.processEvents()
+        QTest.mouseClick(bar, Qt.LeftButton, pos=QPoint(10, 9))
+        _app.processEvents()
+        self.assertEqual(host.moves, 0)
+        root.close()
+        root.deleteLater()
 
 
 if __name__ == "__main__":

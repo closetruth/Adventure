@@ -92,6 +92,7 @@ class Application(QObject):
         self.widget.subtask_claimed.connect(self._on_subtask_claimed)
         self.widget.state_changed.connect(self._on_widget_state_changed)
         self.widget.ease_point_reached.connect(self.sfx.play_random_diamond)
+        self.widget.chest_bagged.connect(self._on_chest_bagged)
 
         # 桥接全局输入事件
         self.bridge = OpBridge()
@@ -310,6 +311,13 @@ class Application(QObject):
             "领取成功",
             f"「{title}」\n获得 {format_reward_gain(reward.gold, reward.diamond)}",
         )
+
+    def _on_chest_bagged(self) -> None:
+        n = len(self.state.inventory.chests)
+        logger.info("宝箱进背包 (chests=%d)", n)
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+        self._save_debounce.start()
 
     def _on_widget_state_changed(self) -> None:
         # 先刷新 UI，再写盘，避免暂停/开始时先卡在存档上
