@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QCursor, QGuiApplication, QMouseEvent, QPalette
+from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QCursor, QGuiApplication, QMouseEvent, QPainter, QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -28,7 +28,12 @@ from .storage import save_state
 from .task_manager import TaskManager
 from .ui_goal_tree_area import GoalTreeArea
 from .ui_qt import make_section_title, set_label_html, set_label_text
-from .ui_roll_bar import EasedProgressBar, SegmentedRollBar
+from .ui_roll_bar import (
+    _CHEST_SIZE,
+    _draw_chest,
+    EasedProgressBar,
+    SegmentedRollBar,
+)
 from .ui_text import (
     format_global_summary_html,
     format_roll_history_lines_html,
@@ -49,6 +54,35 @@ from .win_utils import (
 
 logger = logging.getLogger(__name__)
 
+_FLY_MS = 400
+_FLY_SIZE = 22
+
+
+class _FlyingChest(QWidget):
+    """领取时飞向背包按钮的临时宝箱。"""
+
+    def __init__(self, rarity: int, parent: QWidget):
+        super().__init__(parent)
+        self._rarity = int(rarity)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setFixedSize(_FLY_SIZE, _FLY_SIZE)
+        self.raise_()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        _draw_chest(
+            painter,
+            self.width() / 2.0,
+            self.height() / 2.0,
+            float(_CHEST_SIZE + 2),
+            reached=True,
+            rarity=self._rarity,
+            flash_on=True,
+            opened=False,
+        )
+        painter.end()
+
 
 class FloatingWidget(QWidget):
     """常驻桌面的悬浮小部件。"""
@@ -59,6 +93,7 @@ class FloatingWidget(QWidget):
     subtask_claimed = Signal(str, object)  # (title, Reward)
     state_changed = Signal()
     ease_point_reached = Signal()
+    chest_bagged = Signal()  # 宝箱已写入背包
 
     def __init__(self, state: AppState, manager: TaskManager):
         super().__init__()
@@ -164,6 +199,7 @@ class FloatingWidget(QWidget):
         bar_row.setSpacing(3)
         self.roll_progress_bar = EasedProgressBar()
         self.roll_progress_bar.point_reached.connect(self.ease_point_reached)
+        self.roll_progress_bar.chest_claimed.connect(self._on_chest_claimed)
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
         self.roll_bar = SegmentedRollBar()
@@ -312,6 +348,7 @@ class FloatingWidget(QWidget):
             s.inventory.gold,
             s.inventory.diamond,
             ops_1min=ops_1min,
+            chests=len(s.inventory.chests),
         )
 
     def _paint_global_stats(self) -> None:
@@ -341,6 +378,39 @@ class FloatingWidget(QWidget):
             return int(sub.active_seconds) + int(sub.operations) // 10
         return int(active.active_seconds) + int(active.operations) // 10
 
+    def _sync_ease_chests_claimed(self) -> None:
+        """条上周期与存档 ease_chests 对齐，避免重启重复领。"""
+        bar = self.roll_progress_bar
+        ec = self.state.ease_chests
+        if (not ec.holding) and ec.cycle_id != bar.cycle_id:
+            ec.reset_for_cycle(bar.cycle_id)
+        else:
+            ec.cycle_id = bar.cycle_id
+            ec.holding = bar.holding
+        bar.apply_claimed(ec.claimed)
+
+    def _on_chest_claimed(self, index: int, rarity: int) -> None:
+        ec = self.state.ease_chests
+        if not ec.mark_claimed(index):
+            return
+        self.state.inventory.add_chest(rarity)
+        self.roll_progress_bar.mark_claimed(index)
+        self._fly_chest_to_bag(index, rarity)
+        self._paint_global_stats()
+        if index == 2:
+            ec.holding = False
+            units = self._running_goal_units()
+            if units is not None:
+                self.roll_progress_bar.set_progress(
+                    units,
+                    freeze_at_end=False,
+                    holding=False,
+                )
+                if ec.cycle_id != self.roll_progress_bar.cycle_id:
+                    ec.reset_for_cycle(self.roll_progress_bar.cycle_id)
+                    self.roll_progress_bar.apply_claimed(ec.claimed)
+        self.chest_bagged.emit()
+
     def _update_roll_bar(self) -> None:
         rt = self.state.roll_runtime
         progress, span = roll_progress(self.state)
@@ -348,7 +418,14 @@ class FloatingWidget(QWidget):
         near_full_steps = remaining if 0 < remaining <= 4 else 0
         units = self._running_goal_units()
         if units is not None:
-            self.roll_progress_bar.set_progress(units)
+            ec = self.state.ease_chests
+            self.roll_progress_bar.set_progress(
+                units,
+                freeze_at_end=not ec.claimed[2],
+                holding=ec.holding,
+                held_cycle_id=ec.cycle_id,
+            )
+            self._sync_ease_chests_claimed()
         chance_label = (
             f"金 {rt.gold_chance:.0%}  钻 {rt.diamond_chance:.0%}"
         )
@@ -359,6 +436,34 @@ class FloatingWidget(QWidget):
             chance_label=chance_label,
             near_full_steps=near_full_steps,
         )
+
+    def _fly_chest_to_bag(self, index: int, rarity: int) -> None:
+        bar = self.roll_progress_bar
+        start_global = bar.mapTo(self, bar.chest_center_local(index))
+        end_global = self.inv_btn.mapTo(
+            self,
+            QPoint(self.inv_btn.width() // 2, self.inv_btn.height() // 2),
+        )
+        flyer = _FlyingChest(rarity, self)
+        half = _FLY_SIZE // 2
+        start = QPoint(start_global.x() - half, start_global.y() - half)
+        end = QPoint(end_global.x() - half, end_global.y() - half)
+        flyer.move(start)
+        flyer.show()
+        flyer.raise_()
+        anim = QPropertyAnimation(flyer, b"pos", flyer)
+        anim.setDuration(_FLY_MS)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def _cleanup() -> None:
+            flyer.hide()
+            flyer.deleteLater()
+
+        anim.finished.connect(_cleanup)
+        flyer._anim = anim  # type: ignore[attr-defined]
+        anim.start()
 
     def refresh_roll_meta(self) -> None:
         """仅更新进度条概率/颜色元数据（10 分钟重抽后调用）。"""

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from .models import AppState, TaskStatus
+from .ui_roll_bar import CHEST_RARITY_COLORS, CHEST_RARITY_NAMES
 from .ui_styles import (
     ACCENT,
     ACCENT_HOVER,
@@ -40,6 +41,8 @@ QLabel#StatLine {{ color: #c8ccd8; font-size: 13px; font-weight: 500; }}
 QLabel#HistLine {{ color: #b8bcc8; font-size: 12px; font-weight: 500; }}
 QLabel#HistHit {{ color: #ffd54f; font-size: 12px; font-weight: 600; }}
 QLabel#HistMiss {{ color: #8a909e; font-size: 12px; font-weight: 500; }}
+QLabel#ChestLine {{ color: #d0d4e0; font-size: 13px; font-weight: 600; }}
+QLabel#ChestEmpty {{ color: #8a909e; font-size: 12px; font-weight: 500; }}
 QScrollArea {{ border: none; background: transparent; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QPushButton {{
@@ -80,6 +83,10 @@ class InventoryDialog(QDialog):
         row.addWidget(self.gold_card["frame"])
         row.addWidget(self.diam_card["frame"])
         v.addLayout(row)
+
+        v.addWidget(self._section_label("未开宝箱"))
+        self.chest_card = self._make_chest_card()
+        v.addWidget(self.chest_card["frame"])
 
         v.addWidget(self._section_label("数据统计"))
         self.stat_card = self._make_stat_card()
@@ -161,6 +168,25 @@ class InventoryDialog(QDialog):
         lay.addWidget(cap)
         return {"frame": frame, "num": big}
 
+    def _make_chest_card(self) -> dict:
+        frame = QFrame()
+        frame.setObjectName("Card")
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(6)
+        self.lbl_chests_empty = QLabel("暂无未开宝箱")
+        self.lbl_chests_empty.setObjectName("ChestEmpty")
+        lay.addWidget(self.lbl_chests_empty)
+        self.chest_lines: list[QLabel] = []
+        for name, color in zip(CHEST_RARITY_NAMES, CHEST_RARITY_COLORS):
+            lbl = QLabel()
+            lbl.setObjectName("ChestLine")
+            lbl.setStyleSheet(f"color: {color};")
+            lbl.hide()
+            lay.addWidget(lbl)
+            self.chest_lines.append(lbl)
+        return {"frame": frame}
+
     def _make_stat_card(self) -> dict:
         frame = QFrame()
         frame.setObjectName("Card")
@@ -180,6 +206,16 @@ class InventoryDialog(QDialog):
         s = self.state
         self.gold_card["num"].setText(format_amount(s.inventory.gold))
         self.diam_card["num"].setText(format_amount(s.inventory.diamond))
+        counts = s.inventory.chest_counts_by_rarity()
+        total_chests = sum(counts)
+        self.lbl_chests_empty.setVisible(total_chests == 0)
+        for i, (name, n) in enumerate(zip(CHEST_RARITY_NAMES, counts)):
+            lbl = self.chest_lines[i]
+            if n > 0:
+                lbl.setText(f"{name} × {n}")
+                lbl.show()
+            else:
+                lbl.hide()
         self.lbl_ops.setText(f"全局操作数：{s.total_operations}")
         active = [t for t in s.tasks if t.status == TaskStatus.ACTIVE]
         done = [t for t in s.tasks if t.status == TaskStatus.COMPLETED]

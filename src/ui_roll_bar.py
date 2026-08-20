@@ -4,8 +4,8 @@ from __future__ import annotations
 import random
 from typing import List, Tuple
 
-from PySide6.QtCore import Qt, QPointF, QRectF, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QRadialGradient
+from PySide6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QPolygonF, QRadialGradient
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 # 每段 ease-out 指数：越大越「前冲后磨」。
@@ -41,6 +41,8 @@ _RARITY_WEIGHTS = (
     (35, 28, 20, 12, 5),
     (22, 25, 25, 18, 10),
 )
+CHEST_RARITY_NAMES = ("普通", "罕见", "稀有", "史诗", "传奇")
+CHEST_RARITY_COLORS = ("#c8c0b4", "#7dcc96", "#7aa2ff", "#c9a0ff", "#ffd56a")
 
 
 def _ease_span_for_cycle(cycle_id: int) -> int:
@@ -66,6 +68,26 @@ def _independent_cycle(units: int) -> Tuple[int, int, int]:
         rem -= span
     nxt = cycle_id + _EASE_CYCLES_PER_BLOCK
     return 0, _ease_span_for_cycle(nxt), nxt
+
+
+def resolve_held_cycle(
+    units: int,
+    *,
+    freeze_at_end: bool,
+    holding: bool,
+    held_cycle_id: int,
+) -> Tuple[int, int, int, bool]:
+    """满格且第三箱未领时钳在 100%；返回 progress, span, cycle_id, holding。"""
+    progress, span, cid = _independent_cycle(units)
+    if not freeze_at_end:
+        return progress, span, cid, False
+    if holding:
+        held_cid = int(held_cycle_id)
+        held_span = _ease_span_for_cycle(held_cid)
+        return held_span, held_span, held_cid, True
+    if span > 0 and progress >= span:
+        return span, span, cid, True
+    return progress, span, cid, False
 
 
 def _cycle_checkpoints(span: int, cycle_id: int = 0) -> Tuple[float, float, float]:
@@ -110,8 +132,7 @@ def _draw_chest(
     flash_on: bool,
     opened: bool = False,
 ) -> None:
-    """关盖宝箱。外形随稀有度变化；opened 留给以后开箱。"""
-    del opened
+    """关盖宝箱。opened=True 表示已领进背包：熄灭无光。"""
     rarity = max(0, min(_RARITY_LEGEND, int(rarity)))
     body_hex, lid_hex, glow_hex = _RARITY_PALETTE[rarity]
     glow = QColor(glow_hex)
@@ -123,7 +144,13 @@ def _draw_chest(
     body = QRectF(cx - w * 0.48, cy - h * 0.08, w * 0.96, h * 0.62)
     lid = QRectF(cx - w * 0.5, cy - h * 0.42, w, h * 0.38)
 
-    if reached:
+    show_glow = reached and not opened
+    if opened:
+        body_c = _with_alpha(QColor(body_hex), 48)
+        lid_c = _with_alpha(QColor(lid_hex), 56)
+        rim = QColor(255, 255, 255, 24)
+        accent = _with_alpha(QColor(glow_hex), 40)
+    elif show_glow:
         glow_mul = 1.9 if rarity == _RARITY_LEGEND else 1.55
         radius = size * (glow_mul if flash_on else glow_mul - 0.35)
         grad = QRadialGradient(cx, cy, radius)
@@ -149,7 +176,7 @@ def _draw_chest(
     painter.setBrush(body_c)
     painter.drawRoundedRect(body, round_body, round_body)
     if rarity == _RARITY_EPIC:
-        painter.setPen(QPen(_with_alpha(QColor(glow_hex), 160 if reached else 70), 0.7))
+        painter.setPen(QPen(_with_alpha(QColor(glow_hex), 160 if show_glow else 50), 0.7))
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(body.adjusted(0.9, 0.9, -0.9, -0.9), 1.2, 1.2)
     painter.setPen(QPen(rim, 0.9))
@@ -158,7 +185,10 @@ def _draw_chest(
 
     if rarity == _RARITY_UNCOMMON:
         band_w = max(1.0, w * 0.08)
-        iron = _with_alpha(QColor("#c9d4c4") if reached else QColor("#9aaa9a"), 200 if reached else 90)
+        iron = _with_alpha(
+            QColor("#c9d4c4") if show_glow else QColor("#9aaa9a"),
+            200 if show_glow else 70,
+        )
         painter.setPen(Qt.NoPen)
         painter.setBrush(iron)
         painter.drawRect(QRectF(body.left() + 1.4, body.top(), band_w, body.height()))
@@ -237,6 +267,8 @@ class EasedProgressBar(QWidget):
     """非格子的小型平滑进度条：三节点、每段先快后慢。"""
 
     point_reached = Signal()
+    chest_claimed = Signal(int, int)  # index, rarity
+    cycle_changed = Signal(int)  # cycle_id
 
     def __init__(self, parent=None, *, exponent: float = _EASE_EXPONENT):
         super().__init__(parent)
@@ -247,6 +279,7 @@ class EasedProgressBar(QWidget):
         self._points = _cycle_checkpoints(self._span, self._cycle_id)
         self._rarities = _cycle_chest_rarities(self._span, self._cycle_id)
         self._opened = (False, False, False)
+        self._holding = False
         self._have_baseline = False
         self._flash_on = True
         self._flash_timer = QTimer(self)
@@ -255,10 +288,78 @@ class EasedProgressBar(QWidget):
         self.setMinimumHeight(_BAR_H)
         self.setMaximumHeight(_BAR_H)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
 
-    def set_progress(self, units: int) -> None:
-        """按运行中目标的 units 刷新。周期与开奖间隔互相独立。"""
-        progress, span, cycle_id = _independent_cycle(units)
+    @property
+    def cycle_id(self) -> int:
+        return self._cycle_id
+
+    @property
+    def holding(self) -> bool:
+        return self._holding
+
+    def apply_claimed(self, claimed: Tuple[bool, bool, bool]) -> None:
+        """用存档里的本轮领取状态覆盖绘制。"""
+        nxt = (
+            bool(claimed[0]) if len(claimed) > 0 else False,
+            bool(claimed[1]) if len(claimed) > 1 else False,
+            bool(claimed[2]) if len(claimed) > 2 else False,
+        )
+        if nxt == self._opened:
+            return
+        self._opened = nxt
+        self._sync_flash_timer()
+        self.update()
+
+    def mark_claimed(self, index: int) -> None:
+        if index < 0 or index > 2:
+            return
+        opened = list(self._opened)
+        opened[index] = True
+        self._opened = (opened[0], opened[1], opened[2])
+        self._sync_flash_timer()
+        self.update()
+
+    def _layout_inset(self) -> float:
+        h = float(max(1, self.height()))
+        track_h = min(_TRACK_H, h)
+        radius = track_h / 2.0
+        return max(radius, _CHEST_SIZE * 0.62)
+
+    def chest_center_local(self, index: int) -> QPoint:
+        """检查点中心（控件本地坐标）。"""
+        w = float(max(1, self.width()))
+        h = float(max(1, self.height()))
+        inset = self._layout_inset()
+        pt = self._points[index] if 0 <= index < len(self._points) else 0.0
+        cx = inset + pt * (w - 2 * inset)
+        half = _CHEST_SIZE * 0.55
+        cx = max(half, min(w - half, cx))
+        return QPoint(int(round(cx)), int(round(h / 2.0)))
+
+    def _chest_hit_rect(self, index: int) -> QRect:
+        c = self.chest_center_local(index)
+        box_w = max(_CHEST_SIZE + 8, 18)
+        box_h = max(int(self.height()), _BAR_H)
+        x = c.x() - box_w // 2
+        x = max(0, min(max(0, self.width() - box_w), x))
+        return QRect(x, 0, box_w, box_h)
+
+    def set_progress(
+        self,
+        units: int,
+        *,
+        freeze_at_end: bool = False,
+        holding: bool = False,
+        held_cycle_id: int = 0,
+    ) -> bool:
+        """按运行中目标的 units 刷新。满格且 freeze_at_end 时停住不换轮。"""
+        progress, span, cycle_id, now_holding = resolve_held_cycle(
+            units,
+            freeze_at_end=freeze_at_end,
+            holding=holding,
+            held_cycle_id=held_cycle_id if holding else self._cycle_id,
+        )
         cycle_changed = span != self._span or cycle_id != self._cycle_id
         if cycle_changed:
             points = _cycle_checkpoints(span, cycle_id)
@@ -274,8 +375,9 @@ class EasedProgressBar(QWidget):
             and self._cycle_id == cycle_id
             and points == self._points
             and rarities == self._rarities
+            and self._holding == now_holding
         ):
-            return
+            return self._holding
         old_eased = self._eased_fraction()
         emit_chime = (
             self._have_baseline
@@ -288,11 +390,15 @@ class EasedProgressBar(QWidget):
         self._points = points
         self._rarities = rarities
         self._opened = opened
+        self._holding = now_holding
         self._have_baseline = True
         self._sync_flash_timer()
         self.update()
+        if cycle_changed:
+            self.cycle_changed.emit(cycle_id)
         if emit_chime:
             self.point_reached.emit()
+        return self._holding
 
     def _newly_reached(
         self,
@@ -314,12 +420,16 @@ class EasedProgressBar(QWidget):
     def _eased_fraction(self) -> float:
         return _segment_eased(self._raw_fraction(), self._points, self._exponent)
 
-    def _any_point_reached(self) -> bool:
+    def _any_claimable(self) -> bool:
         eased = self._eased_fraction()
-        return any(eased + 1e-6 >= pt for pt in self._points)
+        for i, pt in enumerate(self._points):
+            opened = self._opened[i] if i < len(self._opened) else False
+            if eased + 1e-6 >= pt and not opened:
+                return True
+        return False
 
     def _sync_flash_timer(self) -> None:
-        if self._any_point_reached():
+        if self._any_claimable():
             if not self._flash_timer.isActive():
                 self._flash_on = True
                 self._flash_timer.start()
@@ -330,6 +440,26 @@ class EasedProgressBar(QWidget):
     def _toggle_dot_flash(self) -> None:
         self._flash_on = not self._flash_on
         self.update()
+
+    def _hit_chest_index(self, pos: QPoint) -> int:
+        eased = self._eased_fraction()
+        for i, pt in enumerate(self._points):
+            opened = self._opened[i] if i < len(self._opened) else False
+            if opened or eased + 1e-6 < pt:
+                continue
+            if self._chest_hit_rect(i).contains(pos):
+                return i
+        return -1
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.LeftButton:
+            idx = self._hit_chest_index(event.position().toPoint())
+            if idx >= 0:
+                rarity = self._rarities[idx] if idx < len(self._rarities) else _RARITY_COMMON
+                self.chest_claimed.emit(idx, int(rarity))
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

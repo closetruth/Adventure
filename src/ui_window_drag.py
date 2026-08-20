@@ -7,6 +7,8 @@ from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QPushButton, QWidget
 
+from .ui_roll_bar import EasedProgressBar
+
 
 class SystemMovable(Protocol):
     def begin_user_move(self) -> None: ...
@@ -39,11 +41,13 @@ class SystemMoveFilter(QObject):
     def attach(self, root: QWidget) -> None:
         root.installEventFilter(self)
         for child in root.findChildren(QWidget):
-            if isinstance(child, QPushButton):
+            if isinstance(child, (QPushButton, EasedProgressBar)):
                 continue
             child.installEventFilter(self)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if isinstance(obj, EasedProgressBar):
+            return False
         if event.type() == QEvent.Type.MouseButtonPress:
             me = event
             if isinstance(me, QMouseEvent) and me.button() == Qt.LeftButton:
