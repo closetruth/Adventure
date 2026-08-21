@@ -27,7 +27,7 @@ from .reward_system import roll_progress
 from .storage import save_state
 from .task_manager import TaskManager
 from .ui_goal_tree_area import GoalTreeArea
-from .ui_qt import make_section_title, set_label_html, set_label_text
+from .ui_qt import make_section_title, set_label_html
 from .ui_roll_bar import (
     _CHEST_SIZE,
     _draw_chest,
@@ -37,7 +37,6 @@ from .ui_roll_bar import (
 from .ui_text import (
     format_global_summary_html,
     format_roll_history_lines_html,
-    format_roll_toast_html,
 )
 from .ui_widget_qss import WIDGET_STYLESHEET
 from .ui_window_drag import DragHandleBar, SystemMoveFilter
@@ -174,7 +173,6 @@ class FloatingWidget(QWidget):
         self.resize(308, 680)
 
         self._op_tracker = OpRateTracker(window_sec=60.0)
-        self._roll_toast_timer: Optional[QTimer] = None
         self._refreshing = False
         self._window_dragging = False
         self._drag_end_timer = QTimer(self)
@@ -256,14 +254,9 @@ class FloatingWidget(QWidget):
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
         self.roll_bar = SegmentedRollBar()
-        self.roll_toast = QLabel("")
-        self.roll_toast.setObjectName("RollToast")
-        self.roll_toast.setTextFormat(Qt.RichText)
-        self.roll_toast.hide()
         bar_row.addWidget(self.roll_progress_bar)
         bar_row.addWidget(cap)
         bar_row.addWidget(self.roll_bar)
-        bar_row.addWidget(self.roll_toast)
         global_lay.addLayout(bar_row)
 
         hist_row = QVBoxLayout()
@@ -552,40 +545,6 @@ class FloatingWidget(QWidget):
         """仅更新进度条概率/颜色元数据（10 分钟重抽后调用）。"""
         self._update_roll_bar()
 
-    def show_roll_result(self, reward: Reward) -> None:
-        """开奖结果轻量 Toast + 进度条闪动。"""
-        if reward.is_empty():
-            self._set_roll_toast("miss", "未中", 1200)
-        else:
-            dual = reward.gold > 0 and reward.diamond > 0
-            if dual and reward.has_crit():
-                hide_ms = 2800
-            elif dual:
-                hide_ms = 2200
-            else:
-                hide_ms = 2000
-            self._set_roll_toast("hit", format_roll_toast_html(reward), hide_ms)
-        self._flash_roll_bar()
-
-    def _set_roll_toast(self, kind: str, text: str, hide_ms: int) -> None:
-        """更新开奖 Toast；未中走灰色属性，命中用 RichText 分色。"""
-        if self.roll_toast.property("toast") != kind:
-            self.roll_toast.setProperty("toast", kind)
-            self.roll_toast.style().unpolish(self.roll_toast)
-            self.roll_toast.style().polish(self.roll_toast)
-        self.roll_toast.setTextFormat(
-            Qt.PlainText if kind == "miss" else Qt.RichText
-        )
-        set_label_text(self.roll_toast, text)
-        self.roll_toast.show()
-
-        if self._roll_toast_timer is None:
-            self._roll_toast_timer = QTimer(self)
-            self._roll_toast_timer.setSingleShot(True)
-            self._roll_toast_timer.timeout.connect(self.roll_toast.hide)
-        self._roll_toast_timer.setInterval(hide_ms)
-        self._roll_toast_timer.start()
-
     def _flash_roll_bar(self) -> None:
         self.roll_bar.set_flash(True)
 
@@ -604,7 +563,7 @@ class FloatingWidget(QWidget):
         if roll_changed:
             self._paint_roll_history()
             if reward is not None:
-                self.show_roll_result(reward)
+                self._flash_roll_bar()
 
         since = self.state.since_roll
         self.goal_tree.refresh_stats(

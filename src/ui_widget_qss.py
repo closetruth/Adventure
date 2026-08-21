@@ -157,12 +157,5 @@ QPushButton#CloseBtn, QPushButton#MinBtn {
     color: #c0c4d0;
 }
 QPushButton#CloseBtn:hover { color: #ff7474; }
-QLabel#RollToast {
-    font-size: 12px;
-    font-weight: 700;
-    padding: 2px 0;
-    background: transparent;
-}
-QLabel#RollToast[toast="miss"] { color: #8a909e; }
 QFrame#Divider { background-color: #2a2d38; max-height: 1px; min-height: 1px; }
 """ + TREE_QSS + GOAL_TREE_PANEL_QSS
