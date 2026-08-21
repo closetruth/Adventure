@@ -154,54 +154,6 @@ def format_global_summary_html(
     return f'<span style="{_font(11)}">' + _muted_sep().join(parts) + "</span>"
 
 
-def format_roll_toast_html(reward: "Reward") -> str:
-    """开奖 Toast：金黄钻青分色；暴击写成 基数 × 倍率 → 实得。"""
-    gold_hit = reward.gold > 0
-    diam_hit = reward.diamond > 0
-    dual = gold_hit and diam_hit
-    spaced = not dual
-    parts: list[str] = []
-    if gold_hit:
-        gold_label = "金" if dual else "金币"
-        if reward.gold_is_crit():
-            parts.append(
-                _crit_formula_html(
-                    reward.gold,
-                    reward.gold_crit_mult,
-                    gold_label,
-                    _TOAST_GOLD,
-                    _TOAST_CRIT,
-                    spaced=spaced,
-                )
-            )
-        else:
-            parts.append(
-                _plain_amount_html(
-                    reward.gold, gold_label, _TOAST_GOLD, spaced=spaced
-                )
-            )
-    if diam_hit:
-        diam_label = "钻" if dual else "钻石"
-        if reward.diamond_is_crit():
-            parts.append(
-                _crit_formula_html(
-                    reward.diamond,
-                    reward.diamond_crit_mult,
-                    diam_label,
-                    _TOAST_DIAM,
-                    _TOAST_CRIT,
-                    spaced=spaced,
-                )
-            )
-        else:
-            parts.append(
-                _plain_amount_html(
-                    reward.diamond, diam_label, _TOAST_DIAM, spaced=spaced
-                )
-            )
-    return "  ".join(parts)
-
-
 def format_roll_history_line_html(
     entry: "RollHistoryEntry",
     *,
