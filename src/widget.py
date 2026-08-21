@@ -9,7 +9,7 @@ import logging
 from typing import Optional
 
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QCursor, QGuiApplication, QMouseEvent, QPainter, QPalette
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QMouseEvent, QPainter, QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -56,6 +56,59 @@ logger = logging.getLogger(__name__)
 
 _FLY_MS = 400
 _FLY_SIZE = 22
+_BADGE_H = 14
+_BADGE_INSET = 3
+
+
+class _ChestBadge(QWidget):
+    """奖励背包按钮内侧右上角：蓝底白字「箱n」方块角标。"""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self._count = 0
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setFixedHeight(_BADGE_H)
+        self.hide()
+
+    def _label(self) -> str:
+        if self._count <= 0:
+            return ""
+        if self._count >= 100:
+            return "箱99+"
+        return f"箱{self._count}"
+
+    def set_count(self, n: int) -> None:
+        n = max(0, int(n))
+        if n == self._count and ((n > 0) == self.isVisible()):
+            if n > 0:
+                self.raise_()
+            return
+        self._count = n
+        if n <= 0:
+            self.hide()
+            return
+        font = QFont("Microsoft YaHei UI", 7)
+        font.setBold(True)
+        fm_w = QFontMetrics(font).horizontalAdvance(self._label()) + 8
+        self.setFixedWidth(max(_BADGE_H + 2, fm_w))
+        self.show()
+        self.raise_()
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        if self._count <= 0:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        font = QFont("Microsoft YaHei UI", 7)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#3a5cff"))
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 3, 3)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(self.rect(), int(Qt.AlignCenter), self._label())
+        painter.end()
 
 
 class _FlyingChest(QWidget):
@@ -253,6 +306,9 @@ class FloatingWidget(QWidget):
         btns.addWidget(self.inv_btn)
         v.addLayout(btns)
 
+        # 角标画在按钮内侧；点击穿透
+        self.inv_chest_badge = _ChestBadge(self.inv_btn)
+
     def note_operation(self) -> None:
         """记录一次全局操作（用于近1分钟计数）。"""
         self._op_tracker.record()
@@ -348,7 +404,6 @@ class FloatingWidget(QWidget):
             s.inventory.gold,
             s.inventory.diamond,
             ops_1min=ops_1min,
-            chests=len(s.inventory.chests),
         )
 
     def _paint_global_stats(self) -> None:
@@ -357,6 +412,27 @@ class FloatingWidget(QWidget):
             self.global_summary,
             self._format_global_summary_html(ops_1min),
         )
+        self._refresh_inv_badge()
+
+    def _refresh_inv_badge(self) -> None:
+        n = len(self.state.inventory.chests)
+        self.inv_chest_badge.set_count(n)
+        self._place_inv_badge()
+
+    def _place_inv_badge(self) -> None:
+        badge = self.inv_chest_badge
+        if not badge.isVisible():
+            return
+        # 按钮内部右上角，不探出边框
+        x = max(0, self.inv_btn.width() - badge.width() - _BADGE_INSET)
+        y = _BADGE_INSET
+        badge.move(x, y)
+        badge.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "inv_chest_badge"):
+            self._place_inv_badge()
 
     def _paint_roll_history(self) -> None:
         set_label_html(
@@ -395,8 +471,8 @@ class FloatingWidget(QWidget):
             return
         self.state.inventory.add_chest(rarity)
         self.roll_progress_bar.mark_claimed(index)
-        self._fly_chest_to_bag(index, rarity)
         self._paint_global_stats()
+        self._fly_chest_to_bag(index, rarity)
         if index == 2:
             ec.holding = False
             units = self._running_goal_units()
@@ -440,10 +516,17 @@ class FloatingWidget(QWidget):
     def _fly_chest_to_bag(self, index: int, rarity: int) -> None:
         bar = self.roll_progress_bar
         start_global = bar.mapTo(self, bar.chest_center_local(index))
-        end_global = self.inv_btn.mapTo(
-            self,
-            QPoint(self.inv_btn.width() // 2, self.inv_btn.height() // 2),
-        )
+        badge = self.inv_chest_badge
+        if badge.isVisible():
+            end_global = badge.mapTo(
+                self,
+                QPoint(badge.width() // 2, badge.height() // 2),
+            )
+        else:
+            end_global = self.inv_btn.mapTo(
+                self,
+                QPoint(self.inv_btn.width() // 2, self.inv_btn.height() // 2),
+            )
         flyer = _FlyingChest(rarity, self)
         half = _FLY_SIZE // 2
         start = QPoint(start_global.x() - half, start_global.y() - half)
@@ -616,3 +699,5 @@ class FloatingWidget(QWidget):
         if self.state.settings.get("pin_all_desktops", True):
             pin_window_to_all_desktops(hwnd)
         prepare_overlay_hwnd(hwnd)
+        if hasattr(self, "inv_chest_badge"):
+            QTimer.singleShot(0, self._place_inv_badge)
