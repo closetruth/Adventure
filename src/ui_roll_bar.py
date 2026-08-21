@@ -18,8 +18,8 @@ _EASE_SPAN_MIN = 540
 _EASE_SPAN_STEP = 12
 _EASE_SPAN_RANGE = 15
 _EASE_CYCLES_PER_BLOCK = 15
-_BAR_H = 18
-_TRACK_H = 7
+_BAR_H = 22
+_TRACK_H = 12
 _CHEST_SIZE = 13
 # 普通 / 罕见 / 稀有 / 史诗 / 传奇
 _RARITY_COMMON = 0
@@ -492,6 +492,51 @@ class EasedProgressBar(QWidget):
         if fill_w > 0:
             painter.setBrush(QColor("#7aa2ff"))
             painter.drawRoundedRect(QRectF(0, track_y, fill_w, track_h), radius, radius)
+
+        # 已走过/当前段：本段完成度按 raw 先快后慢；稀有度字 + 深色描边；1 位小数
+        usable = w - 2 * inset
+        font = QFont("Microsoft YaHei UI", 9)
+        font.setBold(True)
+        painter.setFont(font)
+        raw = self._raw_fraction()
+        exp = self._exponent
+        prev = 0.0
+        for i, pt in enumerate(self._points):
+            pt_f = float(pt)
+            if eased <= prev + 1e-6:
+                prev = pt_f
+                continue
+            width = pt_f - prev
+            if width <= 1e-9 or eased >= pt_f - 1e-6 or raw >= pt_f - 1e-6:
+                seg_pct = 100.0
+            elif raw <= prev + 1e-6:
+                seg_pct = 0.0
+            else:
+                local = max(0.0, min(1.0, (raw - prev) / width))
+                eased_local = 1.0 - pow(1.0 - local, exp)
+                seg_pct = eased_local * 100.0
+            mid = (prev + pt_f) * 0.5
+            tx = inset + mid * usable
+            rarity = self._rarities[i] if i < len(self._rarities) else _RARITY_COMMON
+            rarity = max(0, min(_RARITY_LEGEND, int(rarity)))
+            glow_hex = _RARITY_PALETTE[rarity][2]
+            label = f"{seg_pct:.1f}%"
+            text_rect = QRectF(tx - 24.0, track_y, 48.0, track_h)
+            painter.setPen(QColor(20, 22, 30, 220))
+            for dx, dy in (
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+            ):
+                painter.drawText(
+                    text_rect.translated(dx, dy),
+                    int(Qt.AlignCenter),
+                    label,
+                )
+            painter.setPen(QColor(glow_hex))
+            painter.drawText(text_rect, int(Qt.AlignCenter), label)
+            prev = pt_f
 
         for i, pt in enumerate(self._points):
             cx = inset + pt * (w - 2 * inset)
