@@ -134,9 +134,8 @@ def format_global_summary_html(
     diamond: float,
     *,
     ops_1min: int | None = None,
-    chests: int | None = None,
 ) -> str:
-    """悬浮窗顶栏：总操作 / 背包金币 / 钻石（RichText）。"""
+    """悬浮窗顶栏：总操作 / 背包金币 / 钻石（RichText）。未开宝箱只在奖励背包里看。"""
     parts: list[str] = []
     if ops_1min is not None:
         parts.append(
@@ -152,11 +151,6 @@ def format_global_summary_html(
         f'<span style="color:{_COLOR_DIAM};font-weight:700">'
         f"{format_amount(diamond)}</span>",
     ])
-    if chests is not None and chests > 0:
-        parts.append(
-            f'<span style="color:#e8c87a">宝箱 </span>'
-            f'<span style="color:#e8c87a;font-weight:700">{chests}</span>'
-        )
     return f'<span style="{_font(11)}">' + _muted_sep().join(parts) + "</span>"
 
 

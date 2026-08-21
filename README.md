@@ -15,7 +15,7 @@ https://github.com/user-attachments/assets/1e629403-fa90-4cbe-847e-aedf050f35ad
 
 ## 功能特性
 
-### 任务
+### 目标
 
 目标可以当成**磁盘上的文件夹和文件**来组织：
 

@@ -131,10 +131,17 @@ def _draw_chest(
     rarity: int,
     flash_on: bool,
     opened: bool = False,
+    body_hex: str | None = None,
+    lid_hex: str | None = None,
+    glow_hex: str | None = None,
+    muted_alpha: int | None = None,
 ) -> None:
     """关盖宝箱。opened=True 表示已领进背包：熄灭无光。"""
     rarity = max(0, min(_RARITY_LEGEND, int(rarity)))
-    body_hex, lid_hex, glow_hex = _RARITY_PALETTE[rarity]
+    p_body, p_lid, p_glow = _RARITY_PALETTE[rarity]
+    body_hex = body_hex or p_body
+    lid_hex = lid_hex or p_lid
+    glow_hex = glow_hex or p_glow
     glow = QColor(glow_hex)
     tall = 0.96 if rarity == _RARITY_UNCOMMON else 0.88
     w = size * (1.06 if rarity == _RARITY_LEGEND else 1.0)
@@ -167,9 +174,11 @@ def _draw_chest(
         rim = _with_alpha(QColor(glow_hex), 230 if flash_on else 150)
         accent = QColor(glow_hex)
     else:
-        body_c = _with_alpha(QColor(body_hex), 96)
-        lid_c = _with_alpha(QColor(lid_hex), 110)
-        rim = QColor(255, 255, 255, 36)
+        ba = 96 if muted_alpha is None else max(0, min(255, muted_alpha))
+        la = min(255, ba + 20)
+        body_c = _with_alpha(QColor(body_hex), ba)
+        lid_c = _with_alpha(QColor(lid_hex), la)
+        rim = QColor(255, 255, 255, 36 if muted_alpha is None else min(255, ba // 2))
         accent = _with_alpha(QColor(glow_hex), 100)
 
     painter.setPen(QPen(rim, 1.5 if rarity == _RARITY_EPIC else 0.9))
