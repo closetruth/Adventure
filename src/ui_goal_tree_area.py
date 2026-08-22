@@ -101,6 +101,7 @@ class GoalTreeArea(QWidget):
         self._local_refresh_pending = False
         self._geometry_sync_pending = False
         self._geometry_syncing = False
+        self._dbg_logged_c: set[str] = set()
 
         self._build_ui()
         self.refresh()
@@ -686,6 +687,31 @@ class GoalTreeArea(QWidget):
                 since_diamond=since_diamond,
             )
             return
+        # #region agent log
+        if (
+            sub is not None
+            and sub.is_leaf()
+            and sub.time_target_met()
+            and not sub.can_finish()
+            and sub.id not in self._dbg_logged_c
+        ):
+            self._dbg_logged_c.add(sub.id)
+            from .task_manager import _agent_dbg
+            _agent_dbg(
+                "C",
+                "ui_goal_tree_area.py:_refresh_task_ops_ui",
+                "time met but can_finish false during stats refresh",
+                {
+                    "allow_action_rebuild": allow_action_rebuild,
+                    "sub_id": sub.id,
+                    "title": sub.title,
+                    "done": sub.done,
+                    "claimed": sub.rewards_claimed,
+                    "can_finish": sub.can_finish(),
+                    "task_status": task.status.value,
+                },
+            )
+        # #endregion
         self._refresh_goal_detail_stats_only(
             since_gold=since_gold,
             since_diamond=since_diamond,

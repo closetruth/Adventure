@@ -76,8 +76,20 @@ class Application(QObject):
         self.power_monitor = PowerMonitor()
         self.manager = TaskManager(self.state, self.power_monitor)
         if self.manager.recover_stuck_subtask_rewards():
+            n = self.manager.last_repaired_claimed_count
+            logger.info(
+                "debug-4283d4 启动修复完成 repaired_claimed=%d",
+                n,
+            )
             logger.info("启动时恢复了卡住的子任务奖励")
             self._safe_save()
+            if n:
+                QMessageBox.information(
+                    None,
+                    "Adventure",
+                    f"已修复 {n} 个无法点完成的子目标。\n"
+                    "时长已经达标的，选中后即可点「完成」。",
+                )
         self.sfx = SfxPlayer(self.state.settings)
         if self.sfx.capable():
             self.sfx.prewarm()
