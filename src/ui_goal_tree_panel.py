@@ -431,7 +431,9 @@ class GoalTreePanel(QWidget):
             is_selected = sid == self._selected_subtask_id
             is_current = sid in active_path
             if stats_only and not (is_selected or is_current):
-                continue
+                stale_dot = (not sub.done) and ("●" in sub_line.text())
+                if not stale_dot:
+                    continue
             show_stats = is_selected or is_current
             set_label_html(
                 sub_line,
