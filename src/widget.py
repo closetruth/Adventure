@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, QTimer, Signal
@@ -21,12 +22,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .currency_display import CurrencyDisplay
 from .models import AppState, Reward
 from .op_tracker import OpRateTracker
 from .reward_system import roll_progress
 from .storage import save_state
 from .task_manager import TaskManager
 from .ui_goal_tree_area import GoalTreeArea
+from .ui_odometer import RollingAmount
 from .ui_qt import make_section_title, set_label_html
 from .ui_roll_bar import (
     _CHEST_SIZE,
@@ -35,7 +38,7 @@ from .ui_roll_bar import (
     SegmentedRollBar,
 )
 from .ui_text import (
-    format_global_summary_html,
+    format_ops_summary_html,
     format_roll_history_lines_html,
 )
 from .ui_widget_qss import WIDGET_STYLESHEET
@@ -178,6 +181,12 @@ class FloatingWidget(QWidget):
         self._drag_end_timer = QTimer(self)
         self._drag_end_timer.setSingleShot(True)
         self._drag_end_timer.timeout.connect(self.end_user_move)
+        vis_g, vis_d = state.visible_gold_diamond()
+        self._currency = CurrencyDisplay(vis_g, vis_d)
+        self._currency_last_ts: float | None = None
+        self._currency_timer = QTimer(self)
+        self._currency_timer.setInterval(50)
+        self._currency_timer.timeout.connect(self._tick_currency_display)
 
         self._build_ui()
         # 控件默认是 0/10；立刻用存档进度画一次，否则要等第一次按键才刷新
@@ -240,11 +249,27 @@ class FloatingWidget(QWidget):
         global_lay.setSpacing(6)
         global_lay.addWidget(make_section_title("全局"))
 
+        summary_row = QHBoxLayout()
+        summary_row.setContentsMargins(0, 0, 0, 0)
+        summary_row.setSpacing(6)
         self.global_summary = QLabel("")
         self.global_summary.setObjectName("GlobalSummary")
-        self.global_summary.setAlignment(Qt.AlignCenter)
+        self.global_summary.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self.global_summary.setTextFormat(Qt.RichText)
-        global_lay.addWidget(self.global_summary)
+        gold_cap = QLabel("金币")
+        gold_cap.setObjectName("GlobalCap")
+        gold_cap.setStyleSheet("color: #f5c842; font-weight: 500;")
+        self.gold_reel = RollingAmount("#f5c842")
+        diam_cap = QLabel("钻石")
+        diam_cap.setObjectName("GlobalCap")
+        diam_cap.setStyleSheet("color: #5ec8f2; font-weight: 500;")
+        self.diamond_reel = RollingAmount("#5ec8f2")
+        summary_row.addWidget(self.global_summary, 1)
+        summary_row.addWidget(gold_cap)
+        summary_row.addWidget(self.gold_reel)
+        summary_row.addWidget(diam_cap)
+        summary_row.addWidget(self.diamond_reel)
+        global_lay.addLayout(summary_row)
 
         bar_row = QVBoxLayout()
         bar_row.setSpacing(3)
@@ -390,21 +415,124 @@ class FloatingWidget(QWidget):
         save_state(self.state)
         logger.info("开奖音效: %s", checked)
 
-    def _format_global_summary_html(self, ops_1min: int) -> str:
-        s = self.state
-        return format_global_summary_html(
-            s.total_operations,
-            s.inventory.gold,
-            s.inventory.diamond,
-            ops_1min=ops_1min,
-        )
-
-    def _paint_global_stats(self) -> None:
-        ops_1min = self._op_tracker.count_recent()
+    def _paint_ops_and_reels(self, ops_1min: int) -> None:
         set_label_html(
             self.global_summary,
-            self._format_global_summary_html(ops_1min),
+            format_ops_summary_html(
+                self.state.total_operations,
+                ops_1min=ops_1min,
+            ),
         )
+        self._paint_currency_reels()
+
+    def _paint_currency_reels(self) -> None:
+        self.gold_reel.set_amount(self._currency.gold)
+        self.diamond_reel.set_amount(self._currency.diamond)
+
+    def kick_currency_display(self) -> None:
+        """背包已变时立刻开追（不要等鼠标松开后的 UI flush）。"""
+        # #region agent log
+        t0 = time.perf_counter()
+        # #endregion
+        self._sync_currency_lanes()
+        self.goal_tree.kick_detail_currency()
+        if not hasattr(self, "global_summary"):
+            return
+        self._paint_ops_and_reels(self._op_tracker.count_recent())
+        self._ensure_currency_timer()
+        # #region agent log
+        self._dbg_kick_n = getattr(self, "_dbg_kick_n", 0) + 1
+        ms = (time.perf_counter() - t0) * 1000
+        if self._dbg_kick_n <= 3 or self._dbg_kick_n % 25 == 0 or ms >= 4.0:
+            from .task_manager import _agent_dbg
+            g, d = self._currency_targets()
+            _agent_dbg(
+                "A",
+                "widget.py:kick_currency_display",
+                "kick cost",
+                {
+                    "n": self._dbg_kick_n,
+                    "ms": round(ms, 2),
+                    "timer": self._currency_timer.isActive(),
+                    "need": not self._currency.caught_up(g, d)
+                    or self.goal_tree.detail_needs_tick(),
+                    "vis_g": round(g, 3),
+                    "disp_g": round(self._currency.gold, 3),
+                },
+            )
+        # #endregion
+
+    def _currency_targets(self) -> tuple[float, float]:
+        return self.state.visible_gold_diamond()
+
+    def _ensure_currency_timer(self) -> None:
+        gold, diamond = self._currency_targets()
+        need = (
+            not self._currency.caught_up(gold, diamond)
+            or self.goal_tree.detail_needs_tick()
+        )
+        if need:
+            if not self._currency_timer.isActive():
+                self._currency_last_ts = time.monotonic()
+                self._currency_timer.start()
+            return
+        self._currency_timer.stop()
+        self._currency_last_ts = None
+
+    def _sync_currency_lanes(self) -> None:
+        """变少立刻对齐；变多则启动 50ms 追赶定时器。"""
+        gold, diamond = self._currency_targets()
+        self._currency.step(gold, diamond, 0.0)
+        if self._currency.caught_up(gold, diamond):
+            self._currency.snap_to(gold, diamond)
+
+    def _tick_currency_display(self) -> None:
+        now = time.monotonic()
+        if self.is_user_moving():
+            self._currency_last_ts = now
+            return
+        # #region agent log
+        t0 = time.perf_counter()
+        t_vis = time.perf_counter()
+        # #endregion
+        dt = 0.05
+        if self._currency_last_ts is not None:
+            dt = min(max(now - self._currency_last_ts, 0.0), 0.1)
+        self._currency_last_ts = now
+        gold, diamond = self._currency_targets()
+        # #region agent log
+        vis_ms = (time.perf_counter() - t_vis) * 1000
+        # #endregion
+        still_global = self._currency.step(gold, diamond, dt)
+        still_detail = self.goal_tree.tick_detail_currency(dt)
+        self._paint_currency_reels()
+        if not still_global and not still_detail:
+            self._currency_timer.stop()
+            self._currency_last_ts = None
+        # #region agent log
+        self._dbg_tick_n = getattr(self, "_dbg_tick_n", 0) + 1
+        ms = (time.perf_counter() - t0) * 1000
+        if self._dbg_tick_n <= 3 or self._dbg_tick_n % 20 == 0 or ms >= 4.0:
+            from .task_manager import _agent_dbg
+            _agent_dbg(
+                "B",
+                "widget.py:_tick_currency_display",
+                "tick cost",
+                {
+                    "n": self._dbg_tick_n,
+                    "ms": round(ms, 2),
+                    "vis_ms": round(vis_ms, 2),
+                    "dt": round(dt, 3),
+                    "still_g": still_global,
+                    "still_d": still_detail,
+                },
+            )
+        # #endregion
+
+    def _paint_global_stats(self) -> None:
+        self._sync_currency_lanes()
+        self._paint_ops_and_reels(self._op_tracker.count_recent())
+        self._ensure_currency_timer()
         self._refresh_inv_badge()
 
     def _refresh_inv_badge(self) -> None:

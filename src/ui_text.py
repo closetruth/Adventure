@@ -128,6 +128,25 @@ def _crit_formula_plain(
     return f"{base}×{mult_txt}→+{format_amount(amount)}{label}"
 
 
+def format_ops_summary_html(
+    total_ops: int,
+    *,
+    ops_1min: int | None = None,
+) -> str:
+    """悬浮窗顶栏操作数字（RichText）。金币/钻石由 RollingAmount 绘制。"""
+    parts: list[str] = []
+    if ops_1min is not None:
+        parts.append(
+            f'<span style="color:{_COLOR_OPS_1MIN}">近1分 </span>'
+            f'<span style="color:{_COLOR_OPS_1MIN};font-weight:700">{ops_1min}</span>'
+        )
+    parts.append(
+        f'<span style="color:{_COLOR_OPS}">总操作 </span>'
+        f'<span style="color:{_COLOR_OPS};font-weight:700">{total_ops:,}</span>'
+    )
+    return f'<span style="{_font(11)}">' + _muted_sep().join(parts) + "</span>"
+
+
 def format_global_summary_html(
     total_ops: int,
     gold: float,
@@ -135,23 +154,18 @@ def format_global_summary_html(
     *,
     ops_1min: int | None = None,
 ) -> str:
-    """悬浮窗顶栏：总操作 / 背包金币 / 钻石（RichText）。未开宝箱只在奖励背包里看。"""
-    parts: list[str] = []
-    if ops_1min is not None:
-        parts.append(
-            f'<span style="color:{_COLOR_OPS_1MIN}">近1分 </span>'
-            f'<span style="color:{_COLOR_OPS_1MIN};font-weight:700">{ops_1min}</span>'
-        )
-    parts.extend([
-        f'<span style="color:{_COLOR_OPS}">总操作 </span>'
-        f'<span style="color:{_COLOR_OPS};font-weight:700">{total_ops:,}</span>',
+    """兼容旧调用：操作 + 金/钻文字（现顶栏金/钻已改滚轮）。"""
+    base = format_ops_summary_html(total_ops, ops_1min=ops_1min)
+    extra = (
+        f'{_muted_sep()}'
         f'<span style="color:{_COLOR_GOLD}">金币 </span>'
-        f'<span style="color:{_COLOR_GOLD};font-weight:700">{format_amount(gold)}</span>',
+        f'<span style="color:{_COLOR_GOLD};font-weight:700">{format_amount(gold)}</span>'
+        f'{_muted_sep()}'
         f'<span style="color:{_COLOR_DIAM}">钻石 </span>'
         f'<span style="color:{_COLOR_DIAM};font-weight:700">'
-        f"{format_amount(diamond)}</span>",
-    ])
-    return f'<span style="{_font(11)}">' + _muted_sep().join(parts) + "</span>"
+        f"{format_amount(diamond)}</span>"
+    )
+    return base[:-7] + extra + "</span>" if base.endswith("</span>") else base + extra
 
 
 def format_roll_history_line_html(
@@ -455,6 +469,7 @@ def format_tree_detail_html(
     since_roll_gold: float = 0.0,
     since_roll_diamond: float = 0.0,
     completion_bonus: float = 0.5,
+    omit_compact_currency: bool = False,
 ) -> str:
     """详情面板统计文案。"""
     if sub is None:
@@ -466,10 +481,13 @@ def format_tree_detail_html(
         accum_parts.extend(
             _format_created_completed_html(task.created_at, task.completed_at)
         )
-        lines = [
-            format_goal_compact_html(task.rollup_operations(), gold, diamond),
-            "  ".join(accum_parts),
-        ]
+        if omit_compact_currency:
+            lines = ["  ".join(accum_parts)]
+        else:
+            lines = [
+                format_goal_compact_html(task.rollup_operations(), gold, diamond),
+                "  ".join(accum_parts),
+            ]
         if task.status == TaskStatus.ACTIVE:
             lines.append(
                 format_widget_runtime_html(
@@ -486,7 +504,8 @@ def format_tree_detail_html(
         pending = sub.rollup_pending_summary()
         parts = [f'<span style="color:{_COLOR_MUTED}">分组</span>']
         if ops or gold or pending.gold or pending.diamond:
-            parts.append(format_goal_compact_html(ops, gold, diamond))
+            if not omit_compact_currency:
+                parts.append(format_goal_compact_html(ops, gold, diamond))
             if pending.gold or pending.diamond:
                 parts.append(
                     f'<span style="color:{_COLOR_CLAIM};font-weight:700">'
@@ -494,10 +513,13 @@ def format_tree_detail_html(
                 )
         return "  ".join(parts)
 
-    parts = [
-        format_goal_compact_html(sub.operations, sub.earned_gold, sub.earned_diamond),
-        format_subgoal_runtime_html(sub),
-    ]
+    if omit_compact_currency:
+        parts = [format_subgoal_runtime_html(sub)]
+    else:
+        parts = [
+            format_goal_compact_html(sub.operations, sub.earned_gold, sub.earned_diamond),
+            format_subgoal_runtime_html(sub),
+        ]
     parts.extend(_format_created_completed_html(sub.created_at, sub.completed_at))
     if sub.can_finish():
         pending = sub.pending_summary()
@@ -513,6 +535,15 @@ def format_tree_detail_html(
             f"待领 金{format_amount(pending.gold)} 钻{format_amount(pending.diamond)}</span>"
         )
     return "  ".join(parts)
+
+
+def format_goal_ops_html(operations: int) -> str:
+    """详情操作数（金/钻由 RollingAmount 绘制）。"""
+    return (
+        f'<span style="{_font(13)}">'
+        f'<span style="color:{_COLOR_OPS};font-weight:700">操作 {operations}</span>'
+        f"</span>"
+    )
 
 
 def format_goal_compact_html(operations: int, gold: float, diamond: float) -> str:

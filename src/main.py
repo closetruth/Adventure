@@ -166,6 +166,10 @@ class Application(QObject):
             get_data_dir(), self.state.total_operations, inv.gold, inv.diamond,
             len(self.state.tasks),
         )
+        # #region agent log
+        from .task_manager import _agent_dbg
+        _agent_dbg("A", "main.py:startup", "lag-v2 process loaded", {"ops": self.state.total_operations})
+        # #endregion
 
     # ---------- 系统托盘 ----------
     def _build_tray(self) -> QSystemTrayIcon:
@@ -305,6 +309,19 @@ class Application(QObject):
         ):
             self.sfx.play_roll_hit(subtask_reward)
         self.widget.note_operation()
+        # #region agent log
+        if subtask_reward is not None and not subtask_reward.is_empty():
+            from .task_manager import _agent_dbg
+            _agent_dbg(
+                "D",
+                "main.py:_on_operation",
+                "roll then kick",
+                {"ops": self.state.total_operations, "g": subtask_reward.gold, "d": subtask_reward.diamond},
+            )
+        # #endregion
+        # 金钻只在记入目标时变；暂停中的开奖不要 kick
+        if subtask_reward is not None and not subtask_reward.is_empty():
+            self.widget.kick_currency_display()
         self._schedule_ui_flush(roll_changed=reward is not None, reward=reward)
         self._save_debounce.start()
 

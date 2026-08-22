@@ -93,5 +93,29 @@ class InvariantTests(unittest.TestCase):
         self.assertIsNotNone(validate_state_invariants(s))
 
 
+class VisibleCurrencyTests(unittest.TestCase):
+    def test_includes_leaf_pending(self):
+        s = AppState()
+        s.inventory.gold = 10.0
+        s.inventory.diamond = 1.0
+        leaf = Subtask(title="A")
+        leaf.pending_rewards.append(Reward(gold=0.5, diamond=0.2))
+        t = Task(title="父", status=TaskStatus.PAUSED, subtasks=[leaf])
+        s.tasks = [t]
+        gold, diamond = s.visible_gold_diamond()
+        self.assertAlmostEqual(gold, 10.5)
+        self.assertAlmostEqual(diamond, 1.2)
+
+    def test_skips_completed_tasks(self):
+        s = AppState()
+        s.inventory.gold = 3.0
+        leaf = Subtask(title="A")
+        leaf.pending_rewards.append(Reward(gold=9.0))
+        t = Task(title="完", status=TaskStatus.COMPLETED, subtasks=[leaf])
+        s.tasks = [t]
+        gold, _ = s.visible_gold_diamond()
+        self.assertAlmostEqual(gold, 3.0)
+
+
 if __name__ == "__main__":
     unittest.main()

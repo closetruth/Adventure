@@ -21,6 +21,8 @@ QLabel#SectionTitle {
     padding-bottom: 2px;
 }
 QLabel#GlobalSummary { font-size: 11px; font-weight: 500; }
+QLabel#GlobalCap { font-size: 11px; font-weight: 500; background: transparent; }
+QWidget#RollingAmount { background: transparent; }
 QLabel#RollHistCap { color: #a8b0c4; font-size: 10px; }
 QLabel#RollHist { color: #b8c0d4; font-size: 9px; line-height: 1.25; }
 QLabel#TaskTitle { font-size: 14px; font-weight: 700; color: #ffffff; }

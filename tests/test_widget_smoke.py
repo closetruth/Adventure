@@ -17,7 +17,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
-from src.models import AppState
+from src.models import AppState, Reward
 from src.power_monitor import PowerMonitor
 from src.task_manager import TaskManager
 from src.widget import FloatingWidget
@@ -276,6 +276,74 @@ class EaseChestClickTests(unittest.TestCase):
         self.assertEqual(host.moves, 0)
         root.close()
         root.deleteLater()
+
+
+class CurrencyCountUpWidgetTests(unittest.TestCase):
+    def test_kick_starts_timer_and_moves_display(self):
+        state = AppState()
+        manager = TaskManager(state, PowerMonitor())
+        widget = FloatingWidget(state, manager)
+        widget.show()
+        _app.processEvents()
+        start = widget._currency.gold
+        state.inventory.gold += 2.0
+        widget.kick_currency_display()
+        self.assertTrue(widget._currency_timer.isActive())
+        QTest.qWait(400)
+        self.assertGreater(widget._currency.gold, start)
+        self.assertLess(widget._currency.gold, state.inventory.gold)
+        widget.close()
+        widget.deleteLater()
+
+    def test_pending_roll_moves_global_display(self):
+        state = AppState()
+        manager = TaskManager(state, PowerMonitor())
+        widget = FloatingWidget(state, manager)
+        widget.show()
+        _app.processEvents()
+        task = manager.create("父")
+        leaf = manager.add_subtask(task.id, "叶子")
+        self.assertIsNotNone(leaf)
+        start_g, _ = state.visible_gold_diamond()
+        widget._currency.snap_to(start_g, state.inventory.diamond)
+        leaf.pending_rewards.append(Reward(gold=2.0))
+        widget.kick_currency_display()
+        self.assertTrue(widget._currency_timer.isActive())
+        QTest.qWait(400)
+        self.assertGreater(widget._currency.gold, start_g)
+        self.assertLess(widget._currency.gold, start_g + 2.0)
+        self.assertGreater(widget.gold_reel.amount(), start_g)
+        self.assertLess(widget.gold_reel.amount(), start_g + 2.0)
+        widget.close()
+        widget.deleteLater()
+
+    def test_detail_reel_snaps_and_chases_earned(self):
+        state = AppState()
+        manager = TaskManager(state, PowerMonitor())
+        widget = FloatingWidget(state, manager)
+        widget.show()
+        _app.processEvents()
+        task = manager.create("父")
+        leaf = manager.add_subtask(task.id, "叶子")
+        self.assertIsNotNone(leaf)
+        leaf.earned_gold = 1.0
+        tree = widget.goal_tree
+        tree._expanded_goal_ids.add(task.id)
+        widget.refresh()
+        _app.processEvents()
+        tree._on_tree_select(task.id, leaf.id)
+        _app.processEvents()
+        self.assertTrue(tree.goal_detail_panel.isVisible())
+        self.assertAlmostEqual(tree.detail_gold_reel.amount(), 1.0)
+        leaf.earned_gold += 2.0
+        widget.kick_currency_display()
+        self.assertTrue(widget._currency_timer.isActive())
+        QTest.qWait(400)
+        shown = tree.detail_gold_reel.amount()
+        self.assertGreater(shown, 1.0)
+        self.assertLess(shown, 3.0)
+        widget.close()
+        widget.deleteLater()
 
 
 if __name__ == "__main__":
