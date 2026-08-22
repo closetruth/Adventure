@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QObject, Qt, QRect, QTimer, Signal
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .currency_display import CurrencyDisplay
 from .goal_actions import try_complete_goal, try_delete_goal
 from .models import AppState, Reward, Subtask, Task, TaskStatus
 from .storage import save_state
@@ -44,6 +46,7 @@ from .ui_goal_tree_shared import (
     visible_subtask_structure,
     wrap_indented_subtask_row,
 )
+from .ui_odometer import RollingAmount
 from .ui_qt import (
     clear_layout,
     drain_layout_widgets,
@@ -61,6 +64,7 @@ from .ui_task_tree import (
     apply_subtask_block_ui,
 )
 from .ui_text import (
+    format_goal_ops_html,
     format_goal_root_line_html,
     format_subgoals_focus_hint_html,
     format_tree_detail_html,
@@ -103,6 +107,8 @@ class GoalTreeArea(QWidget):
         self._geometry_syncing = False
         self._dbg_logged_c: set[str] = set()
         self._dbg_stale_dot: set[str] = set()
+        self._detail_currency = CurrencyDisplay(0.0, 0.0)
+        self._detail_focus_key = ""
 
         self._build_ui()
         self.refresh()
@@ -235,6 +241,30 @@ class GoalTreeArea(QWidget):
         self.goal_detail_title.setObjectName("GoalDetailTitle")
         self.goal_detail_title.setWordWrap(True)
         detail_lay.addWidget(self.goal_detail_title)
+
+        currency_row = QHBoxLayout()
+        currency_row.setContentsMargins(0, 0, 0, 0)
+        currency_row.setSpacing(6)
+        self.goal_detail_ops = QLabel("")
+        self.goal_detail_ops.setObjectName("GoalDetailStats")
+        self.goal_detail_ops.setTextFormat(Qt.RichText)
+        gold_cap = QLabel("金")
+        gold_cap.setObjectName("GlobalCap")
+        gold_cap.setStyleSheet("color: #f5c842; font-weight: 700; font-size: 13px;")
+        self.detail_gold_reel = RollingAmount("#f5c842")
+        diam_cap = QLabel("钻")
+        diam_cap.setObjectName("GlobalCap")
+        diam_cap.setStyleSheet("color: #5ec8f2; font-weight: 700; font-size: 13px;")
+        self.detail_diamond_reel = RollingAmount("#5ec8f2")
+        currency_row.addWidget(self.goal_detail_ops)
+        currency_row.addWidget(gold_cap)
+        currency_row.addWidget(self.detail_gold_reel)
+        currency_row.addWidget(diam_cap)
+        currency_row.addWidget(self.detail_diamond_reel)
+        currency_row.addStretch(1)
+        self.goal_detail_currency_row = QWidget()
+        self.goal_detail_currency_row.setLayout(currency_row)
+        detail_lay.addWidget(self.goal_detail_currency_row)
 
         self.goal_detail_stats = QLabel("")
         self.goal_detail_stats.setObjectName("GoalDetailStats")
@@ -677,6 +707,61 @@ class GoalTreeArea(QWidget):
         if width_changed:
             self._sync_subgoals_container_geometry()
 
+    def _detail_earned_targets(self) -> tuple[float, float]:
+        task = self.manager.get(self._selected_task_id)
+        if task is None:
+            return 0.0, 0.0
+        if not self._selected_subtask_id:
+            return task.earned_totals()
+        sub = task.find_subtask(self._selected_subtask_id)
+        if sub is None:
+            return 0.0, 0.0
+        if sub.is_container():
+            return sub.rollup_earned()
+        return float(sub.earned_gold), float(sub.earned_diamond)
+
+    def _paint_detail_ops_and_reels(self) -> None:
+        task = self.manager.get(self._selected_task_id)
+        ops = 0
+        if task is not None:
+            if not self._selected_subtask_id:
+                ops = task.rollup_operations()
+            else:
+                sub = task.find_subtask(self._selected_subtask_id)
+                if sub is not None:
+                    ops = (
+                        sub.rollup_operations()
+                        if sub.is_container()
+                        else sub.operations
+                    )
+        set_label_html(self.goal_detail_ops, format_goal_ops_html(ops))
+        self.detail_gold_reel.set_amount(self._detail_currency.gold)
+        self.detail_diamond_reel.set_amount(self._detail_currency.diamond)
+
+    def kick_detail_currency(self) -> None:
+        """开奖后追详情金/钻；换选中时由详情刷新 snap。"""
+        if not self.goal_detail_panel.isVisible():
+            return
+        gold, diamond = self._detail_earned_targets()
+        self._detail_currency.step(gold, diamond, 0.0)
+        self._paint_detail_ops_and_reels()
+
+    def detail_needs_tick(self) -> bool:
+        if not self.goal_detail_panel.isVisible():
+            return False
+        gold, diamond = self._detail_earned_targets()
+        return not self._detail_currency.caught_up(gold, diamond)
+
+    def tick_detail_currency(self, dt: float) -> bool:
+        if not self.goal_detail_panel.isVisible():
+            return False
+        gold, diamond = self._detail_earned_targets()
+        still = self._detail_currency.step(gold, diamond, dt)
+        # 追赶时不要每 50ms 重写 ops HTML
+        self.detail_gold_reel.set_amount(self._detail_currency.gold)
+        self.detail_diamond_reel.set_amount(self._detail_currency.diamond)
+        return still
+
     def _refresh_goal_detail_stats_only(
         self,
         *,
@@ -691,6 +776,7 @@ class GoalTreeArea(QWidget):
         sub: Subtask | None = None
         if self._selected_subtask_id:
             sub = task.find_subtask(self._selected_subtask_id)
+        self._paint_detail_ops_and_reels()
         set_label_html(
             self.goal_detail_stats,
             format_tree_detail_html(
@@ -699,6 +785,7 @@ class GoalTreeArea(QWidget):
                 since_roll_gold=since_gold,
                 since_roll_diamond=since_diamond,
                 completion_bonus=completion_bonus_gold(self.state),
+                omit_compact_currency=True,
             ),
         )
 
@@ -799,6 +886,14 @@ class GoalTreeArea(QWidget):
 
         title_text = sub.title if sub is not None else task.title
         set_label_text(self.goal_detail_title, title_text)
+        key = f"{task.id}:{self._selected_subtask_id}"
+        gold, diamond = self._detail_earned_targets()
+        if key != self._detail_focus_key:
+            self._detail_currency.snap_to(gold, diamond)
+            self._detail_focus_key = key
+        else:
+            self._detail_currency.step(gold, diamond, 0.0)
+        self._paint_detail_ops_and_reels()
         set_label_html(
             self.goal_detail_stats,
             format_tree_detail_html(
@@ -807,6 +902,7 @@ class GoalTreeArea(QWidget):
                 since_roll_gold=since_gold,
                 since_roll_diamond=since_diamond,
                 completion_bonus=completion_bonus_gold(self.state),
+                omit_compact_currency=True,
             ),
         )
 
@@ -987,7 +1083,6 @@ class GoalTreeArea(QWidget):
             parts.append((
                 task.id,
                 task.title,
-                task.status,
                 expanded,
                 sub_part,
             ))
@@ -1002,19 +1097,7 @@ class GoalTreeArea(QWidget):
         sig = self._task_tree_structure_signature()
         rebuilt = sig != self._subgoal_structure_sig
         # #region agent log
-        active = self.state.active_task()
-        from .task_manager import _agent_dbg
-        _agent_dbg(
-            "G",
-            "ui_goal_tree_area.py:_refresh_task_tree_section",
-            "tree refresh path",
-            {
-                "rebuilt": rebuilt,
-                "active_id": None if active is None else active.id,
-                "current_subtask_id": None if active is None else active.current_subtask_id,
-                "selected_subtask_id": self._selected_subtask_id,
-            },
-        )
+        t0 = time.perf_counter()
         # #endregion
         if rebuilt:
             self._rebuild_task_tree(
@@ -1026,6 +1109,24 @@ class GoalTreeArea(QWidget):
                 since_gold=since_gold,
                 since_diamond=since_diamond,
             )
+        # #region agent log
+        ms = (time.perf_counter() - t0) * 1000
+        if rebuilt or ms >= 8.0:
+            active = self.state.active_task()
+            from .task_manager import _agent_dbg
+            _agent_dbg(
+                "G",
+                "ui_goal_tree_area.py:_refresh_task_tree_section",
+                "tree refresh path",
+                {
+                    "rebuilt": rebuilt,
+                    "ms": round(ms, 2),
+                    "active_id": None if active is None else active.id,
+                    "current_subtask_id": None if active is None else active.current_subtask_id,
+                    "selected_subtask_id": self._selected_subtask_id,
+                },
+            )
+        # #endregion
 
     def _update_task_tree_lines(
         self,

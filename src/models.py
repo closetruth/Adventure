@@ -617,6 +617,25 @@ class AppState:
                 return t
         return None
 
+    def visible_gold_diamond(self) -> tuple[float, float]:
+        """全局顶栏用：背包 + 未完成目标上尚未领取的 pending。
+
+        开奖先进待领、领奖再进背包；只看 inventory 时顶栏开奖不会动。
+        """
+        gold = float(self.inventory.gold)
+        diamond = float(self.inventory.diamond)
+        for t in self.tasks:
+            if t.status == TaskStatus.COMPLETED:
+                continue
+            p = t.pending_summary()
+            gold += p.gold
+            diamond += p.diamond
+            for leaf in t.iter_leaves():
+                lp = leaf.pending_summary()
+                gold += lp.gold
+                diamond += lp.diamond
+        return gold, diamond
+
     def to_dict(self) -> Dict:
         return {
             "inventory": self.inventory.to_dict(),

@@ -18,10 +18,9 @@ def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> N
     try:
         import json
         import os
-        import urllib.request
         payload = {
             "sessionId": "4283d4",
-            "runId": "post-fix",
+            "runId": "lag-v2",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -31,6 +30,7 @@ def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> N
         line = json.dumps(payload, ensure_ascii=False) + "\n"
         paths = [
             r"C:\Users\Adventure\Desktop\Adventure\debug-4283d4.log",
+            r"C:\Users\Adventure\Desktop\Adventure\.cursor\debug-4283d4.log",
         ]
         appdata = os.environ.get("APPDATA")
         if appdata:
@@ -41,19 +41,6 @@ def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> N
                     f.write(line)
             except Exception:
                 pass
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:7883/ingest/2ab1e1c1-f558-411b-acb8-488853e20f7c",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Debug-Session-Id": "4283d4",
-                },
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=0.4)
-        except Exception:
-            pass
     except Exception:
         pass
     # #endregion
