@@ -94,6 +94,37 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertFalse(sub.rewards_claimed, "未完成领取后仍可再完成")
         self.assertFalse(sub.done)
 
+    def test_recover_does_not_claim_in_progress_leaf(self):
+        """启动恢复不得把进行中叶子标成已领取，否则时长达标后也无法完成。"""
+        state, m = _make()
+        t = m.create("甲")
+        sub = m.add_subtask(t.id, "A", target_minutes=10)
+        sub.pending_rewards.append(Reward(gold=1.0))
+        sub.earned_gold = 1.0
+        m.recover_stuck_subtask_rewards()
+        self.assertFalse(sub.done)
+        self.assertFalse(sub.rewards_claimed)
+        self.assertEqual(len(sub.pending_rewards), 1)
+        self.assertEqual(state.inventory.gold, 0.0)
+
+    def test_recover_repairs_premature_claimed_leaf(self):
+        """未完成却已领取的叶子，启动时应恢复为可完成。"""
+        state, m = _make()
+        t = m.create("甲")
+        sub = m.add_subtask(t.id, "A", target_minutes=1)
+        sub.active_seconds = sub.target_seconds
+        sub.rewards_claimed = True
+        sub.pending_rewards.append(Reward(gold=2.0))
+        sub.earned_gold = 2.0
+        m.recover_stuck_subtask_rewards()
+        self.assertFalse(sub.rewards_claimed)
+        self.assertTrue(sub.can_finish())
+        reward = m.complete_and_claim_subtask(t.id, sub.id)
+        self.assertIsNotNone(reward)
+        self.assertEqual(reward.gold, 2.5)
+        self.assertTrue(sub.done)
+        self.assertTrue(sub.rewards_claimed)
+
     def test_decompose_moves_progress_to_legacy(self):
         state, m = _make()
         t = m.create("甲")

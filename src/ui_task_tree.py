@@ -306,6 +306,7 @@ def build_subtask_action_buttons(
         return wrap
 
     is_active = task_status == TaskStatus.ACTIVE
+    can_start = task_status in (TaskStatus.ACTIVE, TaskStatus.PAUSED)
 
     is_current = is_active and sub.id == current_id and not sub.done
 
@@ -315,7 +316,7 @@ def build_subtask_action_buttons(
                 btn = _make_action_btn("||", tooltip="暂停整个目标", parent=wrap)
                 _connect_callback(btn, callbacks.on_pause)
                 lay.addWidget(btn)
-    if is_active and sub.is_leaf() and sub.can_finish() and callbacks.on_complete is not None:
+    if can_start and sub.is_leaf() and sub.can_finish() and callbacks.on_complete is not None:
         btn = _make_action_btn("✓", tooltip="完成并领取", parent=wrap)
         _connect_callback(btn, callbacks.on_complete)
         lay.addWidget(btn)
@@ -412,7 +413,32 @@ def append_subtask_detail_actions(
             _connect_callback(btn, callbacks.on_decompose)
             layout.addWidget(btn)
 
-    if is_active and sub.can_finish() and callbacks.on_complete is not None:
+    show_complete = (
+        can_start and sub.can_finish() and callbacks.on_complete is not None
+    )
+    # #region agent log
+    try:
+        from .task_manager import _agent_dbg
+        _agent_dbg(
+            "B",
+            "ui_task_tree.py:append_subtask_detail_actions",
+            "complete button decision",
+            {
+                "sub_id": sub.id,
+                "title": sub.title,
+                "task_status": task_status.value,
+                "is_active": is_active,
+                "done": sub.done,
+                "claimed": sub.rewards_claimed,
+                "time_met": sub.time_target_met(),
+                "can_finish": sub.can_finish(),
+                "show_complete": show_complete,
+            },
+        )
+    except Exception:
+        pass
+    # #endregion
+    if show_complete:
         btn = _make_detail_action_btn(
             "完成",
             object_name="Primary",
