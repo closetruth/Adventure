@@ -12,6 +12,7 @@ env/
 build/
 dist/
 *.spec
+!Adventure.spec
 *.egg-info/
 .eggs/
 pip-wheel-metadata/
@@ -38,4 +39,10 @@ Desktop.ini
 # App data dumps (if exported locally)
 data.json
 *.broken.json
+
+# Copyrighted audio purged from history (2026-08): do not re-add to the repo
+assets/sounds/diamond/*.mp3
+assets/sounds/[Bb]*.mp3
+assets/sounds/[Tt]he Owl House Ending Theme.mp3
+assets/sounds/roll_diamond.*
 
