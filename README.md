@@ -70,6 +70,10 @@ https://github.com/user-attachments/assets/1e629403-fa90-4cbe-847e-aedf050f35ad
 
 ## 快速开始（Windows）
 
+**正式版用户**：无需安装 Python。到 [Releases](https://github.com/closetruth/Adventure/releases) 下载 `Adventure-vX.Y.Z.zip`（如 `Adventure-v1.0.0.zip`），解压后双击 `Adventure.exe` 即可运行。SmartScreen 提示时点「更多信息」→「仍要运行」（exe 未签名）。
+
+**开发者**：
+
 > **推荐 Python 3.12 或 3.13。** 若使用 **3.14**，必须用 `pygame-ce`（`requirements.txt` 已指定），不要用官方 `pygame`。
 
 1. 将项目放到任意目录（如 `Desktop\Adventure`）。
@@ -189,6 +193,8 @@ build.bat
 
 将音效放进 `assets/sounds/`（`.wav` / `.ogg` / `.mp3` / `.m4a` / `.aac` / `.mp4`）。真 mp3/wav/ogg 直接播；其它格式启动时用本机 ffmpeg 转到 `%APPDATA%\Adventure\sfx_cache\`。扩展名是 `.mp3` 但实际是 AAC/MP4 的文件也走转码。`roll_gold.*` 中金币；`diamond/` 里随机一条中钻石或缓动条到达宝箱。右键可关音效。
 
+> 仓库中不再附带钻石音效（已从历史中移除版权音频）；`diamond/` 目录留空。放入自己的无版权音效即可启用钻石开奖音。
+
 ---
 
 ## 项目结构
@@ -203,8 +209,8 @@ Adventure/
 ├── requirements.txt
 ├── assets/
 │   └── sounds/
-│       ├── roll_gold.wav    # 金币音效（固定一个文件）
-│       └── diamond/         # 钻石音效（文件夹里放多个，随机播）
+│       ├── roll_gold.mp3     # 金币音效（固定一个文件）
+│       └── diamond/          # 钻石音效（文件夹里放多个，随机播；仓库默认空）
 ├── docs/
 │   └── engagement-mechanics.md  # 成瘾/留存机制设计草案
 ├── games/
