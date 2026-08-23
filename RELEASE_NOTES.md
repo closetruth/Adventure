@@ -1,6 +1,12 @@
-## Adventure v1.0.0
+## Adventure v1.0.1
 
-Adventure 首个正式版本。无需安装 Python，解压即用。
+体积优化版：修复打包资源路径，安装包缩小约 74%（639 MB → 164 MB）。
+
+### 本版变化
+
+- **修复**：打包后音效/资源路径错误（PyInstaller 6 资源在 `_internal/`，此前会找不到资产）——已修复
+- **优化**：只打包实际用到的 Qt 模块，去除 WebEngine/QML/3D 等未用组件，安装包大幅缩小
+- 功能与 v1.0.0 一致
 
 ### 主要功能
 
@@ -12,7 +18,7 @@ Adventure 首个正式版本。无需安装 Python，解压即用。
 
 ### 下载与运行（Windows 10/11 x64）
 
-1. 下载本页下方的 `Adventure-v1.0.0.zip`（约几百 MB）并解压到任意目录
+1. 下载本页下方的 `Adventure-v1.0.1.zip` 并解压到任意目录
 2. 双击 `Adventure.exe` 即可运行，无需安装 Python
 3. 若 Windows SmartScreen 提示，点「更多信息」→「仍要运行」（exe 未签名，属正常现象）
 4. 首次启动解压内置依赖，稍慢属正常
