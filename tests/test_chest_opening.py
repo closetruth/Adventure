@@ -13,7 +13,9 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chest_opening import (
-    LETTERS_PER_CHEST,
+    DIAMOND_MEAN,
+    GOLD_MEAN,
+    LETTER_COUNT_MAX,
     MAX_UNLOCK_SLOTS,
     UNLOCK_SPANS,
     generate_open_result,
@@ -90,12 +92,16 @@ class OpenResultTests(unittest.TestCase):
     def _seed_rng(self, seed: int = 1234) -> random.Random:
         return random.Random(seed)
 
-    def test_letter_count_in_range_all_rarities(self):
-        for rarity in range(5):
-            for seed in range(20):
-                result = generate_open_result(rarity, self._seed_rng(seed))
-                lo, hi = LETTERS_PER_CHEST[rarity]
-                self.assertTrue(lo <= len(result.letters) <= hi, (rarity, seed, result))
+    def test_letter_count_geometric(self):
+        """几何分布:数量 ≥1 且 ≤ 上限;低数量频率 > 高数量(右偏)。"""
+        counts = [len(generate_open_result(0, self._seed_rng(seed)).letters) for seed in range(200)]
+        for c in counts:
+            self.assertTrue(1 <= c <= LETTER_COUNT_MAX)
+        n1 = sum(1 for c in counts if c == 1)
+        n2 = sum(1 for c in counts if c == 2)
+        n3 = sum(1 for c in counts if c >= 3)
+        self.assertGreater(n1, n2, "P(1) 应大于 P(2)")
+        self.assertGreater(n2, n3, "P(2) 应大于 P(3+)")
 
     def test_no_duplicate_letters_within_open(self):
         for rarity in range(5):
@@ -109,26 +115,30 @@ class OpenResultTests(unittest.TestCase):
         for _, rar in result.letters:
             self.assertTrue(0 <= rar <= 4)
 
-    def test_guarantee_at_least_one_uncommon(self):
-        # 保底:每箱至少 1 个字母稀有度 ≥ 1(罕见)
+    def test_currency_right_skewed(self):
+        """命中后对数正态:全 >0,均值接近设定,中位数 < 均值(右偏)。"""
         for rarity in range(5):
-            for seed in range(200):
-                result = generate_open_result(rarity, self._seed_rng(seed))
-                self.assertTrue(
-                    any(r >= 1 for _, r in result.letters),
-                    (rarity, seed, result),
-                )
+            samples = [
+                generate_open_result(rarity, self._seed_rng(seed)).gold
+                for seed in range(300)
+                if generate_open_result(rarity, self._seed_rng(seed)).gold > 0
+            ]
+            self.assertTrue(samples, f"稀有度 {rarity} 应至少有一个金币样本")
+            avg = sum(samples) / len(samples)
+            self.assertAlmostEqual(avg, GOLD_MEAN[rarity], delta=GOLD_MEAN[rarity] * 0.5)
+            med = sorted(samples)[len(samples) // 2]
+            self.assertLess(med, avg, f"稀有度 {rarity} 中位数应小于均值(右偏)")
 
-    def test_companion_currency_within_ranges(self):
-        for rarity in range(5):
-            for seed in range(100):
-                result = generate_open_result(rarity, self._seed_rng(seed))
-                self.assertGreaterEqual(result.gold, 0.0)
-                self.assertGreaterEqual(result.diamond, 0.0)
-                if result.gold > 0:
-                    self.assertLessEqual(result.gold, 30.0)
-                if result.diamond > 0:
-                    self.assertLessEqual(result.diamond, 8.0)
+    def test_currency_lognormal_tail(self):
+        """无限尾部:大量采样中出现超过 5× 均值的尾值(彩蛋)。"""
+        samples = [
+            generate_open_result(4, self._seed_rng(seed)).gold
+            for seed in range(5000)
+        ]
+        hits = [g for g in samples if g > 0]
+        self.assertGreater(len(hits), 1000, "传奇箱金币命中应充足")
+        big = [g for g in hits if g > GOLD_MEAN[4] * 5]
+        self.assertTrue(big, "5000 次采样应出现 >5× 均值的尾值")
 
     def test_deterministic_same_seed(self):
         a = generate_open_result(3, self._seed_rng(42))

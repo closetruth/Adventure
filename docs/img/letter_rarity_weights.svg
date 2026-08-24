@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="340" viewBox="0 0 560 340" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif">
+  <rect width="560" height="340" fill="#14151d"/>
+  <text x="280.0" y="26" fill="#e8eaf0" font-size="15" font-weight="700" text-anchor="middle">字母稀有度:按宝箱稀有度加权的分布</text>
+<line x1="46" y1="294" x2="514" y2="294" stroke="#555" stroke-width="1"/>
+<line x1="46" y1="46" x2="46" y2="294" stroke="#555" stroke-width="1"/>
+<line x1="46.0" y1="46" x2="46.0" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="139.6" y1="46" x2="139.6" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="233.2" y1="46" x2="233.2" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="326.8" y1="46" x2="326.8" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="420.4" y1="46" x2="420.4" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="514.0" y1="46" x2="514.0" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="46.0" x2="514" y2="46.0" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="128.7" x2="514" y2="128.7" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="211.3" x2="514" y2="211.3" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="294.0" x2="514" y2="294.0" stroke="#333" stroke-width="0.5"/>
+<polyline points="85.0,77.0 182.5,232.0 280.0,272.3 377.5,287.8 475.0,290.9" fill="none" stroke="#c8c0b4" stroke-width="2" stroke-linejoin="round"><title>普通箱</title></polyline>
+<polyline points="85.0,139.0 182.5,207.2 280.0,247.5 377.5,278.5 475.0,287.8" fill="none" stroke="#7dcc96" stroke-width="2" stroke-linejoin="round"><title>罕见箱</title></polyline>
+<polyline points="85.0,201.0 182.5,201.0 280.0,216.5 377.5,256.8 475.0,284.7" fill="none" stroke="#7aa2ff" stroke-width="2" stroke-linejoin="round"><title>稀有箱</title></polyline>
+<polyline points="85.0,247.5 182.5,216.5 280.0,201.0 377.5,225.8 475.0,269.2" fill="none" stroke="#c9a0ff" stroke-width="2" stroke-linejoin="round"><title>史诗箱</title></polyline>
+<polyline points="85.0,278.5 182.5,256.8 280.0,207.2 377.5,201.0 475.0,216.5" fill="none" stroke="#ffd56a" stroke-width="2" stroke-linejoin="round"><title>传奇箱</title></polyline>
+<text x="85.0" y="310" fill="#aeb6c8" font-size="11" text-anchor="middle">普通</text>
+<text x="182.5" y="310" fill="#aeb6c8" font-size="11" text-anchor="middle">罕见</text>
+<text x="280.0" y="310" fill="#aeb6c8" font-size="11" text-anchor="middle">稀有</text>
+<text x="377.5" y="310" fill="#aeb6c8" font-size="11" text-anchor="middle">史诗</text>
+<text x="475.0" y="310" fill="#aeb6c8" font-size="11" text-anchor="middle">传奇</text>
+<text x="46" y="60" fill="#e8eaf0" font-size="12">各宝箱开出的字母稀有度占比(加权)</text>
+<line x1="396" y1="72" x2="418" y2="72" stroke="#c8c0b4" stroke-width="3"/><text x="424" y="76" fill="#aeb6c8" font-size="11">普通箱</text>
+<line x1="396" y1="87" x2="418" y2="87" stroke="#7dcc96" stroke-width="3"/><text x="424" y="91" fill="#aeb6c8" font-size="11">罕见箱</text>
+<line x1="396" y1="102" x2="418" y2="102" stroke="#7aa2ff" stroke-width="3"/><text x="424" y="106" fill="#aeb6c8" font-size="11">稀有箱</text>
+<line x1="396" y1="117" x2="418" y2="117" stroke="#c9a0ff" stroke-width="3"/><text x="424" y="121" fill="#aeb6c8" font-size="11">史诗箱</text>
+<line x1="396" y1="132" x2="418" y2="132" stroke="#ffd56a" stroke-width="3"/><text x="424" y="136" fill="#aeb6c8" font-size="11">传奇箱</text></svg>

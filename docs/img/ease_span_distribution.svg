@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="340" viewBox="0 0 560 340" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif">
+  <rect width="560" height="340" fill="#14151d"/>
+  <text x="280.0" y="26" fill="#e8eaf0" font-size="15" font-weight="700" text-anchor="middle">视觉宝箱条周期:确定性算法(15 种跨度)</text>
+<line x1="46" y1="294" x2="514" y2="294" stroke="#555" stroke-width="1"/>
+<line x1="46" y1="46" x2="46" y2="294" stroke="#555" stroke-width="1"/>
+<line x1="46.0" y1="46" x2="46.0" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="139.6" y1="46" x2="139.6" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="233.2" y1="46" x2="233.2" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="326.8" y1="46" x2="326.8" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="420.4" y1="46" x2="420.4" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="514.0" y1="46" x2="514.0" y2="294" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="46.0" x2="514" y2="46.0" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="128.7" x2="514" y2="128.7" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="211.3" x2="514" y2="211.3" stroke="#333" stroke-width="0.5"/>
+<line x1="46" y1="294.0" x2="514" y2="294.0" stroke="#333" stroke-width="0.5"/>
+<rect x="37.4" y="117.8" width="17.2" height="176.2" fill="#7aa2ff" rx="2"><title>cycle 0: 540s</title></rect>
+<rect x="70.8" y="90.4" width="17.2" height="203.6" fill="#7aa2ff" rx="2"><title>cycle 1: 624s</title></rect>
+<rect x="104.3" y="63.0" width="17.2" height="231.0" fill="#7aa2ff" rx="2"><title>cycle 2: 708s</title></rect>
+<rect x="137.7" y="94.3" width="17.2" height="199.7" fill="#7aa2ff" rx="2"><title>cycle 3: 612s</title></rect>
+<rect x="171.1" y="66.9" width="17.2" height="227.1" fill="#7aa2ff" rx="2"><title>cycle 4: 696s</title></rect>
+<rect x="204.6" y="98.2" width="17.2" height="195.8" fill="#7aa2ff" rx="2"><title>cycle 5: 600s</title></rect>
+<rect x="238.0" y="70.8" width="17.2" height="223.2" fill="#7aa2ff" rx="2"><title>cycle 6: 684s</title></rect>
+<rect x="271.4" y="102.1" width="17.2" height="191.9" fill="#7aa2ff" rx="2"><title>cycle 7: 588s</title></rect>
+<rect x="304.8" y="74.7" width="17.2" height="219.3" fill="#7aa2ff" rx="2"><title>cycle 8: 672s</title></rect>
+<rect x="338.3" y="106.0" width="17.2" height="188.0" fill="#7aa2ff" rx="2"><title>cycle 9: 576s</title></rect>
+<rect x="371.7" y="78.6" width="17.2" height="215.4" fill="#7aa2ff" rx="2"><title>cycle 10: 660s</title></rect>
+<rect x="405.1" y="110.0" width="17.2" height="184.0" fill="#7aa2ff" rx="2"><title>cycle 11: 564s</title></rect>
+<rect x="438.6" y="82.5" width="17.2" height="211.5" fill="#7aa2ff" rx="2"><title>cycle 12: 648s</title></rect>
+<rect x="472.0" y="113.9" width="17.2" height="180.1" fill="#7aa2ff" rx="2"><title>cycle 13: 552s</title></rect>
+<rect x="505.4" y="86.5" width="17.2" height="207.5" fill="#7aa2ff" rx="2"><title>cycle 14: 636s</title></rect>
+<text x="46.0" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#0</text>
+<text x="213.1" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#5</text>
+<text x="380.3" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#10</text>
+<text x="514.0" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#14</text>
+<text x="514" y="60" fill="#ffd56a" font-size="12" text-anchor="end">跨度 540-708 秒,步长 12,15 轮走遍全部</text>
+<text x="514" y="78" fill="#8a90a0" font-size="11" text-anchor="end">span = 540 + ((cycle_id × 7) % 15) × 12</text></svg>

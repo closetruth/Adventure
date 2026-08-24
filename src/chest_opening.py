@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -26,27 +27,16 @@ LETTER_RARITY_WEIGHTS = (
     (5, 12, 28, 30, 25), # 传奇箱
 )
 
-# 伴生货币:(命中概率, 金额下限, 金额上限);概率分布:先按概率判断是否掉落,命中后均匀抽金额
-GOLD_COMPANION = (
-    (0.50, 1.0, 3.0),
-    (0.50, 2.0, 5.0),
-    (0.50, 3.0, 8.0),
-    (0.50, 5.0, 15.0),
-    (0.50, 10.0, 30.0),
-)
-DIAMOND_COMPANION = (
-    (0.20, 0.1, 0.5),
-    (0.20, 0.2, 1.0),
-    (0.20, 0.5, 2.0),
-    (0.20, 1.0, 4.0),
-    (0.20, 2.0, 8.0),
-)
+# 字母数量:几何分布 p=0.5,0-∞ 右偏(P(1)=50%, P(2)=25%, P(3)=12.5%…,均值 2)
+GEOMETRIC_P = 0.5
+LETTER_COUNT_MAX = 20  # 数量截断(21+ 概率 ~1e-6,可忽略)
 
-# 每箱开出字母数范围(按宝箱稀有度)
-LETTERS_PER_CHEST = ((3, 4), (3, 4), (3, 5), (4, 5), (4, 5))
-
-# 保底:每箱至少 1 个字母稀有度 ≥ 此值(避免整箱全普通)
-MIN_LETTER_RARITY_GUARANTEE = 1
+# 伴生货币:命中概率 + 命中后的对数正态均值(0-∞ 右偏,无上限)
+GOLD_HIT_P = 0.50
+DIAMOND_HIT_P = 0.20
+GOLD_MEAN = (2.0, 4.0, 7.0, 12.0, 18.0)      # 普通..传奇
+DIAMOND_MEAN = (0.2, 0.4, 0.9, 2.0, 4.0)
+CURRENCY_SIGMA = 0.6                          # 对数正态 σ(形状参数)
 
 
 @dataclass
@@ -125,19 +115,31 @@ def _weighted_rarity(weights: Tuple[int, int, int, int, int], rng: random.Random
     return len(weights) - 1
 
 
+def _unbounded_right_skewed(mean: float, rng: random.Random, sigma: float = CURRENCY_SIGMA) -> float:
+    """对数正态右偏，0-∞ 无上限，期望≈mean。
+
+    E[X] = e^(μ+σ²/2) = mean → μ = ln(mean) − σ²/2。
+    众数 ≈ 0.7·mean，中位数 ≈ 0.84·mean；P(X > 10·mean) ≈ 0.02%（彩蛋尾值）。
+    """
+    mu = math.log(max(mean, 1e-9)) - sigma * sigma / 2
+    return rng.lognormvariate(mu, sigma)
+
+
 def generate_open_result(rarity: int, rng: Optional[random.Random] = None) -> OpenResult:
     """按概率分布生成一次开箱结果(纯 RNG,不修改任何状态)。
 
-    - 字母 3-5 个槽,每槽独立按权重表抽稀有度
-    - 保底:至少 1 个字母稀有度 ≥ MIN_LETTER_RARITY_GUARANTEE
-    - 本轮字母不重复(26 池内)
-    - 伴生货币:金币/钻石各自独立按概率判断,命中则均匀抽金额
+    - 字母数量:几何分布 p=0.5,0-∞ 右偏(1 个最常见)
+    - 每个字母独立按权重表抽稀有度;本轮字母不重复(26 池内)
+    - 伴生货币:金币/钻石各自独立按概率判断命中,命中后对数正态右偏抽金额(0-∞)
     """
     rng = rng if rng is not None else random.Random()
     rarity = max(0, min(4, int(rarity)))
     weights = LETTER_RARITY_WEIGHTS[rarity]
 
-    count = rng.randint(*LETTERS_PER_CHEST[rarity])
+    count = 1
+    while rng.random() >= GEOMETRIC_P and count < LETTER_COUNT_MAX:
+        count += 1
+
     pool = [chr(ord("A") + i) for i in range(26)]
     rng.shuffle(pool)
 
@@ -146,22 +148,10 @@ def generate_open_result(rarity: int, rng: Optional[random.Random] = None) -> Op
         rar = _weighted_rarity(weights, rng)
         letters.append((pool[len(letters)], rar))
 
-    # 保底:至少一个字母 ≥ 保底稀有度
-    if not any(r >= MIN_LETTER_RARITY_GUARANTEE for _, r in letters):
-        idx = rng.randrange(len(letters))
-        rar = _weighted_rarity(
-            tuple(weights[r] if r >= MIN_LETTER_RARITY_GUARANTEE else 0
-                  for r in range(5)),
-            rng,
-        )
-        letters[idx] = (letters[idx][0], rar)
+    gold = round(_unbounded_right_skewed(GOLD_MEAN[rarity], rng), 2) if rng.random() < GOLD_HIT_P else 0.0
+    diamond = round(_unbounded_right_skewed(DIAMOND_MEAN[rarity], rng), 2) if rng.random() < DIAMOND_HIT_P else 0.0
 
-    gold_p, gold_min, gold_max = GOLD_COMPANION[rarity]
-    diamond_p, diamond_min, diamond_max = DIAMOND_COMPANION[rarity]
-    gold = rng.uniform(gold_min, gold_max) if rng.random() < gold_p else 0.0
-    diamond = rng.uniform(diamond_min, diamond_max) if rng.random() < diamond_p else 0.0
-
-    return OpenResult(letters=letters, gold=round(gold, 2), diamond=round(diamond, 2))
+    return OpenResult(letters=letters, gold=gold, diamond=diamond)
 
 
 def open_chest(state: AppState, chest: ChestItem, result: OpenResult) -> None:
