@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
 )
 
+from . import chest_opening
 from .game_launcher import launch_pet_arena, launch_pixel_tactics
 from .input_monitor import InputMonitor
 from .power_monitor import PowerMonitor
@@ -372,10 +373,58 @@ class Application(QObject):
             self._inv_dialog = InventoryDialog(self.state, parent=self.widget)
             self._inv_dialog.request_play_game.connect(self.play_pet_arena)
             self._inv_dialog.request_play_grid_game.connect(self.play_pixel_tactics)
+            self._inv_dialog.request_start_unlock.connect(self._on_request_start_unlock)
+            self._inv_dialog.request_open_chest.connect(self._on_request_open_chest)
         self._inv_dialog.refresh()
         self._inv_dialog.show()
         self._inv_dialog.raise_()
         self._inv_dialog.activateWindow()
+
+    def _on_request_start_unlock(self, rarity: int) -> None:
+        """点「解锁」：为该稀有度第一把未解锁的箱子启动倒计时。"""
+        state = self.state
+        for chest in state.inventory.chests:
+            if chest.rarity == rarity and chest.unlock_started_at is None:
+                if not chest_opening.start_unlock(state, chest):
+                    # 槽位已满：刷新让按钮恢复禁用态即可
+                    break
+                logger.info("宝箱开始解锁 (rarity=%d, chests=%d)", rarity, len(state.inventory.chests))
+                break
+        self._safe_save()
+        if self._inv_dialog is not None:
+            self._inv_dialog.refresh()
+
+    def _on_request_open_chest(self, rarity: int) -> None:
+        """点「开箱」：生成概率结果 → 提交状态 → 播放动画 → 刷新。"""
+        state = self.state
+        chest = next(
+            (c for c in state.inventory.chests
+             if c.rarity == rarity and chest_opening.is_ready(c)),
+            None,
+        )
+        if chest is None:
+            return
+        result = chest_opening.generate_open_result(rarity)
+        chest_opening.open_chest(state, chest, result)
+        logger.info(
+            "开箱 (rarity=%d, letters=%d, gold=%+.2f, diamond=%+.2f)",
+            rarity, len(result.letters), result.gold, result.diamond,
+        )
+        self._safe_save()  # 先提交+保存：动画中崩溃不丢奖励
+        self.widget.refresh_stats(roll_changed=False)
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+
+        from .ui_open_chest_dialog import OpenChestDialog
+        totals = {
+            (letter, rar): state.inventory.letters.get(letter, [0] * 5)[rar]
+            for letter, rar in result.letters
+        }
+        dialog = OpenChestDialog(result, rarity, parent=self.widget, letter_totals=totals)
+        dialog.exec()
+        self.widget.refresh_stats(roll_changed=False)
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
 
     def play_pet_arena(self) -> None:
         """暂停主窗交互感，启动 pygame 子进程并结算。"""

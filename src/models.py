@@ -399,19 +399,25 @@ class Task:
 
 @dataclass
 class ChestItem:
-    """未开宝箱（缓动条领取进背包；开箱兑奖后续再做）。"""
+    """未开宝箱（缓动条领取进背包；解锁倒计时后开箱兑奖）。"""
     rarity: int = 0
     obtained_at: float = field(default_factory=time.time)
+    unlock_started_at: Optional[float] = None  # 点「解锁」时的时间戳；None = 未解锁
 
     @classmethod
     def from_dict(cls, data: Dict) -> "ChestItem":
+        unlock_started = data.get("unlock_started_at")
         return cls(
             rarity=max(0, min(4, int(data.get("rarity", 0)))),
             obtained_at=float(data.get("obtained_at", time.time())),
+            unlock_started_at=float(unlock_started) if unlock_started is not None else None,
         )
 
     def to_dict(self) -> Dict:
-        return {"rarity": int(self.rarity), "obtained_at": float(self.obtained_at)}
+        d = {"rarity": int(self.rarity), "obtained_at": float(self.obtained_at)}
+        if self.unlock_started_at is not None:
+            d["unlock_started_at"] = float(self.unlock_started_at)
+        return d
 
 
 @dataclass
@@ -420,6 +426,8 @@ class Inventory:
     gold: float = 0.0
     diamond: float = 0.00
     chests: List[ChestItem] = field(default_factory=list)
+    # 字母收集：{"A": [普通, 罕见, 稀有, 史诗, 传奇 的计数]}，键为大写 A-Z
+    letters: Dict[str, List[int]] = field(default_factory=dict)
 
     def add(self, reward: Reward) -> None:
         self.gold += reward.gold
@@ -437,6 +445,30 @@ class Inventory:
             counts[r] += 1
         return (counts[0], counts[1], counts[2], counts[3], counts[4])
 
+    def add_letter(self, letter: str, rarity: int) -> None:
+        """累加一枚字母收藏（大写 A-Z，稀有度 0-4）。"""
+        letter = str(letter).upper()
+        if not ("A" <= letter <= "Z"):
+            return
+        rarity = max(0, min(4, int(rarity)))
+        counts = self.letters.get(letter)
+        if counts is None:
+            counts = [0, 0, 0, 0, 0]
+            self.letters[letter] = counts
+        counts[rarity] += 1
+
+    def letter_total(self, letter: str) -> int:
+        """某字母的全部稀有度总数。"""
+        counts = self.letters.get(str(letter).upper())
+        return sum(counts) if counts else 0
+
+    def letters_collected_count(self) -> int:
+        """已收集的 (字母, 稀有度) 组合数，上限 26×5=130。"""
+        total = 0
+        for counts in self.letters.values():
+            total += sum(1 for c in counts if c > 0)
+        return total
+
     @classmethod
     def from_dict(cls, data: Dict) -> "Inventory":
         raw_chests = data.get("chests", [])
@@ -445,10 +477,26 @@ class Inventory:
             for item in raw_chests:
                 if isinstance(item, dict):
                     chests.append(ChestItem.from_dict(item))
+        raw_letters = data.get("letters", {})
+        letters: Dict[str, List[int]] = {}
+        if isinstance(raw_letters, dict):
+            for key, val in raw_letters.items():
+                if not (isinstance(key, str) and len(key) == 1 and "A" <= key.upper() <= "Z"):
+                    continue
+                key = key.upper()
+                if isinstance(val, list):
+                    counts = [0, 0, 0, 0, 0]
+                    for i, v in enumerate(val[:5]):
+                        try:
+                            counts[i] = max(0, int(v))
+                        except (TypeError, ValueError):
+                            counts[i] = 0
+                    letters[key] = counts
         return cls(
             gold=float(data.get("gold", 0)),
             diamond=float(data.get("diamond", 0)),
             chests=chests,
+            letters=letters,
         )
 
     def to_dict(self) -> Dict:
@@ -456,6 +504,7 @@ class Inventory:
             "gold": float(self.gold),
             "diamond": float(self.diamond),
             "chests": [c.to_dict() for c in self.chests],
+            "letters": {k: [int(v) for v in vals] for k, vals in self.letters.items()},
         }
 
 
@@ -702,6 +751,17 @@ def validate_state_invariants(state: AppState) -> Optional[str]:
             return f"inventory.chests[{i}] rarity 非法"
         if not math.isfinite(chest.obtained_at):
             return f"inventory.chests[{i}] obtained_at 非法"
+        if chest.unlock_started_at is not None and not math.isfinite(chest.unlock_started_at):
+            return f"inventory.chests[{i}] unlock_started_at 非法"
+
+    for letter, counts in inv.letters.items():
+        if not (isinstance(letter, str) and len(letter) == 1 and "A" <= letter <= "Z"):
+            return f"inventory.letters 键非法: {letter!r}"
+        if not isinstance(counts, (list, tuple)) or len(counts) != 5:
+            return f"inventory.letters[{letter}] 长度非法"
+        for c in counts:
+            if not (isinstance(c, int) and c >= 0):
+                return f"inventory.letters[{letter}] 计数非法"
 
     ec = state.ease_chests
     if not isinstance(ec.claimed, tuple) or len(ec.claimed) != 3:

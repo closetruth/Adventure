@@ -1,10 +1,13 @@
-"""奖励背包对话框：展示玩家拥有的金币 / 钻石以及历史奖励统计。"""
+"""奖励背包对话框：展示玩家拥有的金币 / 钻石、宝箱解锁与字母收集。"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import time
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -13,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import chest_opening
 from .models import AppState, TaskStatus
 from .ui_roll_bar import CHEST_RARITY_COLORS, CHEST_RARITY_NAMES
 from .ui_styles import (
@@ -43,6 +47,8 @@ QLabel#HistHit {{ color: #ffd54f; font-size: 12px; font-weight: 600; }}
 QLabel#HistMiss {{ color: #8a909e; font-size: 12px; font-weight: 500; }}
 QLabel#ChestLine {{ color: #d0d4e0; font-size: 13px; font-weight: 600; }}
 QLabel#ChestEmpty {{ color: #8a909e; font-size: 12px; font-weight: 500; }}
+QLabel#LetterCell {{ font-size: 12px; font-weight: 700; }}
+QLabel#LetterEmpty {{ color: #6a7080; font-size: 10px; font-weight: 600; }}
 QScrollArea {{ border: none; background: transparent; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QPushButton {{
@@ -54,21 +60,35 @@ QPushButton {{
 QPushButton:hover {{ background-color: #3a4070; }}
 QPushButton#Primary {{ background-color: {ACCENT}; border-color: {ACCENT}; font-weight: 700; }}
 QPushButton#Primary:hover {{ background-color: {ACCENT_HOVER}; }}
+QPushButton#OpenReady {{ background-color: #3f7a4a; border-color: #4f9a5c; font-weight: 700; }}
+QPushButton#OpenReady:hover {{ background-color: #4f9a5c; }}
 """
 
 
 class InventoryDialog(QDialog):
     request_play_game = Signal()
     request_play_grid_game = Signal()
+    request_start_unlock = Signal(int)  # 稀有度
+    request_open_chest = Signal(int)    # 稀有度
 
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
         self.state = state
         self.setWindowTitle("奖励背包 - Adventure")
-        self.resize(420, 560)
+        self.resize(520, 620)
         self.setStyleSheet(INVENTORY_DIALOG_QSS)
         self._build()
         self.refresh()
+
+        # 1s 定时器刷新宝箱解锁倒计时
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._refresh_chest_lines)
+        self._timer.start()
+
+    def closeEvent(self, event) -> None:
+        self._timer.stop()
+        super().closeEvent(event)
 
     def _build(self) -> None:
         v = QVBoxLayout(self)
@@ -87,6 +107,10 @@ class InventoryDialog(QDialog):
         v.addWidget(self._section_label("未开宝箱"))
         self.chest_card = self._make_chest_card()
         v.addWidget(self.chest_card["frame"])
+
+        v.addWidget(self._section_label("字母收集"))
+        self.letters_card = self._make_letters_card()
+        v.addWidget(self.letters_card["frame"])
 
         v.addWidget(self._section_label("数据统计"))
         self.stat_card = self._make_stat_card()
@@ -177,15 +201,158 @@ class InventoryDialog(QDialog):
         self.lbl_chests_empty = QLabel("暂无未开宝箱")
         self.lbl_chests_empty.setObjectName("ChestEmpty")
         lay.addWidget(self.lbl_chests_empty)
+
         self.chest_lines: list[QLabel] = []
-        for name, color in zip(CHEST_RARITY_NAMES, CHEST_RARITY_COLORS):
+        self.chest_hint: list[QLabel] = []
+        self.chest_btns: list[QPushButton] = []
+        for i, (name, color) in enumerate(zip(CHEST_RARITY_NAMES, CHEST_RARITY_COLORS)):
+            row = QHBoxLayout()
+            row.setSpacing(8)
             lbl = QLabel()
             lbl.setObjectName("ChestLine")
             lbl.setStyleSheet(f"color: {color};")
             lbl.hide()
-            lay.addWidget(lbl)
+            row.addWidget(lbl)
+            hint = QLabel()
+            hint.setObjectName("StatLine")
+            hint.setStyleSheet("font-size: 12px;")
+            hint.hide()
+            row.addWidget(hint)
+            row.addStretch(1)
+            btn = QPushButton("解锁")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.hide()
+            # 按钮只连一个分发 handler，按当前状态发对应信号
+            btn.clicked.connect(lambda _=False, r=i: self._on_chest_row_clicked(r))
+            row.addWidget(btn)
+            lay.addLayout(row)
             self.chest_lines.append(lbl)
+            self.chest_hint.append(hint)
+            self.chest_btns.append(btn)
         return {"frame": frame}
+
+    def _on_chest_row_clicked(self, rarity: int) -> None:
+        """点击状态按钮：待解锁 → 开始解锁；就绪 → 开箱；解锁中 → 无动作。"""
+        chest = next(
+            (c for c in self.state.inventory.chests if c.rarity == rarity),
+            None,
+        )
+        if chest is None:
+            return
+        if chest.unlock_started_at is None:
+            self.request_start_unlock.emit(rarity)
+        elif chest_opening.is_ready(chest):
+            self.request_open_chest.emit(rarity)
+        # 解锁中：点击无动作，等待倒计时结束
+
+    def _refresh_chest_lines(self) -> None:
+        """宝箱行：数量 + 状态按钮/倒计时。由 refresh() 与 1s 定时器调用。"""
+        s = self.state
+        counts = s.inventory.chest_counts_by_rarity()
+        total_chests = sum(counts)
+        self.lbl_chests_empty.setVisible(total_chests == 0)
+
+        by_rarity: list[list] = [[] for _ in range(5)]
+        for c in s.inventory.chests:
+            by_rarity[c.rarity].append(c)
+
+        can_unlock = chest_opening.slots_available(s)
+
+        for i, name in enumerate(CHEST_RARITY_NAMES):
+            n = counts[i]
+            lbl = self.chest_lines[i]
+            btn = self.chest_btns[i]
+            hint = self.chest_hint[i]
+            if n == 0:
+                lbl.hide()
+                btn.hide()
+                hint.hide()
+                continue
+
+            chest = by_rarity[i][0]
+            if chest.unlock_started_at is None:
+                state_str = "待解锁"
+                btn.setText("解锁")
+                btn.setObjectName("")
+                btn.setEnabled(can_unlock)
+                btn.setToolTip("解锁槽已满" if not can_unlock else "开始解锁倒计时")
+                btn.show()
+                hint.hide()
+            elif chest_opening.is_ready(chest):
+                state_str = "点击开箱"
+                btn.setText("开箱")
+                btn.setObjectName("OpenReady")
+                btn.setEnabled(True)
+                btn.show()
+                hint.hide()
+            else:
+                rem = chest_opening.remaining_seconds(chest)
+                h, m_, sec = rem // 3600, (rem % 3600) // 60, rem % 60
+                state_str = f"解锁中 {h:02d}:{m_:02d}:{sec:02d}"
+                btn.hide()
+                hint.setText(state_str)
+                hint.show()
+
+            lbl.setText(f"{name} × {n}  ·  {state_str}")
+            lbl.show()
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def _make_letters_card(self) -> dict:
+        frame = QFrame()
+        frame.setObjectName("Card")
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(6)
+        self.lbl_letters_title = QLabel()
+        self.lbl_letters_title.setObjectName("StatLine")
+        lay.addWidget(self.lbl_letters_title)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
+        self.letter_cells: list[QLabel] = []
+        for rar in range(5):
+            # 行首稀有度名（彩色）
+            head = QLabel(CHEST_RARITY_NAMES[rar])
+            head.setObjectName("LetterCell")
+            head.setStyleSheet(f"color: {CHEST_RARITY_COLORS[rar]};")
+            grid.addWidget(head, rar, 0)
+            for i, ch in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+                cell = QLabel(ch)
+                cell.setObjectName("LetterCell")
+                cell.setAlignment(Qt.AlignCenter)
+                cell.setFixedSize(30, 30)
+                cell.setStyleSheet("border-radius: 5px;")
+                grid.addWidget(cell, rar, i + 1)
+                self.letter_cells.append(cell)
+        lay.addLayout(grid)
+        return {"frame": frame}
+
+    def _refresh_letters(self) -> None:
+        s = self.state
+        collected = s.inventory.letters_collected_count()
+        self.lbl_letters_title.setText(f"已收集 {collected}/130（字母 × 稀有度）")
+        for rar in range(5):
+            for i, ch in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+                cell = self.letter_cells[rar * 26 + i]
+                counts = s.inventory.letters.get(ch)
+                n = counts[rar] if counts else 0
+                if n > 0:
+                    # 字母 + 数量分两行,稀有度色边框
+                    cell.setText(f"{ch}\n×{n}")
+                    cell.setStyleSheet(
+                        f"background-color: #252838; color: {CHEST_RARITY_COLORS[rar]};"
+                        f"border: 1px solid {CHEST_RARITY_COLORS[rar]}; border-radius: 5px;"
+                        "font-size: 10px; font-weight: 700; line-height: 1.1;"
+                    )
+                    cell.setToolTip(f"{ch} · {CHEST_RARITY_NAMES[rar]} × {n}")
+                else:
+                    cell.setText("·")
+                    cell.setStyleSheet(
+                        "color: #6a7080; font-size: 10px; font-weight: 600;"
+                    )
+                    cell.setToolTip(f"未收集：{ch} · {CHEST_RARITY_NAMES[rar]}")
 
     def _make_stat_card(self) -> dict:
         frame = QFrame()
@@ -206,16 +373,8 @@ class InventoryDialog(QDialog):
         s = self.state
         self.gold_card["num"].setText(format_amount(s.inventory.gold))
         self.diam_card["num"].setText(format_amount(s.inventory.diamond))
-        counts = s.inventory.chest_counts_by_rarity()
-        total_chests = sum(counts)
-        self.lbl_chests_empty.setVisible(total_chests == 0)
-        for i, (name, n) in enumerate(zip(CHEST_RARITY_NAMES, counts)):
-            lbl = self.chest_lines[i]
-            if n > 0:
-                lbl.setText(f"{name} × {n}")
-                lbl.show()
-            else:
-                lbl.hide()
+        self._refresh_chest_lines()
+        self._refresh_letters()
         self.lbl_ops.setText(f"全局操作数：{s.total_operations}")
         active = [t for t in s.tasks if t.status == TaskStatus.ACTIVE]
         done = [t for t in s.tasks if t.status == TaskStatus.COMPLETED]
