@@ -16,6 +16,28 @@ class PlaceScrollTests(unittest.TestCase):
         self.assertEqual(digit, 2)
         self.assertAlmostEqual(frac, 0.0, places=6)
 
+    def test_resting_reel_aligns_to_tenths_grid(self):
+        """开箱货币是 2 位小数（如 12.37）：静止刷新必须量化到 0.1 网格，
+        十分位不能停在两数字中间。"""
+        from src.ui_odometer import RollingAmount
+        reel = RollingAmount("#f5c842")
+        reel.set_amount(12.37)
+        self.assertEqual(reel.amount(), 12.4)
+        # 整数/整格值不动
+        reel.set_amount(12.4)
+        self.assertEqual(reel.amount(), 12.4)
+        reel.set_amount(12.0)
+        self.assertEqual(reel.amount(), 12.0)
+        # 追赶动画的中间值保留小数（用于滚动）
+        reel.set_amount_scrolling(12.34)
+        self.assertEqual(reel.amount(), 12.34)
+
+    def test_tenths_mid_roll_keeps_scroll(self):
+        """追赶动画中的中间值仍应连续滚动（frac>0）。"""
+        digit, frac = place_scroll(12.34, 0.1)
+        self.assertEqual(digit, 3)
+        self.assertGreater(frac, 0.0)
+
     def test_ones_of_10_2_rests_on_full_digit(self):
         digit, frac = place_scroll(10.2, 1.0)
         self.assertEqual(digit, 0)

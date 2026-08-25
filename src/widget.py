@@ -429,6 +429,10 @@ class FloatingWidget(QWidget):
         self.gold_reel.set_amount(self._currency.gold)
         self.diamond_reel.set_amount(self._currency.diamond)
 
+    def _paint_currency_reels_scrolling(self) -> None:
+        self.gold_reel.set_amount_scrolling(self._currency.gold)
+        self.diamond_reel.set_amount_scrolling(self._currency.diamond)
+
     def kick_currency_display(self) -> None:
         """背包已变时立刻开追（不要等鼠标松开后的 UI flush）。"""
         # #region agent log
@@ -505,7 +509,7 @@ class FloatingWidget(QWidget):
         # #endregion
         still_global = self._currency.step(gold, diamond, dt)
         still_detail = self.goal_tree.tick_detail_currency(dt)
-        self._paint_currency_reels()
+        self._paint_currency_reels_scrolling()
         if not still_global and not still_detail:
             self._currency_timer.stop()
             self._currency_last_ts = None

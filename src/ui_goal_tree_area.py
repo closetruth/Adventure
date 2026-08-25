@@ -758,8 +758,8 @@ class GoalTreeArea(QWidget):
         gold, diamond = self._detail_earned_targets()
         still = self._detail_currency.step(gold, diamond, dt)
         # 追赶时不要每 50ms 重写 ops HTML
-        self.detail_gold_reel.set_amount(self._detail_currency.gold)
-        self.detail_diamond_reel.set_amount(self._detail_currency.diamond)
+        self.detail_gold_reel.set_amount_scrolling(self._detail_currency.gold)
+        self.detail_diamond_reel.set_amount_scrolling(self._detail_currency.diamond)
         return still
 
     def _refresh_goal_detail_stats_only(

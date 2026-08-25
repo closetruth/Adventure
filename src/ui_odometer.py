@@ -46,13 +46,13 @@ class RollingAmount(QWidget):
         super().__init__(parent)
         self.setObjectName("RollingAmount")
         self._amount = 0.0
+        self._rolling = False
         self._color = QColor(color)
         self._font = QFont("Microsoft YaHei UI", 11)
         self._font.setPixelSize(11)
         self._font.setWeight(QFont.Weight.Bold)
         self._digit_w = 8
-        self._digit_h = 16
-        self._dot_w = 4
+        self._digit_h = 14
         self._recompute_metrics()
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -62,7 +62,10 @@ class RollingAmount(QWidget):
         return self._amount
 
     def set_amount(self, value: float) -> None:
+        """静止刷新：对齐到 0.1 网格。开箱货币是 2 位小数（如 12.37），
+        不量化十分位会停在两数字中间；量化后静止帧永远是整格。"""
         v = max(0.0, float(value))
+        v = round(v * 10.0 + 1e-6) / 10.0
         if abs(v - self._amount) < 1e-9:
             return
         self._amount = v
@@ -81,18 +84,39 @@ class RollingAmount(QWidget):
         self._apply_fixed_size()
         self.update()
 
+    def set_amount_scrolling(self, value: float) -> None:
+        """追赶动画：保留中间值用于滚动（10.2 → 10.3 时十分位连续翻）。"""
+        v = max(0.0, float(value))
+        if abs(v - self._amount) < 1e-9:
+            return
+        self._amount = v
+        w, h = self._content_width(), self._digit_h
+        # #region agent log
+        resized = w != self.width() or h != self.height()
+        if resized:
+            from .task_manager import _agent_dbg
+            _agent_dbg(
+                "C",
+                "ui_odometer.py:set_amount_scrolling",
+                "reel resized",
+                {"w": w, "h": h, "old_w": self.width()},
+            )
+        # #endregion
+        self._apply_fixed_size()
+        self.update()
+
     def _recompute_metrics(self) -> None:
         fm = QFontMetrics(self._font)
         self._digit_w = max(fm.horizontalAdvance(str(d)) for d in range(10))
         self._digit_h = max(fm.height(), 14)
-        self._dot_w = max(fm.horizontalAdvance("."), 3)
 
     def _column_count(self) -> int:
         return integer_digit_count(self._amount)
 
     def _content_width(self) -> int:
         n = self._column_count()
-        return n * self._digit_w + self._dot_w + self._digit_w
+        # 每列等宽：整数位 + 小数点（占一格）+ 十分位
+        return (n + 2) * self._digit_w
 
     def _apply_fixed_size(self) -> None:
         w, h = self._content_width(), self._digit_h
@@ -119,9 +143,10 @@ class RollingAmount(QWidget):
             place = 10 ** (n - 1 - i)
             self._paint_digit(p, x, float(place))
             x += self._digit_w
+        # 小数点占与数字同宽的格子，在格内居中：与左右数字间距一致。
         p.setClipping(False)
-        p.drawText(QRect(x, 0, self._dot_w, self._digit_h), Qt.AlignCenter, ".")
-        x += self._dot_w
+        p.drawText(QRect(x, 0, self._digit_w, self._digit_h), Qt.AlignCenter, ".")
+        x += self._digit_w
         self._paint_digit(p, x, 0.1)
         p.end()
 
