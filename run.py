@@ -3,6 +3,7 @@
 小游戏子进程：
   python run.py --game pet <session_in.json>
   python run.py --game grid <session_in.json>
+  python run.py --game word <session_in.json>
 
 兼容旧参数：
   python run.py --game <session_in.json>  # 默认 pet
@@ -14,7 +15,7 @@ import sys
 
 def _run_game_cli() -> int:
     if len(sys.argv) < 3:
-        print("用法: run.py --game <pet|grid> <session_in.json>")
+        print("用法: run.py --game <pet|grid|word> <session_in.json>")
         return 2
 
     # 兼容旧调用：--game <session>
@@ -30,6 +31,9 @@ def _run_game_cli() -> int:
         return run_session(session_path)
     if game_name == "grid":
         from games.pixel_tactics import run_session
+        return run_session(session_path)
+    if game_name == "word":
+        from games.word_arena import run_session
         return run_session(session_path)
 
     print(f"未知游戏类型: {game_name}")

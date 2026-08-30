@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import chest_opening
-from .game_launcher import launch_pet_arena, launch_pixel_tactics
+from .game_launcher import launch_pet_arena, launch_pixel_tactics, launch_word_arena
 from .input_monitor import InputMonitor
 from .power_monitor import PowerMonitor
 from .inventory_dialog import InventoryDialog
@@ -373,6 +373,7 @@ class Application(QObject):
             self._inv_dialog = InventoryDialog(self.state, parent=self.widget)
             self._inv_dialog.request_play_game.connect(self.play_pet_arena)
             self._inv_dialog.request_play_grid_game.connect(self.play_pixel_tactics)
+            self._inv_dialog.request_play_word_game.connect(self.play_word_arena)
             self._inv_dialog.request_start_unlock.connect(self._on_request_start_unlock)
             self._inv_dialog.request_open_chest.connect(self._on_request_open_chest)
         self._inv_dialog.refresh()
@@ -451,6 +452,20 @@ class Application(QObject):
             QMessageBox.information(self.widget, "像素战场结算", msg)
         else:
             logger.warning("像素战场失败: %s", msg)
+            QMessageBox.warning(self.widget, "无法开始", msg)
+
+    def play_word_arena(self) -> None:
+        """启动计算机词汇自走棋子进程并结算。"""
+        ok, msg, _result = launch_word_arena(self.state)
+        self._safe_save()
+        self.widget.refresh()
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+        if ok:
+            logger.info("词汇自走棋结算: %s", msg.replace('\n', ' '))
+            QMessageBox.information(self.widget, "词汇自走棋结算", msg)
+        else:
+            logger.warning("词汇自走棋失败: %s", msg)
             QMessageBox.warning(self.widget, "无法开始", msg)
 
     # ---------- 退出 ----------

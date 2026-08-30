@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 ENTRY_GOLD_COST = 10
 GRID_GAME_ENTRY_GOLD_COST = 12
+WORD_GAME_ENTRY_GOLD_COST = 10
+
+# 入场费：game_key -> 金币
+_GAME_ENTRY_COST = {
+    "pet": ENTRY_GOLD_COST,
+    "grid": GRID_GAME_ENTRY_GOLD_COST,
+    "word": WORD_GAME_ENTRY_GOLD_COST,
+}
 
 
 def python_for_subprocess() -> str:
@@ -33,6 +41,7 @@ def game_script_path(game_key: str) -> Path:
     mapping = {
         "pet": "pet_arena.py",
         "grid": "pixel_tactics.py",
+        "word": "word_arena.py",
     }
     return project_root() / "games" / mapping.get(game_key, "pet_arena.py")
 
@@ -61,7 +70,9 @@ def build_game_command(game_key: str, session_in: Path) -> List[str]:
     if script.exists():
         return [py, str(script), session_str]
 
-    module = "games.pet_arena" if game_key == "pet" else "games.pixel_tactics"
+    module = {"pet": "games.pet_arena", "grid": "games.pixel_tactics"}.get(
+        game_key, "games.word_arena" if game_key == "word" else "games.pet_arena"
+    )
     return [py, "-m", module, session_str]
 
 
@@ -76,7 +87,7 @@ def can_start_game(state: AppState, game_key: str) -> Tuple[bool, str]:
             "  .venv\\Scripts\\python.exe -m pip install pygame-ce\n"
             "推荐用 Python 3.12 重建环境：install.bat",
         )
-    need = ENTRY_GOLD_COST if game_key == "pet" else GRID_GAME_ENTRY_GOLD_COST
+    need = _GAME_ENTRY_COST.get(game_key, ENTRY_GOLD_COST)
     if state.inventory.gold < need:
         return (
             False,
@@ -107,7 +118,7 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
         return False, msg, None
 
     # 扣除入场费
-    need = ENTRY_GOLD_COST if game_key == "pet" else GRID_GAME_ENTRY_GOLD_COST
+    need = _GAME_ENTRY_COST.get(game_key, ENTRY_GOLD_COST)
     before_gold = state.inventory.gold
     state.inventory.gold = max(0, state.inventory.gold - need)
     logger.info("游戏启动(%s): 扣除入场费 %d gold (%.1f→%.1f)",
@@ -155,6 +166,9 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
     state.inventory.diamond = max(0, state.inventory.diamond + result.diamond_delta)
     logger.info("游戏(%s) 结算: gold_delta=%+.1f diamond_delta=%+.1f waves=%d",
                 game_key, result.gold_delta, result.diamond_delta, result.waves_cleared)
+    for letter, rarity in getattr(result, "letters", []):
+        state.inventory.add_letter(letter, rarity)
+        logger.info("游戏(%s) 字母入账: %s 稀有度 %d", game_key, letter, rarity)
     state.settings["pet_best_round"] = max(
         int(state.settings.get("pet_best_round", 0)),
         int(result.waves_cleared),
@@ -182,3 +196,8 @@ def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
 def launch_pixel_tactics(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
     """启动像素格子战场（类金铲铲）。"""
     return _launch_game(state, "grid")
+
+
+def launch_word_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
+    """启动计算机词汇自走棋。"""
+    return _launch_game(state, "word")

@@ -1,17 +1,18 @@
 """奖励背包对话框：展示玩家拥有的金币 / 钻石、宝箱解锁与字母收集。"""
 from __future__ import annotations
 
-import time
-
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -38,7 +39,7 @@ QFrame#Card {{
     border: 1px solid #2e3040;
     border-radius: 12px;
 }}
-QLabel#Big {{ font-size: 40px; font-weight: 800; }}
+QLabel#Big {{ font-size: 28px; font-weight: 800; }}
 QLabel#Cap {{ font-size: 15px; font-weight: 700; }}
 QLabel#Section {{ color: #e0e4f0; font-size: 14px; font-weight: 700; }}
 QLabel#StatLine {{ color: #c8ccd8; font-size: 13px; font-weight: 500; }}
@@ -65,9 +66,20 @@ QPushButton#OpenReady:hover {{ background-color: #4f9a5c; }}
 """
 
 
+class _FitWidthScroll(QScrollArea):
+    """sizeHint 不跟随内部内容宽度，避免把背包窗口撑出屏幕。"""
+
+    def sizeHint(self) -> QSize:
+        return QSize(200, super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, 80)
+
+
 class InventoryDialog(QDialog):
     request_play_game = Signal()
     request_play_grid_game = Signal()
+    request_play_word_game = Signal()
     request_start_unlock = Signal(int)  # 稀有度
     request_open_chest = Signal(int)    # 稀有度
 
@@ -75,9 +87,9 @@ class InventoryDialog(QDialog):
         super().__init__(parent)
         self.state = state
         self.setWindowTitle("奖励背包 - Adventure")
-        self.resize(520, 620)
         self.setStyleSheet(INVENTORY_DIALOG_QSS)
         self._build()
+        self._apply_dialog_size()
         self.refresh()
 
         # 1s 定时器刷新宝箱解锁倒计时
@@ -90,14 +102,42 @@ class InventoryDialog(QDialog):
         self._timer.stop()
         super().closeEvent(event)
 
+    def _apply_dialog_size(self) -> None:
+        """限制在可用屏内：QDialog 默认按内容 sizeHint 撑满，会裁掉底部游戏。"""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        avail_w, avail_h = 800, 800
+        if screen is not None:
+            g = screen.availableGeometry()
+            avail_w, avail_h = g.width(), g.height()
+        w = min(560, max(420, avail_w - 48))
+        h = min(640, max(360, avail_h - 80))
+        self.setMinimumSize(min(420, w), min(360, h))
+        self.setMaximumSize(max(w, avail_w - 24), max(h, avail_h - 40))
+        self.resize(w, h)
+
     def _build(self) -> None:
-        v = QVBoxLayout(self)
-        v.setContentsMargins(16, 16, 16, 16)
-        v.setSpacing(12)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        # QDialog 默认 SetMinAndMaxSize，会按滚动区内内容把窗口撑出屏幕。
+        outer.setSizeConstraint(QLayout.SetNoConstraint)
+
+        scroll = _FitWidthScroll()
+        scroll.setObjectName("InvBodyScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        body = QWidget()
+        v = QVBoxLayout(body)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(8)
 
         v.addWidget(self._section_label("当前持有"))
         row = QHBoxLayout()
-        row.setSpacing(10)
+        row.setSpacing(8)
         self.gold_card = self._make_card("金币", "#ffd54f", "GoldCap")
         self.diam_card = self._make_card("钻石", "#7dd3fc", "DiamCap")
         row.addWidget(self.gold_card["frame"])
@@ -119,56 +159,69 @@ class InventoryDialog(QDialog):
         v.addWidget(self._section_label("开奖历史"))
         self.history_scroll = QScrollArea()
         self.history_scroll.setWidgetResizable(True)
-        self.history_scroll.setMaximumHeight(180)
+        self.history_scroll.setMaximumHeight(96)
         self.history_inner = QWidget()
         self.history_layout = QVBoxLayout(self.history_inner)
         self.history_layout.setContentsMargins(0, 0, 0, 0)
         self.history_layout.setSpacing(4)
         self.history_scroll.setWidget(self.history_inner)
         v.addWidget(self.history_scroll)
+        v.addStretch(1)
 
-        v.addWidget(self._section_label("小游戏"))
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+
+        # 小游戏钉在窗口底部，不随字母/历史一起滚出可视区。
+        footer = QWidget()
+        fv = QVBoxLayout(footer)
+        fv.setContentsMargins(14, 8, 14, 12)
+        fv.setSpacing(6)
+        fv.addWidget(self._section_label("小游戏"))
         games = QFrame()
         games.setObjectName("Card")
         gl = QVBoxLayout(games)
-        gl.setContentsMargins(14, 12, 14, 12)
+        gl.setContentsMargins(12, 8, 12, 8)
         gl.setSpacing(6)
-        gl.addWidget(QLabel("小动物竞技场（AutoPet）"))
-        sub = QLabel(
-            "AutoPet 风格：鼠标点商店/队伍操作，战斗时 5 vs 5 对位；"
-            "点「刷新/卖出/开战」。入场费 10 金币。"
+        self.btn_play = self._add_game_row(
+            gl, "小动物竞技场", "入场 10 金币", "开始",
+            self.request_play_game,
         )
-        sub.setObjectName("StatLine")
-        sub.setWordWrap(True)
-        gl.addWidget(sub)
-        self.btn_play = QPushButton("开始游戏")
-        self.btn_play.setObjectName("Primary")
-        self.btn_play.setCursor(Qt.PointingHandCursor)
-        self.btn_play.clicked.connect(self.request_play_game.emit)
-        gl.addWidget(self.btn_play, alignment=Qt.AlignRight)
-        v.addWidget(games)
-
-        grid_games = QFrame()
-        grid_games.setObjectName("Card")
-        gl2 = QVBoxLayout(grid_games)
-        gl2.setContentsMargins(14, 12, 14, 12)
-        gl2.setSpacing(6)
-        gl2.addWidget(QLabel("像素格子战场（类金铲铲）"))
-        sub2 = QLabel(
-            "像素 6x4 棋盘，先布阵后自动战斗。方向键移动光标，Z 放置，R 刷新，空格开战。"
-            "入场费 12 金币。"
+        self.btn_play_grid = self._add_game_row(
+            gl, "像素格子战场", "入场 12 金币", "开始",
+            self.request_play_grid_game,
         )
-        sub2.setObjectName("StatLine")
-        sub2.setWordWrap(True)
-        gl2.addWidget(sub2)
-        self.btn_play_grid = QPushButton("开始像素格子模式")
-        self.btn_play_grid.setObjectName("Primary")
-        self.btn_play_grid.setCursor(Qt.PointingHandCursor)
-        self.btn_play_grid.clicked.connect(self.request_play_grid_game.emit)
-        gl2.addWidget(self.btn_play_grid, alignment=Qt.AlignRight)
-        v.addWidget(grid_games)
+        self.btn_play_word = self._add_game_row(
+            gl, "词汇自走棋", "入场 10 金币", "开始",
+            self.request_play_word_game,
+        )
+        fv.addWidget(games)
+        outer.addWidget(footer)
 
-        v.addStretch(1)
+    def _add_game_row(
+        self,
+        parent: QVBoxLayout,
+        title: str,
+        cost: str,
+        button_text: str,
+        signal: Signal,
+    ) -> QPushButton:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        name = QLabel(title)
+        fee = QLabel(cost)
+        fee.setObjectName("StatLine")
+        col.addWidget(name)
+        col.addWidget(fee)
+        row.addLayout(col, 1)
+        btn = QPushButton(button_text)
+        btn.setObjectName("Primary")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(signal.emit)
+        row.addWidget(btn)
+        parent.addLayout(row)
+        return btn
 
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
@@ -179,7 +232,7 @@ class InventoryDialog(QDialog):
         frame = QFrame()
         frame.setObjectName("Card")
         lay = QVBoxLayout(frame)
-        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setContentsMargins(12, 10, 12, 10)
         big = QLabel("0")
         big.setObjectName("Big")
         big.setStyleSheet(f"color: {color};")
@@ -302,18 +355,19 @@ class InventoryDialog(QDialog):
         frame = QFrame()
         frame.setObjectName("Card")
         lay = QVBoxLayout(frame)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(6)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(4)
         self.lbl_letters_title = QLabel()
         self.lbl_letters_title.setObjectName("StatLine")
         lay.addWidget(self.lbl_letters_title)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(4)
+        grid_host = QWidget()
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(1)
+        grid.setVerticalSpacing(2)
         self.letter_cells: list[QLabel] = []
         for rar in range(5):
-            # 行首稀有度名（彩色）
             head = QLabel(CHEST_RARITY_NAMES[rar])
             head.setObjectName("LetterCell")
             head.setStyleSheet(f"color: {CHEST_RARITY_COLORS[rar]};")
@@ -322,11 +376,20 @@ class InventoryDialog(QDialog):
                 cell = QLabel(ch)
                 cell.setObjectName("LetterCell")
                 cell.setAlignment(Qt.AlignCenter)
-                cell.setFixedSize(30, 30)
-                cell.setStyleSheet("border-radius: 5px;")
+                cell.setFixedSize(16, 20)
+                cell.setStyleSheet("border-radius: 3px;")
                 grid.addWidget(cell, rar, i + 1)
                 self.letter_cells.append(cell)
-        lay.addLayout(grid)
+
+        letters_scroll = _FitWidthScroll()
+        letters_scroll.setWidgetResizable(True)
+        letters_scroll.setFrameShape(QFrame.NoFrame)
+        letters_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        letters_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        letters_scroll.setFixedHeight(5 * 20 + 2 * 4 + 18)
+        letters_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        letters_scroll.setWidget(grid_host)
+        lay.addWidget(letters_scroll)
         return {"frame": frame}
 
     def _refresh_letters(self) -> None:
@@ -343,8 +406,8 @@ class InventoryDialog(QDialog):
                     cell.setText(f"{ch}\n×{n}")
                     cell.setStyleSheet(
                         f"background-color: #252838; color: {CHEST_RARITY_COLORS[rar]};"
-                        f"border: 1px solid {CHEST_RARITY_COLORS[rar]}; border-radius: 5px;"
-                        "font-size: 10px; font-weight: 700; line-height: 1.1;"
+                        f"border: 1px solid {CHEST_RARITY_COLORS[rar]}; border-radius: 3px;"
+                        "font-size: 9px; font-weight: 700; line-height: 1.0;"
                     )
                     cell.setToolTip(f"{ch} · {CHEST_RARITY_NAMES[rar]} × {n}")
                 else:

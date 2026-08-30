@@ -4,9 +4,9 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from .storage import get_data_dir
 
@@ -62,6 +62,7 @@ class GameResult:
     gold_delta: float = 0.0
     diamond_delta: float = 0.0
     waves_cleared: int = 0
+    letters: List[Tuple[str, int]] = field(default_factory=list)
     message: str = ""
 
     @classmethod
@@ -71,11 +72,18 @@ class GameResult:
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
+            letters: List[Tuple[str, int]] = []
+            raw_letters = data.get("letters", [])
+            if isinstance(raw_letters, list):
+                for item in raw_letters:
+                    if isinstance(item, (list, tuple)) and len(item) >= 2:
+                        letters.append((str(item[0]), int(item[1])))
             return cls(
                 session_id=data.get("session_id", ""),
                 gold_delta=float(data.get("gold_delta", 0)),
                 diamond_delta=float(data.get("diamond_delta", 0)),
                 waves_cleared=int(data.get("waves_cleared", 0)),
+                letters=letters,
                 message=str(data.get("message", "")),
             )
         except (json.JSONDecodeError, OSError, KeyError, TypeError):
