@@ -455,8 +455,28 @@ class Application(QObject):
             QMessageBox.warning(self.widget, "无法开始", msg)
 
     def play_word_arena(self) -> None:
-        """启动计算机词汇自走棋子进程并结算。"""
-        ok, msg, _result = launch_word_arena(self.state)
+        """启动计算机词汇自走棋：藏起置顶窗并泵事件，避免游戏卡住。"""
+        ok, msg = False, ""
+        widget_vis = self.widget.isVisible()
+        inv_vis = self._inv_dialog is not None and self._inv_dialog.isVisible()
+        try:
+            self.monitor.stop()
+            if inv_vis:
+                self._inv_dialog.hide()
+            self.widget.hide()
+            self.qt_app.processEvents()
+            ok, msg, _result = launch_word_arena(
+                self.state, pump=self.qt_app.processEvents,
+            )
+        finally:
+            try:
+                self.monitor.start()
+            except Exception:
+                pass
+            if widget_vis:
+                self.widget.show()
+            if inv_vis and self._inv_dialog is not None:
+                self._inv_dialog.show()
         self._safe_save()
         self.widget.refresh()
         if self._inv_dialog is not None and self._inv_dialog.isVisible():

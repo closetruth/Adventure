@@ -4,8 +4,9 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from .game_protocol import GameResult, GameSession
 from .models import AppState
@@ -44,6 +45,38 @@ def game_script_path(game_key: str) -> Path:
         "word": "word_arena.py",
     }
     return project_root() / "games" / mapping.get(game_key, "pet_arena.py")
+
+
+def game_subprocess_stdio() -> dict:
+    """游戏是 GUI 子进程：stdout 绝不能接到 PIPE。
+
+    ``capture_output=True`` 会让父进程阻塞读管道，子进程一旦打印就把管道写满，
+    pygame 窗口表现为卡住。stderr 仍接 PIPE 以便启动失败时带出报错。
+    """
+    return {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+
+
+def wait_for_game_process(
+    proc: subprocess.Popen,
+    pump: Optional[Callable[[], None]] = None,
+) -> subprocess.CompletedProcess:
+    """等待游戏结束；pump 用来在等待时处理 Qt 事件，避免主程序未响应。"""
+    if pump is None:
+        _out, err = proc.communicate()
+        return subprocess.CompletedProcess(proc.args, proc.returncode, "", err or "")
+    while proc.poll() is None:
+        pump()
+        time.sleep(0.03)
+    err = ""
+    if proc.stderr is not None:
+        err = proc.stderr.read() or ""
+    return subprocess.CompletedProcess(proc.args, proc.returncode or 0, "", err)
 
 
 def pygame_available() -> bool:
@@ -112,7 +145,11 @@ def _format_proc_error(proc: subprocess.CompletedProcess[str]) -> str:
     return f"退出码 {proc.returncode}"
 
 
-def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[GameResult]]:
+def _launch_game(
+    state: AppState,
+    game_key: str,
+    pump: Optional[Callable[[], None]] = None,
+) -> Tuple[bool, str, Optional[GameResult]]:
     ok, msg = can_start_game(state, game_key)
     if not ok:
         return False, msg, None
@@ -136,25 +173,19 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
     cmd = build_game_command(game_key, in_path)
     cwd = str(project_root())
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        proc = subprocess.Popen(cmd, cwd=cwd, **game_subprocess_stdio())
+        completed = wait_for_game_process(proc, pump=pump)
     except OSError as e:
         return False, f"启动失败：{e}\n命令：{' '.join(cmd)}", None
 
-    if proc.returncode != 0 and not result_path.exists():
-        detail = _format_proc_error(proc)
-        logger.error("游戏(%s) 启动失败 (rc=%d): %s", game_key, proc.returncode, detail[:200])
+    if completed.returncode != 0 and not result_path.exists():
+        detail = _format_proc_error(completed)
+        logger.error("游戏(%s) 启动失败 (rc=%d): %s", game_key, completed.returncode, detail[:200])
         return False, f"游戏未能正常启动。\n{detail}\n\n命令：{' '.join(cmd)}", None
 
     result = GameResult.read(result_path)
     if result is None:
-        detail = _format_proc_error(proc) if proc.returncode != 0 else ""
+        detail = _format_proc_error(completed) if completed.returncode != 0 else ""
         extra = f"\n{detail}" if detail else ""
         logger.warning("游戏(%s) 未能读取结算文件", game_key)
         return False, f"未读取到游戏结算文件。{extra}", None
@@ -188,16 +219,25 @@ def _launch_game(state: AppState, game_key: str) -> Tuple[bool, str, Optional[Ga
     return True, tip, result
 
 
-def launch_pet_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
+def launch_pet_arena(
+    state: AppState,
+    pump: Optional[Callable[[], None]] = None,
+) -> Tuple[bool, str, Optional[GameResult]]:
     """启动 AutoPet 竞技场。"""
-    return _launch_game(state, "pet")
+    return _launch_game(state, "pet", pump=pump)
 
 
-def launch_pixel_tactics(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
+def launch_pixel_tactics(
+    state: AppState,
+    pump: Optional[Callable[[], None]] = None,
+) -> Tuple[bool, str, Optional[GameResult]]:
     """启动像素格子战场（类金铲铲）。"""
-    return _launch_game(state, "grid")
+    return _launch_game(state, "grid", pump=pump)
 
 
-def launch_word_arena(state: AppState) -> Tuple[bool, str, Optional[GameResult]]:
+def launch_word_arena(
+    state: AppState,
+    pump: Optional[Callable[[], None]] = None,
+) -> Tuple[bool, str, Optional[GameResult]]:
     """启动计算机词汇自走棋。"""
-    return _launch_game(state, "word")
+    return _launch_game(state, "word", pump=pump)

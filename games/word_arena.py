@@ -5,7 +5,7 @@
 自动回合制战斗（左列先手打右列），赢拿奖杯、输掉生命，集满 10 奖杯通关。
 
 操作：
-  鼠标点选商店卡片/队伍/按钮；空格=开始/开战/继续；ESC 退出并结算
+  全部用鼠标点击（商店/队伍/开战/继续）；ESC 退出并结算
   dummy 环境（SDL_VIDEODRIVER=dummy）自动模拟完整一局，便于无头验证
 """
 from __future__ import annotations
@@ -271,6 +271,8 @@ class WordArenaGame:
 
         # 输入
         self._click_zones: List[Tuple[pygame.Rect, str, tuple]] = []
+        self._swap_pick: Optional[int] = None
+        self.over_wait = 0.0
         self.auto_dummy = "SDL_VIDEODRIVER" in __import__("os").environ and \
             __import__("os").environ.get("SDL_VIDEODRIVER") == "dummy"
         self.dummy_t = 0.0
@@ -308,26 +310,36 @@ class WordArenaGame:
                 self._dummy_step(dt)
             self._draw()
             if self.phase == "over" and not self.auto_dummy:
-                pygame.time.wait(1100)
-                running = False
+                self.over_wait += dt
+                if self.over_wait >= 0.4:
+                    running = False
             elif self.phase == "over" and self.auto_dummy:
                 running = False
         self._write_result()
 
     def _on_space(self) -> None:
         if self.phase == "title":
-            if not self.entry_paid:
-                self._pay_entry()
-                return
-            self._start_run()
+            self._click_start_game()
+        elif self.phase == "shop":
+            self._click_start_battle()
         elif self.phase == "battle_res":
             self._next_round_or_end()
 
     def _on_mouse_down(self, pos) -> None:
-        for rect, action, args in self._click_zones:
+        # 后注册的小按钮（冻、卖）优先于大卡片
+        for rect, action, args in reversed(self._click_zones):
             if rect.collidepoint(pos):
                 getattr(self, f"_click_{action}")(*args)
                 return
+
+    def _click_start_game(self) -> None:
+        if self.phase != "title":
+            return
+        if not self.entry_paid:
+            self._pay_entry()
+            if not self.entry_paid:
+                return
+        self._start_run()
 
     # ---------- 阶段流转 ----------
     def _pay_entry(self) -> None:
@@ -336,7 +348,7 @@ class WordArenaGame:
             return
         self.gold -= ENTRY_FEE
         self.entry_paid = True
-        self._set_log(f"已支付入场费 {ENTRY_FEE} 金币，按空格开始")
+        self._set_log(f"已支付入场费 {ENTRY_FEE} 金币")
 
     def _start_run(self) -> None:
         self.phase = "shop"
@@ -345,7 +357,7 @@ class WordArenaGame:
         self.gold += ROUND_GOLD
         self._roll_shop(initial=True)
         self._build_enemy_team()
-        self._set_log("第 1 回合：买词汇和食物，然后按空格开战")
+        self._set_log("第 1 回合：点击商店买棋子，点「开战」")
 
     def _next_round_or_end(self) -> None:
         if self.trophies >= WIN_TROPHIES:
@@ -475,8 +487,15 @@ class WordArenaGame:
     def _click_team_slot(self, idx: int) -> None:
         if self.phase != "shop":
             return
+        if self._swap_pick is not None and self._swap_pick != idx:
+            self.team[self._swap_pick], self.team[idx] = self.team[idx], self.team[self._swap_pick]
+            self._swap_pick = None
+            self.selected_slot = idx
+            self._set_log("已交换两格位置")
+            return
+        self._swap_pick = idx
         self.selected_slot = idx
-        self._set_log(f"选中队伍槽位 {idx + 1}")
+        self._set_log(f"选中槽位 {idx + 1}，再点另一格可换位")
 
     def _click_refresh(self) -> None:
         if self.phase != "shop":
@@ -873,6 +892,7 @@ class WordArenaGame:
 
     # ---------- 绘制 ----------
     def _draw(self) -> None:
+        self._click_zones = []
         self.screen.fill(COL_BG)
         self._draw_header()
         if self.phase == "title":
@@ -901,21 +921,26 @@ class WordArenaGame:
         lines = [
             ("计算机词汇自走棋", self.font_lg2, COL_TEXT),
             ("用英语计算机词汇当棋子，边玩边学", self.font_sm, COL_MUTED),
-            ("商店买词汇/食物 → 三合升星 → 自动战斗 → 集满 10 奖杯通关", self.font_sm, COL_MUTED),
+            ("点击商店买词汇/食物 → 三合升星 → 自动战斗 → 10 奖杯通关", self.font_sm, COL_MUTED),
             ("", self.font_sm, COL_MUTED),
             (f"入场费 {ENTRY_FEE} 金币", self.font_sm, COL_GOLD),
-            ("按空格 开始 / ESC 退出", self.font_lg, COL_TEXT),
         ]
-        y = 140
+        y = 88
         for text, f, c in lines:
             s = f.render(text, True, c)
             self.screen.blit(s, (W // 2 - s.get_width() // 2, y))
-            y += s.get_height() + 16
-        # 词库预览
+            y += s.get_height() + 12
+        btn = pygame.Rect(W // 2 - 130, y + 4, 260, 52)
+        pygame.draw.rect(self.screen, COL_ACCENT, btn, border_radius=12)
+        lab = self.font_lg.render("开始", True, COL_TEXT)
+        self.screen.blit(lab, (btn.centerx - lab.get_width() // 2, btn.centery - 16))
+        self._register_click(btn, "start_game")
+        hint = self.font_sm.render("ESC 退出并结算", True, COL_MUTED)
+        self.screen.blit(hint, (W // 2 - hint.get_width() // 2, btn.bottom + 10))
         self._draw_word_grid()
 
     def _draw_word_grid(self) -> None:
-        x0, y0 = 60, 340
+        x0, y0 = 60, 360
         for i, w in enumerate(WORDS[:12]):
             x = x0 + (i % 4) * 250
             y = y0 + (i // 4) * 110
@@ -929,8 +954,9 @@ class WordArenaGame:
         # 左：商店卡片区
         pygame.draw.rect(self.screen, COL_PANEL, (16, 70, 420, 430), border_radius=12)
         self.screen.blit(self.font.render("商店", True, COL_TEXT), (30, 86))
-        # 刷新按钮
-        self._register_click(pygame.Rect(330, 82, 90, 32), "refresh")
+        shop_live = self.phase == "shop"
+        if shop_live:
+            self._register_click(pygame.Rect(330, 82, 90, 32), "refresh")
         pygame.draw.rect(self.screen, COL_CARD, (330, 82, 90, 32), border_radius=8)
         self.screen.blit(self.font_sm.render("刷新 -1", True, COL_GOLD), (344, 90))
         for i, slot in enumerate(self.shop):
@@ -941,8 +967,9 @@ class WordArenaGame:
             if slot.spec is None:
                 self.screen.blit(self.font_sm.render("已售出", True, COL_MUTED), (x + 20, y + 30))
                 continue
-            self._register_click(pygame.Rect(x, y, 390, 105), "buy_shop", (i,))
-            self._register_click(pygame.Rect(x + 350, y + 8, 34, 24), "freeze", (i,))
+            if shop_live:
+                self._register_click(pygame.Rect(x, y, 390, 105), "buy_shop", i)
+                self._register_click(pygame.Rect(x + 350, y + 8, 34, 24), "freeze", i)
             freeze_c = COL_ACCENT if self.frozen[i] else COL_MUTED
             self.screen.blit(self.font_sm.render("冻", True, freeze_c), (x + 360, y + 12))
             if slot.kind == "word":
@@ -962,14 +989,15 @@ class WordArenaGame:
         # 队伍
         pygame.draw.rect(self.screen, COL_PANEL, (16, 520, 420, 165), border_radius=12)
         self.screen.blit(self.font.render("我的队伍", True, COL_TEXT), (30, 536))
-        self.screen.blit(self.font_sm.render("（点击选择喂食目标）", True, COL_MUTED), (130, 542))
+        self.screen.blit(self.font_sm.render("（点选喂食 / 再点另一格换位）", True, COL_MUTED), (130, 542))
         for i, u in enumerate(self.team):
             x, y = 30 + i * 85, 572
             rr = pygame.Rect(x, y, 76, 84)
             if self.selected_slot == i and self.phase == "shop":
                 pygame.draw.rect(self.screen, COL_ACCENT, rr, 2, border_radius=10)
-            self._register_click(rr, "team_slot", (i,))
-            self._register_click(pygame.Rect(x, y + 92, 76, 20), "sell", (i,))
+            if shop_live:
+                self._register_click(rr, "team_slot", i)
+                self._register_click(pygame.Rect(x, y + 92, 76, 20), "sell", i)
             if u is None:
                 pygame.draw.rect(self.screen, COL_CARD, rr, border_radius=10)
                 self.screen.blit(self.font_sm.render("空", True, COL_MUTED), (x + 26, y + 30))
@@ -985,7 +1013,7 @@ class WordArenaGame:
         if self.phase == "shop":
             self._register_click(pygame.Rect(560, 520, 200, 50), "start_battle")
             pygame.draw.rect(self.screen, COL_ACCENT, (560, 520, 200, 50), border_radius=12)
-            self.screen.blit(self.font.render("开战（空格）", True, COL_TEXT), (590, 532))
+            self.screen.blit(self.font.render("开战", True, COL_TEXT), (620, 532))
             # 敌方预览
             pygame.draw.rect(self.screen, COL_PANEL, (520, 70, 560, 430), border_radius=12)
             self.screen.blit(self.font.render("敌方（预览）", True, COL_ENEMY), (540, 86))
@@ -1005,7 +1033,7 @@ class WordArenaGame:
             if self.phase == "battle_res":
                 self._register_click(pygame.Rect(820, 580, 240, 52), "next_round")
                 pygame.draw.rect(self.screen, COL_ACCENT, (820, 580, 240, 52), border_radius=12)
-                self.screen.blit(self.font_sm.render(f"继续（空格） {self.battle_result_msg}", True, COL_TEXT), (836, 594))
+                self.screen.blit(self.font_sm.render(f"继续  {self.battle_result_msg}", True, COL_TEXT), (836, 594))
 
     def _click_next_round(self) -> None:
         if self.phase == "battle_res":
@@ -1047,7 +1075,7 @@ class WordArenaGame:
             if f["t"] > 0.9:
                 continue
             alpha = int(255 * (1 - f["t"] / 0.9))
-            s = self.font_sm.render(f["text"], True, (255, 255, 255))
+            s = self.font_sm.render(f["text"], True, (255, 255, 255)).copy()
             s.set_alpha(alpha)
             self.screen.blit(s, (int(f["x"]), int(f["y"]) - int(f["t"] * 30)))
 

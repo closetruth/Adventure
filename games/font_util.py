@@ -36,17 +36,42 @@ def _load_from_known_files(size: int, bold: bool) -> pygame.font.Font | None:
     return None
 
 
-def load_font(size: int, bold: bool = False) -> pygame.font.Font:
-    font = _load_from_known_files(size, bold)
-    if font is not None:
-        return font
+class CachedFont:
+    """缓存 ``render`` 结果。汉字字体每帧重绘是小游戏卡顿的主因。"""
 
-    names = ("microsoftyaheiui", "microsoftyahei", "simhei", "arial")
-    try:
-        for name in names:
-            path = pygame.font.match_font(name, bold=bold)
-            if path:
-                return pygame.font.Font(path, size)
-        return pygame.font.SysFont(None, size, bold=bold)
-    except TypeError:
-        return pygame.font.Font(None, size)
+    def __init__(self, font: pygame.font.Font):
+        self._font = font
+        self._cache: dict[tuple, pygame.Surface] = {}
+
+    def render(self, text, antialias, color, *args, **kwargs):
+        if hasattr(color, "r"):
+            key_c = (color.r, color.g, color.b, getattr(color, "a", 255))
+        else:
+            key_c = tuple(color)
+        key = (str(text), bool(antialias), key_c)
+        surf = self._cache.get(key)
+        if surf is None:
+            surf = self._font.render(text, antialias, color, *args, **kwargs)
+            if len(self._cache) < 1024:
+                self._cache[key] = surf
+        return surf
+
+    def __getattr__(self, name):
+        return getattr(self._font, name)
+
+
+def load_font(size: int, bold: bool = False) -> CachedFont:
+    font = _load_from_known_files(size, bold)
+    if font is None:
+        names = ("microsoftyaheiui", "microsoftyahei", "simhei", "arial")
+        try:
+            found = None
+            for name in names:
+                path = pygame.font.match_font(name, bold=bold)
+                if path:
+                    found = pygame.font.Font(path, size)
+                    break
+            font = found or pygame.font.SysFont(None, size, bold=bold)
+        except TypeError:
+            font = pygame.font.Font(None, size)
+    return CachedFont(font)
