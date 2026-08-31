@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import math
-import random
 from pathlib import Path
 
 OUT_DIR = Path(__file__).resolve().parent / "img"
@@ -202,13 +201,9 @@ def chart_crit_mult() -> str:
 
 # ---------- 6. 开奖周期:均匀分布对比 ----------
 def chart_roll_span_uniform() -> str:
-    x_lo, x_hi, y_lo, y_hi = 0.0, 800.0, 0.0, 1.3
+    x_lo, x_hi, y_lo, y_hi = 0.0, 400.0, 0.0, 1.3
     g: list[str] = []
     _axis(g, x_lo, x_hi, y_lo, y_hi)
-    # 开奖周期 6-14 操作(画在 0-20 刻度,放大显示)
-    for v, label, color in ((10, "开奖周期 6-14 操作(均匀)", "#ffd54f"), (624, "缓动条周期 540-708 秒(确定性算法)", "#7aa2ff")):
-        pass
-    # 用两条横条表示均匀区间
     y1 = _y(0.6, y_lo, y_hi)
     g.append(
         f'<rect x="{_x(6, x_lo, x_hi):.1f}" y="{y1:.1f}" '
@@ -218,11 +213,11 @@ def chart_roll_span_uniform() -> str:
              f'text-anchor="middle" font-weight="700">6-14 操作</text>')
     y2 = _y(0.2, y_lo, y_hi)
     g.append(
-        f'<rect x="{_x(540, x_lo, x_hi):.1f}" y="{y2:.1f}" '
-        f'width="{_x(708, x_lo, x_hi) - _x(540, x_lo, x_hi):.1f}" height="26" fill="#7aa2ff" rx="3"/>'
+        f'<rect x="{_x(258, x_lo, x_hi):.1f}" y="{y2:.1f}" '
+        f'width="{_x(342, x_lo, x_hi) - _x(258, x_lo, x_hi):.1f}" height="26" fill="#7aa2ff" rx="3"/>'
     )
-    g.append(f'<text x="{_x(624, x_lo, x_hi):.1f}" y="{y2 + 17:.1f}" fill="#e8eaf0" font-size="11" '
-             f'text-anchor="middle">540-708 秒</text>')
+    g.append(f'<text x="{_x(300, x_lo, x_hi):.1f}" y="{y2 + 17:.1f}" fill="#e8eaf0" font-size="11" '
+             f'text-anchor="middle">258-342 秒</text>')
     g.append(f'<text x="{W - M}" y="{y1 + 4}" fill="#ffd54f" font-size="12" text-anchor="end">开奖周期(均匀)</text>')
     g.append(f'<text x="{W - M}" y="{y2 + 4}" fill="#7aa2ff" font-size="12" text-anchor="end">缓动条周期(确定性)</text>')
     return _svg("开奖周期与视觉宝箱条周期对比", "\n".join(g))
@@ -230,8 +225,8 @@ def chart_roll_span_uniform() -> str:
 
 # ---------- 7. 缓动条周期跨度:确定性算法 ----------
 def chart_ease_span_distribution() -> str:
-    spans = [540 + ((cid * 7) % 15) * 12 for cid in range(15)]
-    x_lo, x_hi, y_lo, y_hi = 0, 14, 0, 760
+    spans = [258 + ((cid * 7) % 15) * 6 for cid in range(15)]
+    x_lo, x_hi, y_lo, y_hi = 0, 14, 0, 400
     g: list[str] = []
     _axis(g, x_lo, x_hi, y_lo, y_hi)
     bw = (W - 2 * M) / 15 * 0.55
@@ -249,97 +244,69 @@ def chart_ease_span_distribution() -> str:
         )
     g.append(
         f'<text x="{W - M}" y="{M + 14}" fill="#ffd56a" font-size="12" text-anchor="end">'
-        "跨度 540-708 秒,步长 12,15 轮走遍全部</text>"
+        "跨度 258-342 秒,步长 6,15 轮走遍全部</text>"
     )
     g.append(
         f'<text x="{W - M}" y="{M + 32}" fill="#8a90a0" font-size="11" text-anchor="end">'
-        "span = 540 + ((cycle_id × 7) % 15) × 12</text>"
+        "span = 258 + ((cycle_id × 7) % 15) × 6</text>"
     )
     return _svg("视觉宝箱条周期:确定性算法(15 种跨度)", "\n".join(g))
 
 
-# ---------- 8. 缓动条检查点:种子化均匀分布 ----------
+# ---------- 8. 缓动条检查点:终点一箱 ----------
 def chart_ease_checkpoints() -> str:
-    # 示例周期(span=600, cycle=3)的种子化检查点
-    span, cid = 600, 3
-    rng = random.Random(f"ease:{span}:{cid}")
-    p1 = rng.uniform(0.18, 0.32)
-    p2 = rng.uniform(max(0.52, p1 + 0.22), 0.78)
-    p3 = 1.0
     g: list[str] = []
-    # 进度条(0-1 横条)
     bar_y = M + 60
     g.append(
         f'<rect x="{M}" y="{bar_y}" width="{W - 2*M}" height="18" fill="#252838" rx="9"/>'
     )
-    # 区间阴影:p1 ∈ [0.18,0.32]
+    fill_w = W - 2 * M
     g.append(
-        f'<rect x="{_x(0.18, 0, 1):.1f}" y="{bar_y + 2}" '
-        f'width="{_x(0.32, 0, 1) - _x(0.18, 0, 1):.1f}" height="14" fill="#7dcc96" opacity="0.25"/>'
+        f'<rect x="{M}" y="{bar_y}" width="{fill_w:.1f}" height="18" fill="#7aa2ff" rx="9"/>'
     )
-    # p2 ∈ [0.52,0.78]
+    x = _x(1.0, 0, 1)
     g.append(
-        f'<rect x="{_x(0.52, 0, 1):.1f}" y="{bar_y + 2}" '
-        f'width="{_x(0.78, 0, 1) - _x(0.52, 0, 1):.1f}" height="14" fill="#7aa2ff" opacity="0.25"/>'
+        f'<line x1="{x:.1f}" y1="{bar_y - 12}" x2="{x:.1f}" y2="{bar_y + 30}" '
+        f'stroke="#ffd56a" stroke-width="3"/>'
     )
-    # 三个检查点
-    for px, color, name in ((p1, "#7dcc96", f"检查点1 {p1:.2f}"), (p2, "#7aa2ff", f"检查点2 {p2:.2f}"), (p3, "#ffd56a", "终点 1.00")):
-        x = _x(px, 0, 1)
-        g.append(
-            f'<line x1="{x:.1f}" y1="{bar_y - 12}" x2="{x:.1f}" y2="{bar_y + 30}" '
-            f'stroke="{color}" stroke-width="3"/>'
-        )
-        g.append(
-            f'<text x="{x:.1f}" y="{bar_y + 48}" fill="{color}" font-size="11" '
-            f'text-anchor="middle">{name}</text>'
-        )
-    for i, t in enumerate(["p1 ∈ [0.18, 0.32]", "p2 ∈ [max(0.52, p1+0.22), 0.78]", "p3 = 1.0(固定)"]):
-        g.append(
-            f'<text x="{W - M}" y="{bar_y + 100 + i*18}" fill="#8a90a0" font-size="11" '
-            f'text-anchor="end">{t}</text>'
-        )
     g.append(
-        f'<text x="{W - M}" y="{bar_y + 160}" fill="#8a90a0" font-size="11" text-anchor="end">'
-        "seed = ease:{span}:{cycle_id},同周期同布局</text>"
+        f'<text x="{x:.1f}" y="{bar_y + 48}" fill="#ffd56a" font-size="11" '
+        f'text-anchor="end">终点箱 1.00</text>'
     )
-    return _svg("缓动条检查点:种子化均匀(示例周期 600s)", "\n".join(g))
+    g.append(
+        f'<text x="{W - M}" y="{bar_y + 100}" fill="#8a90a0" font-size="11" '
+        f'text-anchor="end">每轮一只箱子,固定在 100%</text>'
+    )
+    return _svg("缓动条检查点:终点一箱", "\n".join(g))
 
 
-# ---------- 9. 缓动条三箱稀有度权重 ----------
+# ---------- 9. 缓动条单箱稀有度权重 ----------
 def chart_ease_rarity_weights() -> str:
-    weights = (
-        (50, 28, 14, 6, 2),
-        (35, 28, 20, 12, 5),
-        (22, 25, 25, 18, 10),
-    )
+    weights = (22, 25, 25, 18, 10)
     names = ("普通", "罕见", "稀有", "史诗", "传奇")
     colors = ("#c8c0b4", "#7dcc96", "#7aa2ff", "#c9a0ff", "#ffd56a")
-    box_names = ("第 1 箱", "第 2 箱", "第 3 箱")
-    box_colors = ("#7dd3fc", "#c9a0ff", "#ffd56a")
-    x_lo, x_hi, y_lo, y_hi = -0.4, 4.4, 0.0, 55.0
+    total = sum(weights)
+    x_lo, x_hi, y_lo, y_hi = -0.4, 4.4, 0.0, 40.0
     g: list[str] = []
     _axis(g, x_lo, x_hi, y_lo, y_hi)
-    for r in range(3):
-        pts = []
-        for c in range(5):
-            pr = weights[r][c] / sum(weights[r]) * 100
-            pts.append(f"{_x(c, x_lo, x_hi):.1f},{_y(pr, y_lo, y_hi):.1f}")
+    bw = (W - 2 * M) / 5 * 0.45
+    for c, (w, name, color) in enumerate(zip(weights, names, colors)):
+        pr = w / total * 100
+        x0 = _x(c, x_lo, x_hi) - bw / 2
+        y0 = _y(pr, y_lo, y_hi)
         g.append(
-            f'<polyline points="{" ".join(pts)}" fill="none" stroke="{box_colors[r]}" '
-            f'stroke-width="2" stroke-linejoin="round"><title>{box_names[r]}</title></polyline>'
+            f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{H - M - y0:.1f}" '
+            f'fill="{color}" rx="2"><title>{name} {pr:.0f}%</title></rect>'
         )
-    for c in range(5):
         g.append(
             f'<text x="{_x(c, x_lo, x_hi):.1f}" y="{H - M + 16}" fill="#aeb6c8" '
-            f'font-size="11" text-anchor="middle">{names[c]}</text>'
+            f'font-size="11" text-anchor="middle">{name}</text>'
         )
-    for r in range(3):
-        g.append(
-            f'<line x1="{W - M - 100}" y1="{M + 24 + r*15}" x2="{W - M - 82}" y2="{M + 24 + r*15}" '
-            f'stroke="{box_colors[r]}" stroke-width="3"/>'
-            f'<text x="{W - M - 76}" y="{M + 28 + r*15}" fill="#aeb6c8" font-size="11">{box_names[r]}</text>'
-        )
-    return _svg("缓动条三箱稀有度权重:越靠后高档略多", "\n".join(g))
+    g.append(
+        f'<text x="{W - M}" y="{M + 14}" fill="#ffd56a" font-size="12" text-anchor="end">'
+        "权重 22 / 25 / 25 / 18 / 10</text>"
+    )
+    return _svg("缓动条单箱稀有度权重", "\n".join(g))
 
 
 CHARTS = {

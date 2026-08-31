@@ -510,44 +510,49 @@ class Inventory:
 
 @dataclass
 class EaseChestsState:
-    """当前缓动条周期内三个宝箱的领取状态（防重启重复领）。"""
+    """当前缓动条周期内终点宝箱的领取状态（防重启重复领）。"""
     cycle_id: int = 0
-    claimed: Tuple[bool, bool, bool] = (False, False, False)
-    holding: bool = False  # 满格停住、等点第三箱
+    claimed: Tuple[bool, ...] = (False,)
+    holding: bool = False  # 满格停住、等点本轮箱子
 
     @classmethod
     def from_dict(cls, data: Dict) -> "EaseChestsState":
-        raw = data.get("claimed", [False, False, False])
+        raw = data.get("claimed", [False])
         if not isinstance(raw, (list, tuple)):
-            raw = [False, False, False]
-        claimed = tuple(bool(raw[i]) if i < len(raw) else False for i in range(3))
+            raw = [False]
+        if len(raw) >= 3:
+            claimed = (bool(raw[2]),)
+        elif len(raw) >= 1:
+            claimed = (bool(raw[0]),)
+        else:
+            claimed = (False,)
         return cls(
             cycle_id=int(data.get("cycle_id", 0)),
-            claimed=(claimed[0], claimed[1], claimed[2]),
+            claimed=claimed,
             holding=bool(data.get("holding", False)),
         )
 
     def to_dict(self) -> Dict:
         return {
             "cycle_id": int(self.cycle_id),
-            "claimed": [bool(self.claimed[0]), bool(self.claimed[1]), bool(self.claimed[2])],
+            "claimed": [bool(self.claimed[0]) if self.claimed else False],
             "holding": bool(self.holding),
         }
 
     def reset_for_cycle(self, cycle_id: int) -> None:
         self.cycle_id = int(cycle_id)
-        self.claimed = (False, False, False)
+        self.claimed = (False,)
         self.holding = False
 
     def mark_claimed(self, index: int) -> bool:
         """标记领取；已领过返回 False。"""
-        if index < 0 or index > 2:
+        if index < 0 or index >= len(self.claimed):
             return False
         if self.claimed[index]:
             return False
         claimed = list(self.claimed)
         claimed[index] = True
-        self.claimed = (claimed[0], claimed[1], claimed[2])
+        self.claimed = tuple(claimed)
         return True
 
 
@@ -764,7 +769,7 @@ def validate_state_invariants(state: AppState) -> Optional[str]:
                 return f"inventory.letters[{letter}] 计数非法"
 
     ec = state.ease_chests
-    if not isinstance(ec.claimed, tuple) or len(ec.claimed) != 3:
+    if not isinstance(ec.claimed, tuple) or len(ec.claimed) != 1:
         return "ease_chests.claimed 非法"
 
     active_count = 0

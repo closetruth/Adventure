@@ -1,16 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="560" height="340" viewBox="0 0 560 340" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif">
   <rect width="560" height="340" fill="#14151d"/>
-  <text x="280.0" y="26" fill="#e8eaf0" font-size="15" font-weight="700" text-anchor="middle">缓动条检查点:种子化均匀(示例周期 600s)</text>
+  <text x="280.0" y="26" fill="#e8eaf0" font-size="15" font-weight="700" text-anchor="middle">缓动条检查点:终点一箱</text>
 <rect x="46" y="106" width="468" height="18" fill="#252838" rx="9"/>
-<rect x="130.2" y="108" width="65.5" height="14" fill="#7dcc96" opacity="0.25"/>
-<rect x="289.4" y="108" width="121.7" height="14" fill="#7aa2ff" opacity="0.25"/>
-<line x1="175.7" y1="94" x2="175.7" y2="136" stroke="#7dcc96" stroke-width="3"/>
-<text x="175.7" y="154" fill="#7dcc96" font-size="11" text-anchor="middle">检查点1 0.28</text>
-<line x1="293.6" y1="94" x2="293.6" y2="136" stroke="#7aa2ff" stroke-width="3"/>
-<text x="293.6" y="154" fill="#7aa2ff" font-size="11" text-anchor="middle">检查点2 0.53</text>
+<rect x="46" y="106" width="468.0" height="18" fill="#7aa2ff" rx="9"/>
 <line x1="514.0" y1="94" x2="514.0" y2="136" stroke="#ffd56a" stroke-width="3"/>
-<text x="514.0" y="154" fill="#ffd56a" font-size="11" text-anchor="middle">终点 1.00</text>
-<text x="514" y="206" fill="#8a90a0" font-size="11" text-anchor="end">p1 ∈ [0.18, 0.32]</text>
-<text x="514" y="224" fill="#8a90a0" font-size="11" text-anchor="end">p2 ∈ [max(0.52, p1+0.22), 0.78]</text>
-<text x="514" y="242" fill="#8a90a0" font-size="11" text-anchor="end">p3 = 1.0(固定)</text>
-<text x="514" y="266" fill="#8a90a0" font-size="11" text-anchor="end">seed = ease:{span}:{cycle_id},同周期同布局</text></svg>
+<text x="514.0" y="154" fill="#ffd56a" font-size="11" text-anchor="end">终点箱 1.00</text>
+<text x="514" y="206" fill="#8a90a0" font-size="11" text-anchor="end">每轮一只箱子,固定在 100%</text></svg>

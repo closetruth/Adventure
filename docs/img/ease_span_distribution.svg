@@ -13,24 +13,24 @@
 <line x1="46" y1="128.7" x2="514" y2="128.7" stroke="#333" stroke-width="0.5"/>
 <line x1="46" y1="211.3" x2="514" y2="211.3" stroke="#333" stroke-width="0.5"/>
 <line x1="46" y1="294.0" x2="514" y2="294.0" stroke="#333" stroke-width="0.5"/>
-<rect x="37.4" y="117.8" width="17.2" height="176.2" fill="#7aa2ff" rx="2"><title>cycle 0: 540s</title></rect>
-<rect x="70.8" y="90.4" width="17.2" height="203.6" fill="#7aa2ff" rx="2"><title>cycle 1: 624s</title></rect>
-<rect x="104.3" y="63.0" width="17.2" height="231.0" fill="#7aa2ff" rx="2"><title>cycle 2: 708s</title></rect>
-<rect x="137.7" y="94.3" width="17.2" height="199.7" fill="#7aa2ff" rx="2"><title>cycle 3: 612s</title></rect>
-<rect x="171.1" y="66.9" width="17.2" height="227.1" fill="#7aa2ff" rx="2"><title>cycle 4: 696s</title></rect>
-<rect x="204.6" y="98.2" width="17.2" height="195.8" fill="#7aa2ff" rx="2"><title>cycle 5: 600s</title></rect>
-<rect x="238.0" y="70.8" width="17.2" height="223.2" fill="#7aa2ff" rx="2"><title>cycle 6: 684s</title></rect>
-<rect x="271.4" y="102.1" width="17.2" height="191.9" fill="#7aa2ff" rx="2"><title>cycle 7: 588s</title></rect>
-<rect x="304.8" y="74.7" width="17.2" height="219.3" fill="#7aa2ff" rx="2"><title>cycle 8: 672s</title></rect>
-<rect x="338.3" y="106.0" width="17.2" height="188.0" fill="#7aa2ff" rx="2"><title>cycle 9: 576s</title></rect>
-<rect x="371.7" y="78.6" width="17.2" height="215.4" fill="#7aa2ff" rx="2"><title>cycle 10: 660s</title></rect>
-<rect x="405.1" y="110.0" width="17.2" height="184.0" fill="#7aa2ff" rx="2"><title>cycle 11: 564s</title></rect>
-<rect x="438.6" y="82.5" width="17.2" height="211.5" fill="#7aa2ff" rx="2"><title>cycle 12: 648s</title></rect>
-<rect x="472.0" y="113.9" width="17.2" height="180.1" fill="#7aa2ff" rx="2"><title>cycle 13: 552s</title></rect>
-<rect x="505.4" y="86.5" width="17.2" height="207.5" fill="#7aa2ff" rx="2"><title>cycle 14: 636s</title></rect>
+<rect x="37.4" y="134.0" width="17.2" height="160.0" fill="#7aa2ff" rx="2"><title>cycle 0: 258s</title></rect>
+<rect x="70.8" y="108.0" width="17.2" height="186.0" fill="#7aa2ff" rx="2"><title>cycle 1: 300s</title></rect>
+<rect x="104.3" y="82.0" width="17.2" height="212.0" fill="#7aa2ff" rx="2"><title>cycle 2: 342s</title></rect>
+<rect x="137.7" y="111.7" width="17.2" height="182.3" fill="#7aa2ff" rx="2"><title>cycle 3: 294s</title></rect>
+<rect x="171.1" y="85.7" width="17.2" height="208.3" fill="#7aa2ff" rx="2"><title>cycle 4: 336s</title></rect>
+<rect x="204.6" y="115.4" width="17.2" height="178.6" fill="#7aa2ff" rx="2"><title>cycle 5: 288s</title></rect>
+<rect x="238.0" y="89.4" width="17.2" height="204.6" fill="#7aa2ff" rx="2"><title>cycle 6: 330s</title></rect>
+<rect x="271.4" y="119.2" width="17.2" height="174.8" fill="#7aa2ff" rx="2"><title>cycle 7: 282s</title></rect>
+<rect x="304.8" y="93.1" width="17.2" height="200.9" fill="#7aa2ff" rx="2"><title>cycle 8: 324s</title></rect>
+<rect x="338.3" y="122.9" width="17.2" height="171.1" fill="#7aa2ff" rx="2"><title>cycle 9: 276s</title></rect>
+<rect x="371.7" y="96.8" width="17.2" height="197.2" fill="#7aa2ff" rx="2"><title>cycle 10: 318s</title></rect>
+<rect x="405.1" y="126.6" width="17.2" height="167.4" fill="#7aa2ff" rx="2"><title>cycle 11: 270s</title></rect>
+<rect x="438.6" y="100.6" width="17.2" height="193.4" fill="#7aa2ff" rx="2"><title>cycle 12: 312s</title></rect>
+<rect x="472.0" y="130.3" width="17.2" height="163.7" fill="#7aa2ff" rx="2"><title>cycle 13: 264s</title></rect>
+<rect x="505.4" y="104.3" width="17.2" height="189.7" fill="#7aa2ff" rx="2"><title>cycle 14: 306s</title></rect>
 <text x="46.0" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#0</text>
 <text x="213.1" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#5</text>
 <text x="380.3" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#10</text>
 <text x="514.0" y="310" fill="#aeb6c8" font-size="10" text-anchor="middle">#14</text>
-<text x="514" y="60" fill="#ffd56a" font-size="12" text-anchor="end">跨度 540-708 秒,步长 12,15 轮走遍全部</text>
-<text x="514" y="78" fill="#8a90a0" font-size="11" text-anchor="end">span = 540 + ((cycle_id × 7) % 15) × 12</text></svg>
+<text x="514" y="60" fill="#ffd56a" font-size="12" text-anchor="end">跨度 258-342 秒,步长 6,15 轮走遍全部</text>
+<text x="514" y="78" fill="#8a90a0" font-size="11" text-anchor="end">span = 258 + ((cycle_id × 7) % 15) × 6</text></svg>

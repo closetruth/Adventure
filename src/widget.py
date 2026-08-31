@@ -598,7 +598,7 @@ class FloatingWidget(QWidget):
         self.roll_progress_bar.mark_claimed(index)
         self._paint_global_stats()
         self._fly_chest_to_bag(index, rarity)
-        if index == 2:
+        if index == 0:
             ec.holding = False
             units = self._running_goal_units()
             if units is not None:
@@ -622,7 +622,7 @@ class FloatingWidget(QWidget):
             ec = self.state.ease_chests
             self.roll_progress_bar.set_progress(
                 units,
-                freeze_at_end=not ec.claimed[2],
+                freeze_at_end=not ec.claimed[0],
                 holding=ec.holding,
                 held_cycle_id=ec.cycle_id,
             )

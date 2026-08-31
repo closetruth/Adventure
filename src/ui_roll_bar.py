@@ -10,12 +10,9 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 # 每段 ease-out 指数：越大越「前冲后磨」。
 _EASE_EXPONENT = 2.6
-_POINT_P1 = (0.18, 0.32)
-_POINT_P2 = (0.52, 0.78)
-_POINT_MIN_GAP = 0.22
-# 独立于开奖的视觉周期：约 540～708 秒一轮（空闲时接近 10 分钟）。
-_EASE_SPAN_MIN = 540
-_EASE_SPAN_STEP = 12
+# 独立于开奖的视觉周期：约 258～342 秒一轮（空闲时接近 5 分钟）。
+_EASE_SPAN_MIN = 258
+_EASE_SPAN_STEP = 6
 _EASE_SPAN_RANGE = 15
 _EASE_CYCLES_PER_BLOCK = 15
 _BAR_H = 22
@@ -35,18 +32,14 @@ _RARITY_PALETTE = (
     ("#7a4ad4", "#5a32a8", "#c9a0ff"),
     ("#d4a017", "#b8860b", "#ffd56a"),
 )
-# 三个箱子各自独立抽；越靠后高档略多。
-_RARITY_WEIGHTS = (
-    (50, 28, 14, 6, 2),
-    (35, 28, 20, 12, 5),
-    (22, 25, 25, 18, 10),
-)
+# 单箱稀有度：沿用旧第 3 箱权重（5 分钟一只，质量略高）。
+_RARITY_WEIGHTS = (22, 25, 25, 18, 10)
 CHEST_RARITY_NAMES = ("普通", "罕见", "稀有", "史诗", "传奇")
 CHEST_RARITY_COLORS = ("#c8c0b4", "#7dcc96", "#7aa2ff", "#c9a0ff", "#ffd56a")
 
 
 def _ease_span_for_cycle(cycle_id: int) -> int:
-    # 7 与 15 互质，15 轮里 span 走遍 540、552、…、708。
+    # 7 与 15 互质，15 轮里 span 走遍 258、264、…、342。
     return _EASE_SPAN_MIN + ((max(0, cycle_id) * 7) % _EASE_SPAN_RANGE) * _EASE_SPAN_STEP
 
 
@@ -77,7 +70,7 @@ def resolve_held_cycle(
     holding: bool,
     held_cycle_id: int,
 ) -> Tuple[int, int, int, bool]:
-    """满格且第三箱未领时钳在 100%；返回 progress, span, cycle_id, holding。"""
+    """满格且本轮箱子未领时钳在 100%；返回 progress, span, cycle_id, holding。"""
     progress, span, cid = _independent_cycle(units)
     if not freeze_at_end:
         return progress, span, cid, False
@@ -90,29 +83,23 @@ def resolve_held_cycle(
     return progress, span, cid, False
 
 
-def _cycle_checkpoints(span: int, cycle_id: int = 0) -> Tuple[float, float, float]:
-    """每个视觉周期一组检查点：第一点偏早，第二点拉开，终点固定 1.0。"""
-    rng = random.Random(f"ease:{max(1, span)}:{int(cycle_id)}")
-    p1 = rng.uniform(*_POINT_P1)
-    p2 = rng.uniform(max(_POINT_P2[0], p1 + _POINT_MIN_GAP), _POINT_P2[1])
-    return (p1, p2, 1.0)
+def _cycle_checkpoints(span: int, cycle_id: int = 0) -> Tuple[float, ...]:
+    """每个视觉周期一个终点检查点（箱子画在 100%）。"""
+    return (1.0,)
 
 
-def _cycle_chest_rarities(span: int, cycle_id: int = 0) -> Tuple[int, int, int]:
-    """每个视觉周期三个箱子的稀有度，与检查点同样由 span+cycle 固定。"""
+def _cycle_chest_rarities(span: int, cycle_id: int = 0) -> Tuple[int, ...]:
+    """每个视觉周期一只箱子的稀有度，由 span+cycle 固定。"""
     rng = random.Random(f"chest:{max(1, span)}:{int(cycle_id)}")
-    picks = []
-    for weights in _RARITY_WEIGHTS:
-        roll = rng.randrange(sum(weights))
-        acc = 0
-        rarity = _RARITY_COMMON
-        for idx, w in enumerate(weights):
-            acc += w
-            if roll < acc:
-                rarity = idx
-                break
-        picks.append(rarity)
-    return (picks[0], picks[1], picks[2])
+    roll = rng.randrange(sum(_RARITY_WEIGHTS))
+    acc = 0
+    rarity = _RARITY_COMMON
+    for idx, w in enumerate(_RARITY_WEIGHTS):
+        acc += w
+        if roll < acc:
+            rarity = idx
+            break
+    return (rarity,)
 
 
 def _with_alpha(color: QColor, alpha: int) -> QColor:
@@ -253,7 +240,7 @@ def _draw_chest(
         )
 
 
-def _segment_eased(raw: float, points: Tuple[float, float, float], exponent: float) -> float:
+def _segment_eased(raw: float, points: Tuple[float, ...], exponent: float) -> float:
     """分段幂函数 ease-out：到每个点前都先快后慢。"""
     if raw <= 0.0:
         return 0.0
@@ -273,7 +260,7 @@ def _segment_eased(raw: float, points: Tuple[float, float, float], exponent: flo
 
 
 class EasedProgressBar(QWidget):
-    """非格子的小型平滑进度条：三节点、每段先快后慢。"""
+    """非格子的小型平滑进度条：终点一箱、整段先快后慢。"""
 
     point_reached = Signal()
     chest_claimed = Signal(int, int)  # index, rarity
@@ -287,7 +274,7 @@ class EasedProgressBar(QWidget):
         self._exponent = max(1.0, exponent)
         self._points = _cycle_checkpoints(self._span, self._cycle_id)
         self._rarities = _cycle_chest_rarities(self._span, self._cycle_id)
-        self._opened = (False, False, False)
+        self._opened = (False,)
         self._holding = False
         self._have_baseline = False
         self._flash_on = True
@@ -307,13 +294,9 @@ class EasedProgressBar(QWidget):
     def holding(self) -> bool:
         return self._holding
 
-    def apply_claimed(self, claimed: Tuple[bool, bool, bool]) -> None:
+    def apply_claimed(self, claimed: Tuple[bool, ...]) -> None:
         """用存档里的本轮领取状态覆盖绘制。"""
-        nxt = (
-            bool(claimed[0]) if len(claimed) > 0 else False,
-            bool(claimed[1]) if len(claimed) > 1 else False,
-            bool(claimed[2]) if len(claimed) > 2 else False,
-        )
+        nxt = (bool(claimed[0]) if len(claimed) > 0 else False,)
         if nxt == self._opened:
             return
         self._opened = nxt
@@ -321,11 +304,13 @@ class EasedProgressBar(QWidget):
         self.update()
 
     def mark_claimed(self, index: int) -> None:
-        if index < 0 or index > 2:
+        if index < 0 or index > 0:
             return
         opened = list(self._opened)
+        if index >= len(opened):
+            return
         opened[index] = True
-        self._opened = (opened[0], opened[1], opened[2])
+        self._opened = tuple(opened)
         self._sync_flash_timer()
         self.update()
 
@@ -373,7 +358,7 @@ class EasedProgressBar(QWidget):
         if cycle_changed:
             points = _cycle_checkpoints(span, cycle_id)
             rarities = _cycle_chest_rarities(span, cycle_id)
-            opened = (False, False, False)
+            opened = (False,)
         else:
             points = self._points
             rarities = self._rarities
@@ -414,7 +399,7 @@ class EasedProgressBar(QWidget):
         old_eased: float,
         progress: int,
         span: int,
-        points: Tuple[float, float, float],
+        points: Tuple[float, ...],
     ) -> bool:
         raw = progress / max(1, span)
         new_eased = _segment_eased(raw, points, self._exponent)

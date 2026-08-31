@@ -246,9 +246,9 @@ class EaseChestClickTests(unittest.TestCase):
         _app.processEvents()
         got: list[int] = []
         bar.chest_claimed.connect(lambda i, _r: got.append(i))
-        QTest.mouseClick(bar, Qt.LeftButton, pos=bar.chest_center_local(2))
+        QTest.mouseClick(bar, Qt.LeftButton, pos=bar.chest_center_local(0))
         _app.processEvents()
-        self.assertEqual(got, [2])
+        self.assertEqual(got, [0])
         bar.close()
         bar.deleteLater()
 

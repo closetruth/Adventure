@@ -12,7 +12,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.models import AppState, ChestItem, EaseChestsState, Inventory, validate_state_invariants
 from src.storage import load_state, save_state, take_load_warning
-from src.ui_roll_bar import _ease_span_for_cycle, _independent_cycle, resolve_held_cycle
+from src.ui_roll_bar import (
+    _cycle_checkpoints,
+    _cycle_chest_rarities,
+    _ease_span_for_cycle,
+    _independent_cycle,
+    resolve_held_cycle,
+)
+
+
+class SingleChestCycleTests(unittest.TestCase):
+    def test_span_covers_about_five_minutes(self):
+        spans = [_ease_span_for_cycle(i) for i in range(15)]
+        self.assertEqual(min(spans), 258)
+        self.assertEqual(max(spans), 342)
+        self.assertEqual(len(set(spans)), 15)
+        self.assertEqual(sum(spans) / 15, 300)
+
+    def test_checkpoints_are_end_only(self):
+        self.assertEqual(_cycle_checkpoints(300, 0), (1.0,))
+        self.assertEqual(_cycle_checkpoints(258, 7), (1.0,))
+
+    def test_one_rarity_per_cycle_is_seeded(self):
+        r = _cycle_chest_rarities(300, 0)
+        self.assertEqual(len(r), 1)
+        self.assertTrue(0 <= r[0] <= 4)
+        self.assertEqual(_cycle_chest_rarities(300, 0), r)
 
 
 class EaseChestsModelTests(unittest.TestCase):
@@ -26,15 +51,16 @@ class EaseChestsModelTests(unittest.TestCase):
 
     def test_mark_claimed_once(self):
         ec = EaseChestsState(cycle_id=3)
-        self.assertTrue(ec.mark_claimed(1))
+        self.assertTrue(ec.mark_claimed(0))
+        self.assertFalse(ec.mark_claimed(0))
         self.assertFalse(ec.mark_claimed(1))
-        self.assertEqual(ec.claimed, (False, True, False))
+        self.assertEqual(ec.claimed, (True,))
 
     def test_reset_for_cycle_clears_claimed(self):
-        ec = EaseChestsState(cycle_id=1, claimed=(True, True, False), holding=True)
+        ec = EaseChestsState(cycle_id=1, claimed=(True,), holding=True)
         ec.reset_for_cycle(2)
         self.assertEqual(ec.cycle_id, 2)
-        self.assertEqual(ec.claimed, (False, False, False))
+        self.assertEqual(ec.claimed, (False,))
         self.assertFalse(ec.holding)
 
     def test_roundtrip_holding_flag(self):
@@ -54,7 +80,7 @@ class EaseChestsModelTests(unittest.TestCase):
                 state.inventory.add_chest(2)
                 state.inventory.add_chest(4)
                 state.ease_chests = EaseChestsState(
-                    cycle_id=7, claimed=(True, False, True)
+                    cycle_id=7, claimed=(True,)
                 )
                 save_state(state)
                 loaded = load_state()
@@ -63,8 +89,18 @@ class EaseChestsModelTests(unittest.TestCase):
                 self.assertEqual(loaded.inventory.chests[0].rarity, 2)
                 self.assertEqual(loaded.inventory.chests[1].rarity, 4)
                 self.assertEqual(loaded.ease_chests.cycle_id, 7)
-                self.assertEqual(loaded.ease_chests.claimed, (True, False, True))
+                self.assertEqual(loaded.ease_chests.claimed, (True,))
                 self.assertIsNone(validate_state_invariants(loaded))
+
+    def test_legacy_three_claimed_uses_last_slot(self):
+        waiting = EaseChestsState.from_dict(
+            {"cycle_id": 2, "claimed": [True, True, False], "holding": True}
+        )
+        self.assertEqual(waiting.claimed, (False,))
+        already = EaseChestsState.from_dict(
+            {"cycle_id": 2, "claimed": [False, False, True], "holding": False}
+        )
+        self.assertEqual(already.claimed, (True,))
 
     def test_legacy_inventory_without_chests(self):
         inv = Inventory.from_dict({"gold": 1.0, "diamond": 0.5})

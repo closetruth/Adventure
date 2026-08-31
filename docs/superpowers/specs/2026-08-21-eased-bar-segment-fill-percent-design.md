@@ -1,5 +1,7 @@
 # Eased bar segment fill percent (growing)
 
+> Superseded layout: the bar now has **one chest at 100%** (single segment). Percent still grows on the entered segment.
+
 ## Goal
 
 On the continuous eased progress bar (`EasedProgressBar`), each entered segment shows a **growing** completion percent for that segment (not static segment width). Text uses rarity color with a **white** outline.

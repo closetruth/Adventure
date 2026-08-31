@@ -119,7 +119,8 @@
 
 | 已有能力 | 位置 |
 |----------|------|
-| 落点 + 连通簇开奖 | `reward_system.py`, `ui_roll_bar.py` |
+| 开奖周期 6～14 操作 | `reward_system.py`, `ui_roll_bar.py` |
+| 缓动宝箱条（约 5 分钟、终点一箱、点领取入包） | `ui_roll_bar.py`, `EaseChestsState` |
 | 随机间隔 6～14 | `INTERVAL_MIN/MAX` |
 | 金/钻独立概率 | `maybe_roll` |
 | 开奖音效 | `sfx.py`, `sound_on_roll_hit` |

@@ -51,7 +51,7 @@ QTimer @ 50ms (main thread)
 
 ### Data model (`src/models.py`)
 
-- `AppState` is the single root state object — inventory, task list, roll history, `roll_runtime`, settings dict.
+- `AppState` is the single root state object — inventory, task list, roll history, `roll_runtime`, `ease_chests`, settings dict.
 - `Task` has `status: ACTIVE | PAUSED | COMPLETED`. Only **one** ACTIVE task is allowed at a time.
 - `Task.current_subtask_id` points at the focused **leaf** subtask (when the task has a subtask tree). `Task.active_focus_path_ids()` returns the root-to-leaf path for UI highlighting.
 - `Subtask` forms a tree: **leaf** nodes accumulate ops/time/rewards; **container** nodes (`children` non-empty) rollup from descendants via `rollup_operations()`, `rollup_earned()`, etc. Leaves have `target_seconds`, `pending_rewards`, `done`, `rewards_claimed`.
@@ -92,11 +92,11 @@ Folder-style accounting: parent task `earned_*` / display totals sync from subta
 - `src/goal_actions.py` — `try_complete_goal`, `try_delete_goal` with confirmation.
 - `src/ui_confirm.py` — `ask_yes_no`: topmost styled confirm dialog.
 - `src/ui_text.py` — formatting functions: amounts (max 1 decimal), durations, tree node HTML. **No emoji** — intentional, because Windows default fonts render them as tofu.
-- `src/ui_roll_bar.py` — `EasedProgressBar` (independent ~10 min cycle, three closed chests with five rarity tiers, glow + diamond SFX on reach; open-chest not wired) and `SegmentedRollBar` (lottery segment bar).
+- `src/ui_roll_bar.py` — `EasedProgressBar` (independent 258–342s cycle, one closed chest at 100%, five rarity tiers, freeze until click → inventory) and `SegmentedRollBar` (lottery segment bar).
 - `src/op_tracker.py` — `OpRateTracker`: sliding 60s window of operation timestamps (in-memory only, not persisted).
 - `src/active_time.py` — `ActiveTimeTracker`: increments focused leaf or flat task `active_seconds` every 1s tick; paused tasks don't tick.
 - `src/power_monitor.py` — `should_count_time()`: false when display is off.
-- `src/sfx.py` — roll hit sounds via Qt Multimedia (`QMediaPlayer`). Native mp3/wav/ogg play as-is; other formats ffmpeg → `%APPDATA%\Adventure\sfx_cache\`. Gold lane = `roll_gold.*`; diamond lane = random file in `assets/sounds/diamond/` (also eased-bar checkpoint chime).
+- `src/sfx.py` — roll hit sounds via Qt Multimedia (`QMediaPlayer`). Native mp3/wav/ogg play as-is; other formats ffmpeg → `%APPDATA%\Adventure\sfx_cache\`. Gold lane = `roll_gold.*`; diamond lane = random file in `assets/sounds/diamond/` (also eased-bar chest-reached chime).
 - `src/win_utils.py` — `pin_window_to_all_desktops` (pyvda), `set_startup` (registry Run key). Graceful no-ops on non-Windows.
 
 ### Game subprocess protocol
