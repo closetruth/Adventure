@@ -9,8 +9,7 @@ QWidget#WidgetWindow {
 }
 QWidget#WidgetRoot {
     background-color: #1c1c26;
-    border-radius: 12px;
-    border: 1px solid #3a3f52;
+    border-radius: 8px;
 }
 QLabel { color: #f5f5f7; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"; }
 QWidget#DragHandle { background: transparent; }

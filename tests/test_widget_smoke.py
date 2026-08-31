@@ -82,6 +82,22 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
         self.assertEqual(widget.height(), before_h, "点击后窗口高度不得变化")
         self.assertLessEqual(widget.minimumSizeHint().height(), 600)
 
+    def test_window_keeps_fixed_size(self):
+        """环绕进度吃边距，不得把窗口撑出 308x680。"""
+        self.assertEqual(self.widget.width(), 308)
+        self.assertEqual(self.widget.height(), 680)
+
+    def test_widget_root_is_inset_for_ring(self):
+        """内容区内缩，四边留给环形轨道。"""
+        from src.widget import RING_PAD
+
+        root = self.widget.findChild(QWidget, "WidgetRoot")
+        self.assertIsNotNone(root)
+        self.assertEqual(root.x(), RING_PAD)
+        self.assertEqual(root.y(), RING_PAD)
+        self.assertEqual(root.width(), 308 - 2 * RING_PAD)
+        self.assertEqual(root.height(), 680 - 2 * RING_PAD)
+
     def test_window_is_opaque(self):
         """不透明顶层窗，避免分层窗点穿。"""
         self.assertFalse(
@@ -232,6 +248,38 @@ class RollBarInitRegressionTest(unittest.TestCase):
         widget.deleteLater()
 
 
+class EaseRingPathTests(unittest.TestCase):
+    """圆角环：左上起、沿顶边向右（顺时针）。"""
+
+    def test_start_is_top_left_going_right(self):
+        from PySide6.QtCore import QSize
+        from src.ui_roll_bar import point_on_ring, ring_center_path
+
+        path = ring_center_path(QSize(200, 400), inset=4.0, radius=12.0)
+        p0 = point_on_ring(path, 0.0)
+        p_top = point_on_ring(path, 0.05)
+        self.assertLess(p0.x(), 40)
+        self.assertLess(p0.y(), 30)
+        self.assertGreater(p_top.x(), p0.x())
+        self.assertLess(p_top.y(), p0.y() + 0.5)
+        self.assertLess(abs(p_top.y() - 4.0), 1.5)
+
+    def test_full_chest_near_start(self):
+        from src.ui_roll_bar import EasedProgressBar, _ease_span_for_cycle
+
+        bar = EasedProgressBar()
+        bar.resize(200, 400)
+        bar.show()
+        _app.processEvents()
+        bar.set_progress(_ease_span_for_cycle(0), freeze_at_end=True)
+        _app.processEvents()
+        c = bar.chest_center_local(2)
+        self.assertLess(c.x(), 40, "第三箱在 100%，应靠近左上起点")
+        self.assertLess(c.y(), 40)
+        bar.close()
+        bar.deleteLater()
+
+
 class EaseChestClickTests(unittest.TestCase):
     """缓动条左键应能点到宝箱，不能被全局拖动滤镜吃掉。"""
 
@@ -239,7 +287,7 @@ class EaseChestClickTests(unittest.TestCase):
         from src.ui_roll_bar import EasedProgressBar, _ease_span_for_cycle
 
         bar = EasedProgressBar()
-        bar.resize(280, 18)
+        bar.resize(200, 400)
         bar.show()
         _app.processEvents()
         bar.set_progress(_ease_span_for_cycle(0), freeze_at_end=True)
@@ -265,7 +313,7 @@ class EaseChestClickTests(unittest.TestCase):
 
         root = QWidget()
         bar = EasedProgressBar(root)
-        bar.setGeometry(0, 0, 200, 18)
+        bar.setGeometry(0, 0, 200, 400)
         host = Host()
         SystemMoveFilter(host).attach(root)
         root.show()
@@ -276,6 +324,31 @@ class EaseChestClickTests(unittest.TestCase):
         self.assertEqual(host.moves, 0)
         root.close()
         root.deleteLater()
+
+    def test_eased_bar_paint_does_not_requeue_update(self):
+        from src.ui_roll_bar import EasedProgressBar, _ease_span_for_cycle
+
+        bar = EasedProgressBar()
+        bar.resize(200, 400)
+        bar.set_progress(_ease_span_for_cycle(0) // 2)
+        bar.show()
+        _app.processEvents()
+        calls = {"n": 0}
+        real_update = bar.update
+
+        def wrapped(*args, **kwargs):
+            calls["n"] += 1
+            return real_update(*args, **kwargs)
+
+        bar.update = wrapped
+        bar.repaint()
+        self.assertEqual(
+            calls["n"],
+            0,
+            "paintEvent 不得再调用 update()（会造成半透明窗重绘风暴）",
+        )
+        bar.hide()
+        bar.deleteLater()
 
 
 class CurrencyCountUpWidgetTests(unittest.TestCase):

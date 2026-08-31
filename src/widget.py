@@ -42,7 +42,7 @@ from .ui_text import (
     format_roll_history_lines_html,
 )
 from .ui_widget_qss import WIDGET_STYLESHEET
-from .ui_window_drag import DragHandleBar, SystemMoveFilter
+from .ui_window_drag import DragHandleBar, SystemMoveFilter, SystemMovable
 from .win_utils import (
     WM_ENTERSIZEMOVE,
     WM_EXITSIZEMOVE,
@@ -60,6 +60,7 @@ _FLY_MS = 400
 _FLY_SIZE = 22
 _BADGE_H = 14
 _BADGE_INSET = 3
+RING_PAD = 14
 
 
 class _ChestBadge(QWidget):
@@ -111,6 +112,32 @@ class _ChestBadge(QWidget):
         painter.setPen(QColor("#ffffff"))
         painter.drawText(self.rect(), int(Qt.AlignCenter), self._label())
         painter.end()
+
+
+class _RingHost(QWidget):
+    """底层环形进度铺满窗口，内容区内缩，四边留给轨道。"""
+
+    def __init__(self, window: SystemMovable, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._window = window
+        self.bar = EasedProgressBar(self)
+        self.inner = QWidget(self)
+        self.inner.setObjectName("WidgetRoot")
+        self.inner.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        r = self.rect()
+        self.bar.setGeometry(r)
+        self.inner.setGeometry(r.adjusted(RING_PAD, RING_PAD, -RING_PAD, -RING_PAD))
+        self.bar.lower()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.LeftButton:
+            self._window.begin_user_move()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class _FlyingChest(QWidget):
@@ -203,16 +230,18 @@ class FloatingWidget(QWidget):
     # ---------- UI ----------
     def _build_ui(self) -> None:
         self.setStyleSheet(WIDGET_STYLESHEET)
-        root = QWidget(self)
-        root.setObjectName("WidgetRoot")
-        root.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
+        host = _RingHost(self, self)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(root)
+        outer.addWidget(host)
 
+        self.roll_progress_bar = host.bar
+        self.roll_progress_bar.point_reached.connect(self.ease_point_reached)
+        self.roll_progress_bar.chest_claimed.connect(self._on_chest_claimed)
+
+        root = host.inner
         v = QVBoxLayout(root)
-        v.setContentsMargins(14, 10, 14, 12)
+        v.setContentsMargins(8, 6, 8, 8)
         v.setSpacing(8)
 
         # 顶栏（拖动手柄 + 窗口按钮）
@@ -273,13 +302,9 @@ class FloatingWidget(QWidget):
 
         bar_row = QVBoxLayout()
         bar_row.setSpacing(3)
-        self.roll_progress_bar = EasedProgressBar()
-        self.roll_progress_bar.point_reached.connect(self.ease_point_reached)
-        self.roll_progress_bar.chest_claimed.connect(self._on_chest_claimed)
         cap = QLabel("距下次开奖")
         cap.setObjectName("Subtle")
         self.roll_bar = SegmentedRollBar()
-        bar_row.addWidget(self.roll_progress_bar)
         bar_row.addWidget(cap)
         bar_row.addWidget(self.roll_bar)
         global_lay.addLayout(bar_row)

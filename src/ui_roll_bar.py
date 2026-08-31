@@ -4,8 +4,8 @@ from __future__ import annotations
 import random
 from typing import List, Tuple
 
-from PySide6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QPolygonF, QRadialGradient
+from PySide6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, QSize, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF, QRadialGradient
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 # 每段 ease-out 指数：越大越「前冲后磨」。
@@ -18,9 +18,12 @@ _EASE_SPAN_MIN = 540
 _EASE_SPAN_STEP = 12
 _EASE_SPAN_RANGE = 15
 _EASE_CYCLES_PER_BLOCK = 15
-_BAR_H = 22
-_TRACK_H = 12
+_RING_INSET = 4.0
+_RING_RADIUS = 12.0
+_TRACK_W = 7.0
+_CHEST_HIT = 18
 _CHEST_SIZE = 13
+_FILL_HEX = "#7aa2ff"
 # 普通 / 罕见 / 稀有 / 史诗 / 传奇
 _RARITY_COMMON = 0
 _RARITY_UNCOMMON = 1
@@ -272,8 +275,48 @@ def _segment_eased(raw: float, points: Tuple[float, float, float], exponent: flo
     return 1.0
 
 
+def ring_center_path(size: QSize, *, inset: float, radius: float) -> QPainterPath:
+    """窗框轨道中心线：圆角矩形，左上起、顺时针。"""
+    w = max(1.0, float(size.width()))
+    h = max(1.0, float(size.height()))
+    inset = max(0.0, float(inset))
+    rect = QRectF(inset, inset, max(1.0, w - 2.0 * inset), max(1.0, h - 2.0 * inset))
+    r = min(float(radius), rect.width() / 2.0, rect.height() / 2.0)
+    path = QPainterPath()
+    path.addRoundedRect(rect, r, r)
+    return path
+
+
+def point_on_ring(path: QPainterPath, t: float) -> QPointF:
+    t = max(0.0, min(1.0, float(t)))
+    if path.isEmpty():
+        return QPointF(0.0, 0.0)
+    return path.pointAtPercent(t)
+
+
+def subpath_on_ring(path: QPainterPath, t: float) -> QPainterPath:
+    """进度 0..1 的未闭合子路径；满格返回整圈。"""
+    t = max(0.0, min(1.0, float(t)))
+    if t <= 0.0 or path.isEmpty():
+        return QPainterPath()
+    if t >= 1.0 - 1e-9:
+        return QPainterPath(path)
+    length = path.length()
+    if length <= 1e-6:
+        return QPainterPath()
+    steps = max(8, int(length * t / 2.0))
+    sub = QPainterPath()
+    for i in range(steps + 1):
+        p = path.pointAtPercent((i / steps) * t)
+        if i == 0:
+            sub.moveTo(p)
+        else:
+            sub.lineTo(p)
+    return sub
+
+
 class EasedProgressBar(QWidget):
-    """非格子的小型平滑进度条：三节点、每段先快后慢。"""
+    """沿窗框的圆角环形缓动进度：三节点、每段先快后慢。"""
 
     point_reached = Signal()
     chest_claimed = Signal(int, int)  # index, rarity
@@ -294,9 +337,7 @@ class EasedProgressBar(QWidget):
         self._flash_timer = QTimer(self)
         self._flash_timer.setInterval(400)
         self._flash_timer.timeout.connect(self._toggle_dot_flash)
-        self.setMinimumHeight(_BAR_H)
-        self.setMaximumHeight(_BAR_H)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setCursor(Qt.PointingHandCursor)
 
     @property
@@ -329,30 +370,27 @@ class EasedProgressBar(QWidget):
         self._sync_flash_timer()
         self.update()
 
-    def _layout_inset(self) -> float:
-        h = float(max(1, self.height()))
-        track_h = min(_TRACK_H, h)
-        radius = track_h / 2.0
-        return max(radius, _CHEST_SIZE * 0.62)
+    def _ring_path(self) -> QPainterPath:
+        return ring_center_path(
+            self.size(),
+            inset=_RING_INSET,
+            radius=_RING_RADIUS,
+        )
 
     def chest_center_local(self, index: int) -> QPoint:
         """检查点中心（控件本地坐标）。"""
-        w = float(max(1, self.width()))
-        h = float(max(1, self.height()))
-        inset = self._layout_inset()
         pt = self._points[index] if 0 <= index < len(self._points) else 0.0
-        cx = inset + pt * (w - 2 * inset)
-        half = _CHEST_SIZE * 0.55
-        cx = max(half, min(w - half, cx))
-        return QPoint(int(round(cx)), int(round(h / 2.0)))
+        p = point_on_ring(self._ring_path(), pt)
+        return QPoint(int(round(p.x())), int(round(p.y())))
 
     def _chest_hit_rect(self, index: int) -> QRect:
         c = self.chest_center_local(index)
-        box_w = max(_CHEST_SIZE + 8, 18)
-        box_h = max(int(self.height()), _BAR_H)
-        x = c.x() - box_w // 2
-        x = max(0, min(max(0, self.width() - box_w), x))
-        return QRect(x, 0, box_w, box_h)
+        box = _CHEST_HIT
+        x = c.x() - box // 2
+        y = c.y() - box // 2
+        x = max(0, min(max(0, self.width() - box), x))
+        y = max(0, min(max(0, self.height() - box), y))
+        return QRect(x, y, box, box)
 
     def set_progress(
         self,
@@ -473,80 +511,33 @@ class EasedProgressBar(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#1c1c26"))
 
-        w = float(self.width())
-        h = float(self.height())
-        track_h = min(_TRACK_H, h)
-        track_y = (h - track_h) / 2.0
-        radius = track_h / 2.0
-        inset = max(radius, _CHEST_SIZE * 0.62)
-
-        track = QRectF(0, track_y, w, track_h)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 22))
-        painter.drawRoundedRect(track, radius, radius)
+        path = self._ring_path()
+        painter.setBrush(Qt.NoBrush)
+        track_pen = QPen(QColor(255, 255, 255, 22), _TRACK_W)
+        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        track_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(track_pen)
+        painter.drawPath(path)
 
         eased = self._eased_fraction()
-        fill_w = inset + eased * (w - 2 * inset) + inset if eased > 0 else 0.0
-        fill_w = max(0.0, min(w, fill_w))
-        if fill_w > 0:
-            painter.setBrush(QColor("#7aa2ff"))
-            painter.drawRoundedRect(QRectF(0, track_y, fill_w, track_h), radius, radius)
-
-        # 已走过/当前段：本段完成度按 raw 先快后慢；稀有度字 + 深色描边；1 位小数
-        usable = w - 2 * inset
-        font = QFont("Microsoft YaHei UI", 9)
-        font.setBold(True)
-        painter.setFont(font)
-        raw = self._raw_fraction()
-        exp = self._exponent
-        prev = 0.0
-        for i, pt in enumerate(self._points):
-            pt_f = float(pt)
-            if eased <= prev + 1e-6:
-                prev = pt_f
-                continue
-            width = pt_f - prev
-            if width <= 1e-9 or eased >= pt_f - 1e-6 or raw >= pt_f - 1e-6:
-                seg_pct = 100.0
-            elif raw <= prev + 1e-6:
-                seg_pct = 0.0
-            else:
-                local = max(0.0, min(1.0, (raw - prev) / width))
-                eased_local = 1.0 - pow(1.0 - local, exp)
-                seg_pct = eased_local * 100.0
-            mid = (prev + pt_f) * 0.5
-            tx = inset + mid * usable
-            rarity = self._rarities[i] if i < len(self._rarities) else _RARITY_COMMON
-            rarity = max(0, min(_RARITY_LEGEND, int(rarity)))
-            glow_hex = _RARITY_PALETTE[rarity][2]
-            label = f"{seg_pct:.1f}%"
-            text_rect = QRectF(tx - 24.0, track_y, 48.0, track_h)
-            painter.setPen(QColor(20, 22, 30, 220))
-            for dx, dy in (
-                (-1, 0),
-                (1, 0),
-                (0, -1),
-                (0, 1),
-            ):
-                painter.drawText(
-                    text_rect.translated(dx, dy),
-                    int(Qt.AlignCenter),
-                    label,
-                )
-            painter.setPen(QColor(glow_hex))
-            painter.drawText(text_rect, int(Qt.AlignCenter), label)
-            prev = pt_f
+        if eased > 0:
+            fill_pen = QPen(QColor(_FILL_HEX), _TRACK_W)
+            fill_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            fill_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(fill_pen)
+            painter.drawPath(subpath_on_ring(path, eased))
 
         for i, pt in enumerate(self._points):
-            cx = inset + pt * (w - 2 * inset)
+            p = point_on_ring(path, pt)
             reached = eased + 1e-6 >= pt
             rarity = self._rarities[i] if i < len(self._rarities) else _RARITY_COMMON
             opened = self._opened[i] if i < len(self._opened) else False
             _draw_chest(
                 painter,
-                cx,
-                h / 2.0,
+                p.x(),
+                p.y(),
                 _CHEST_SIZE,
                 reached=reached,
                 rarity=rarity,
