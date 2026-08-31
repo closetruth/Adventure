@@ -164,6 +164,7 @@ def _launch_game(
     session = GameSession.create(
         gold=state.inventory.gold,
         diamond=state.inventory.diamond,
+        word_lineups=list(state.settings.get("word_lineups") or []) if game_key == "word" else None,
     )
     in_path = session.write()
     result_path = session.result_path()
@@ -204,6 +205,10 @@ def _launch_game(
         int(state.settings.get("pet_best_round", 0)),
         int(result.waves_cleared),
     )
+    if game_key == "word":
+        hist = [x for x in (state.settings.get("word_lineups") or []) if isinstance(x, dict)]
+        hist.extend(x for x in (getattr(result, "word_lineups", None) or []) if isinstance(x, dict))
+        state.settings["word_lineups"] = hist[-40:]
 
     tip = result.message or "游戏结束"
     if result.gold_delta or result.diamond_delta:

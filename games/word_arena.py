@@ -1,8 +1,9 @@
 """计算机词汇自走棋（Super Auto Pets 式轻量版）。
 
 用英语计算机词汇当棋子：每种词汇自带一个与本义强关联的触发技能。
-每回合商店固定 10 金币，买词汇/食物、喂食、三合升星、调整队伍顺序；
-自动回合制战斗（左列先手打右列），赢拿奖杯、输掉生命，集满 10 奖杯通关。
+每回合商店固定 10 铜币，买词汇/食物、喂食、三合升星、调整队伍顺序；
+金币可在商店花 5 金买 1 点生命。自动回合制战斗（上敌下我回放动画），
+赢拿奖杯、输掉生命，集满 10 奖杯通关。你用过的阵型会存下来当以后的敌方。
 
 操作：
   全部用鼠标点击（商店/队伍/开战/继续）；ESC 退出并结算
@@ -34,7 +35,8 @@ from src.game_protocol import GameResult, GameSession  # noqa: E402
 W, H = 1100, 700
 FPS = 60
 ENTRY_FEE = 10
-ROUND_GOLD = 10
+ROUND_COPPER = 10
+LIFE_GOLD_COST = 5
 MAX_TEAM = 5
 SHOP_SLOTS = 3
 TIER_COUNT = 5
@@ -49,6 +51,7 @@ COL_BORDER = (80, 90, 130)
 COL_TEXT = (240, 242, 250)
 COL_MUTED = (158, 166, 188)
 COL_GOLD = (255, 213, 79)
+COL_COPPER = (196, 122, 58)
 COL_DIAM = (125, 211, 252)
 COL_HP = (232, 86, 86)
 COL_EXP = (120, 226, 255)
@@ -222,6 +225,60 @@ class Unit:
         )
 
 
+def unit_to_dict(u: Optional[Unit]) -> Optional[dict]:
+    if u is None:
+        return None
+    return {
+        "word": u.word,
+        "star": int(u.star),
+        "atk": int(u.atk),
+        "hp": int(u.hp),
+        "max_hp": int(u.max_hp),
+        "honey": bool(u.honey),
+        "garlic": bool(u.garlic),
+        "cookie": bool(u.cookie),
+        "chain_atk": int(u.chain_atk),
+    }
+
+
+def unit_from_dict(data: Optional[dict]) -> Optional[Unit]:
+    if not data:
+        return None
+    spec = WORD_BY_KEY.get(str(data.get("word", "")))
+    if spec is None:
+        return None
+    star = max(1, min(3, int(data.get("star", 1))))
+    u = Unit.from_spec(spec, star)
+    u.atk = max(0, int(data.get("atk", u.atk)))
+    u.max_hp = max(1, int(data.get("max_hp", u.max_hp)))
+    u.hp = max(1, min(u.max_hp, int(data.get("hp", u.max_hp))))
+    u.honey = bool(data.get("honey", False))
+    u.garlic = bool(data.get("garlic", False))
+    u.cookie = bool(data.get("cookie", False))
+    u.chain_atk = max(0, int(data.get("chain_atk", 0)))
+    return u
+
+
+def lineup_to_dict(round_no: int, team: List[Optional[Unit]]) -> dict:
+    padded = list(team) + [None] * MAX_TEAM
+    return {
+        "round": int(round_no),
+        "units": [unit_to_dict(u) for u in padded[:MAX_TEAM]],
+    }
+
+
+def lineup_from_dict(data: dict) -> List[Unit]:
+    raw = data.get("units") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: List[Unit] = []
+    for item in raw:
+        u = unit_from_dict(item if isinstance(item, dict) else None)
+        if u is not None:
+            out.append(u)
+    return out
+
+
 @dataclass
 class ShopSlot:
     kind: str = ""          # "word" | "food" | ""
@@ -235,6 +292,9 @@ class WordArenaGame:
         self.initial_diamond = session.diamond
         self.gold = session.gold
         self.diamond = session.diamond
+        self.copper = 0
+        self.past_lineups: List[dict] = list(getattr(session, "word_lineups", None) or [])
+        self.new_lineups: List[dict] = []
 
         self.phase = "title"  # title | shop | battle | battle_res | over
         self.round_no = 0
@@ -268,6 +328,11 @@ class WordArenaGame:
         self.float_texts: List[dict] = []
         self.battle_over = False
         self.battle_result_msg = ""
+        self.hit_flash = {"p": 0.0, "e": 0.0}
+        self.battle_focus_p = 0
+        self.battle_focus_e = 0
+        self._combat_p: List[Optional[Unit]] = []
+        self._combat_e: List[Optional[Unit]] = []
 
         # 输入
         self._click_zones: List[Tuple[pygame.Rect, str, tuple]] = []
@@ -304,6 +369,7 @@ class WordArenaGame:
                         self._on_space()
             if self.phase == "battle":
                 self._update_battle(dt)
+                self._update_float_texts(dt)
             if self.log_t > 0:
                 self.log_t -= dt
             if self.auto_dummy:
@@ -343,18 +409,15 @@ class WordArenaGame:
 
     # ---------- 阶段流转 ----------
     def _pay_entry(self) -> None:
-        if self.gold < ENTRY_FEE:
-            self._set_log(f"金币不足，需要 {ENTRY_FEE}")
-            return
-        self.gold -= ENTRY_FEE
+        # 入场费由主程序启动时从背包扣除，局内不再扣一次
         self.entry_paid = True
-        self._set_log(f"已支付入场费 {ENTRY_FEE} 金币")
+        self._set_log(f"入场费 {ENTRY_FEE} 金币已从背包扣除")
 
     def _start_run(self) -> None:
         self.phase = "shop"
         self.round_no = 1
         self.available_tiers = 1
-        self.gold += ROUND_GOLD
+        self.copper += ROUND_COPPER
         self._roll_shop(initial=True)
         self._build_enemy_team()
         self._set_log("第 1 回合：点击商店买棋子，点「开战」")
@@ -376,7 +439,7 @@ class WordArenaGame:
             self._set_log("仁慈机制：你连输两场，回复 1 点生命")
         self.round_no += 1
         self.available_tiers = min(TIER_COUNT, 1 + (self.round_no - 1) // 2)
-        self.gold += ROUND_GOLD
+        self.copper += ROUND_COPPER
         self._roll_shop(initial=True)
         self._build_enemy_team()
         self.phase = "shop"
@@ -385,10 +448,10 @@ class WordArenaGame:
     # ---------- 商店 ----------
     def _roll_shop(self, initial: bool = False) -> None:
         if not initial:
-            if self.gold <= 0:
-                self._set_log("金币不足，无法刷新")
+            if self.copper <= 0:
+                self._set_log("铜币不足，无法刷新")
                 return
-            self.gold -= 1
+            self.copper -= 1
         odds = TIER_ODDS[self.available_tiers - 1]
         for i in range(SHOP_SLOTS):
             if self.frozen[i] and self.shop[i].spec is not None:
@@ -406,8 +469,8 @@ class WordArenaGame:
         slot = self.shop[idx]
         if slot.spec is None:
             return
-        if self.gold < slot.spec.cost:
-            self._set_log(f"金币不足，需要 {slot.spec.cost}")
+        if self.copper < slot.spec.cost:
+            self._set_log(f"铜币不足，需要 {slot.spec.cost}")
             return
         if slot.kind == "word":
             ok = self._buy_word(slot.spec)
@@ -422,7 +485,7 @@ class WordArenaGame:
         # 先尝试同名合成
         for i, u in enumerate(self.team):
             if u is not None and u.word == spec.word and u.star < 3:
-                self.gold -= spec.cost
+                self.copper -= spec.cost
                 u.star += 1
                 b = STAR_BONUS.get(u.star, 0)
                 u.atk = spec.base_atk + b
@@ -433,7 +496,7 @@ class WordArenaGame:
         # 放入空槽
         for i, u in enumerate(self.team):
             if u is None:
-                self.gold -= spec.cost
+                self.copper -= spec.cost
                 self.team[i] = unit
                 self._set_log(f"获得词汇 {spec.word}（{spec.cn}）")
                 return True
@@ -445,10 +508,10 @@ class WordArenaGame:
         if unit is None:
             self._set_log("先选择要喂食的队伍槽位")
             return False
-        if self.gold < spec.cost:
-            self._set_log(f"金币不足，需要 {spec.cost}")
+        if self.copper < spec.cost:
+            self._set_log(f"铜币不足，需要 {spec.cost}")
             return False
-        self.gold -= spec.cost
+        self.copper -= spec.cost
         if spec.effect == "apple":
             unit.atk += 1
             unit.max_hp += 1
@@ -480,9 +543,22 @@ class WordArenaGame:
         if u is None:
             return
         refund = max(1, (u.star - 1) + WORD_BY_KEY[u.word].cost // 3)
-        self.gold += refund
+        self.copper += refund
         self.team[idx] = None
-        self._set_log(f"卖出 {u.word}，返还 {refund} 金币")
+        self._set_log(f"卖出 {u.word}，返还 {refund} 铜币")
+
+    def _click_buy_life(self) -> None:
+        if self.phase != "shop":
+            return
+        if self.lives >= MAX_LIVES:
+            self._set_log("生命已满")
+            return
+        if self.gold < LIFE_GOLD_COST:
+            self._set_log(f"金币不足，买命需要 {LIFE_GOLD_COST}")
+            return
+        self.gold -= LIFE_GOLD_COST
+        self.lives += 1
+        self._set_log(f"买命：-{LIFE_GOLD_COST} 金币，生命 {self.lives}")
 
     def _click_team_slot(self, idx: int) -> None:
         if self.phase != "shop":
@@ -517,19 +593,42 @@ class WordArenaGame:
         self._start_battle()
 
     def _start_battle(self) -> None:
+        self.new_lineups.append(lineup_to_dict(self.round_no, self.team))
         self.phase = "battle"
         self.battle_players = [u.copy_for_battle() if u else None for u in self.team]
-        self.battle_enemies = [u.copy_for_battle() for u in self.enemy_team]
+        self.battle_enemies = [None] * MAX_TEAM
+        for i, u in enumerate(self.enemy_team[:MAX_TEAM]):
+            self.battle_enemies[i] = u.copy_for_battle()
+        self._combat_p = [u.copy_for_battle() if u else None for u in self.battle_players]
+        self._combat_e = [u.copy_for_battle() if u else None for u in self.battle_enemies]
         self.battle_events = []
         self.battle_event_idx = 0
         self.battle_event_cooldown = 0.0
         self.float_texts = []
         self.battle_over = False
         self.battle_result_msg = ""
+        self.hit_flash = {"p": 0.0, "e": 0.0}
+        self.battle_focus_p = 0
+        self.battle_focus_e = 0
         self._build_battle_events()
 
     # ---------- 敌方 ----------
+    def _pick_ghost_lineup(self) -> Optional[dict]:
+        pool = [L for L in (self.past_lineups + self.new_lineups) if isinstance(L, dict)]
+        viable = [L for L in pool if lineup_from_dict(L)]
+        if not viable:
+            return None
+        near = [
+            L for L in viable
+            if abs(int(L.get("round", 1)) - self.round_no) <= 1
+        ]
+        return random.choice(near or viable)
+
     def _build_enemy_team(self) -> None:
+        ghost = self._pick_ghost_lineup()
+        if ghost is not None:
+            self.enemy_team = lineup_from_dict(ghost)
+            return
         cnt = min(3 + self.round_no // 2, MAX_TEAM)
         avail = min(TIER_COUNT, 1 + (self.round_no - 1) // 2)
         team: List[Unit] = []
@@ -552,22 +651,22 @@ class WordArenaGame:
     def _build_battle_events(self) -> None:
         self.battle_events = [{"type": "start", "msg": f"第 {self.round_no} 回合战斗开始"}]
         # 开局技能（先手方全员）
-        for u in self._alive(self.battle_players):
-            self._cast_skill(u, self.battle_players, self.battle_enemies)
-        for u in self._alive(self.battle_enemies):
-            self._cast_skill(u, self.battle_enemies, self.battle_players)
+        for u in self._alive(self._combat_p):
+            self._cast_skill(u, self._combat_p, self._combat_e)
+        for u in self._alive(self._combat_e):
+            self._cast_skill(u, self._combat_e, self._combat_p)
 
         # 回合模拟：每回合双方各行动一轮，直到一方全灭
         guard = 0
-        while self._alive(self.battle_players) and self._alive(self.battle_enemies) and guard < 60:
+        while self._alive(self._combat_p) and self._alive(self._combat_e) and guard < 60:
             guard += 1
-            self._one_round(self.battle_players, self.battle_enemies)
-            if self._alive(self.battle_players) and self._alive(self.battle_enemies):
-                self._one_round(self.battle_enemies, self.battle_players)
+            self._one_round(self._combat_p, self._combat_e)
+            if self._alive(self._combat_p) and self._alive(self._combat_e):
+                self._one_round(self._combat_e, self._combat_p)
 
-        if self._alive(self.battle_players) and not self._alive(self.battle_enemies):
+        if self._alive(self._combat_p) and not self._alive(self._combat_e):
             self.battle_events.append({"type": "end", "win": True, "msg": "胜利！"})
-        elif self._alive(self.battle_enemies) and not self._alive(self.battle_players):
+        elif self._alive(self._combat_e) and not self._alive(self._combat_p):
             self.battle_events.append({"type": "end", "win": False, "msg": "失败…"})
         else:
             self.battle_events.append({"type": "end", "win": False, "msg": "平局"})
@@ -590,9 +689,9 @@ class WordArenaGame:
         return any(u is not None and u.skill == skill for u in board)
 
     def _board_of(self, u: Unit) -> List[Optional[Unit]]:
-        if any(x is u for x in self.battle_players):
-            return self.battle_players
-        return self.battle_enemies
+        if any(x is u for x in self._combat_p):
+            return self._combat_p
+        return self._combat_e
 
     def _unit_attack(self, attacker: Unit, target: Unit) -> None:
         dmg = max(1, attacker.total_atk)
@@ -635,7 +734,7 @@ class WordArenaGame:
         if attacker.skill == "pipeline" and target.alive:
             board = self._board_of(attacker)
             allies = [a for a in self._alive(board) if a is not attacker]
-            enemies = self._alive(self.battle_enemies if board is self.battle_players else self.battle_players)
+            enemies = self._alive(self._combat_e if board is self._combat_p else self._combat_p)
             if allies and enemies:
                 partner = random.choice(allies)
                 self._deal_damage(partner, random.choice(enemies), max(1, partner.total_atk))
@@ -658,9 +757,17 @@ class WordArenaGame:
             self.battle_events.append({"type": "block", "msg": f"{target.word} 大蒜减伤"})
             return
         target.hp -= dmg
+        t_side, t_slot = self._side_slot(target)
+        a_side, a_slot = self._side_slot(attacker)
         self.battle_events.append({
-            "type": "hit", "msg": f"{attacker.word} → {target.word} -{dmg}",
-            "target_idx": self._unit_idx(target),
+            "type": "hit",
+            "msg": f"{attacker.word} → {target.word} -{dmg}",
+            "target_side": t_side,
+            "target_slot": t_slot,
+            "attacker_side": a_side,
+            "attacker_slot": a_slot,
+            "damage": dmg,
+            "target_hp": max(0, target.hp),
         })
         # socket：受击时全队回 1 血
         if target.alive and target.skill == "socket":
@@ -670,7 +777,18 @@ class WordArenaGame:
         # shell 反弹
         if target.alive and target.skill == "shell" and attacker.alive:
             attacker.hp -= 1
-            self.battle_events.append({"type": "hit", "msg": f"{target.word} 反弹 -1"})
+            ra_side, ra_slot = self._side_slot(attacker)
+            rs_side, rs_slot = self._side_slot(target)
+            self.battle_events.append({
+                "type": "hit",
+                "msg": f"{target.word} 反弹 -1",
+                "target_side": ra_side,
+                "target_slot": ra_slot,
+                "attacker_side": rs_side,
+                "attacker_slot": rs_slot,
+                "damage": 1,
+                "target_hp": max(0, attacker.hp),
+            })
             if attacker.hp <= 0:
                 self._on_faint(attacker)
         # heap：受击时随机队友 +1 攻
@@ -684,7 +802,17 @@ class WordArenaGame:
             front = [a for a in self._alive(board) if a is not target]
             if front:
                 front[0].hp -= 1
-                self.battle_events.append({"type": "hit", "msg": f"{target.word} 路由转移"})
+                f_side, f_slot = self._side_slot(front[0])
+                self.battle_events.append({
+                    "type": "hit",
+                    "msg": f"{target.word} 路由转移",
+                    "target_side": f_side,
+                    "target_slot": f_slot,
+                    "attacker_side": t_side,
+                    "attacker_slot": t_slot,
+                    "damage": 1,
+                    "target_hp": max(0, front[0].hp),
+                })
                 if front[0].hp <= 0:
                     self._on_faint(front[0])
         # proxy：50% 转移给随机队友
@@ -693,68 +821,97 @@ class WordArenaGame:
             if allies:
                 proxy = random.choice(allies)
                 proxy.hp -= max(0, dmg)
-                self.battle_events.append({"type": "hit", "msg": f"{target.word} 代理转移"})
+                p_side, p_slot = self._side_slot(proxy)
+                self.battle_events.append({
+                    "type": "hit",
+                    "msg": f"{target.word} 代理转移",
+                    "target_side": p_side,
+                    "target_slot": p_slot,
+                    "attacker_side": t_side,
+                    "attacker_slot": t_slot,
+                    "damage": max(0, dmg),
+                    "target_hp": max(0, proxy.hp),
+                })
                 if proxy.hp <= 0:
                     self._on_faint(proxy)
         # 死亡检查
         if not target.alive:
             self._on_faint(target)
 
-    def _spawn_into_board(self, board: List[Optional[Unit]], unit: Unit) -> bool:
-        """把新单位放进棋盘的第一个空槽。"""
+    def _side_slot(self, u: Unit) -> Tuple[str, int]:
+        for i, x in enumerate(self._combat_p):
+            if x is u:
+                return "p", i
+        for i, x in enumerate(self._combat_e):
+            if x is u:
+                return "e", i
+        return "p", 0
+
+    def _spawn_into_board(self, board: List[Optional[Unit]], unit: Unit) -> Optional[int]:
+        """把新单位放进棋盘的第一个空槽，返回槽位。"""
         for i, x in enumerate(board):
             if x is None:
                 board[i] = unit
-                return True
-        return False
+                return i
+        return None
 
     def _unit_idx(self, u: Unit) -> int:
-        for i, x in enumerate(self.battle_players):
+        for i, x in enumerate(self._combat_p):
             if x is u:
                 return i
-        for i, x in enumerate(self.battle_enemies):
+        for i, x in enumerate(self._combat_e):
             if x is u:
                 return i + 100
         return 0
 
     def _on_faint(self, u: Unit) -> None:
         team = self._board_of(u)
-        self.battle_events.append({"type": "faint", "msg": f"{u.word} 倒下了"})
-        # 从棋盘移除（原地留下 None，保持槽位顺序）
+        side, slot = self._side_slot(u)
+        self.battle_events.append({
+            "type": "faint", "msg": f"{u.word} 倒下了", "side": side, "slot": slot,
+        })
         try:
             team[team.index(u)] = None
         except ValueError:
             pass
-        # honey：召唤 1/1 蜜蜂
         if u.honey:
             bee = Unit.from_spec(WORD_BY_KEY["bug"])
             bee.atk, bee.hp, bee.max_hp = 1, 1, 1
-            if self._spawn_into_board(team, bee):
-                self.battle_events.append({"type": "spawn", "msg": "蜂蜜：蜜蜂 1/1 出现"})
-        # cookie：死亡留饼干（下次喂食效果×2）
+            idx = self._spawn_into_board(team, bee)
+            if idx is not None:
+                self.battle_events.append({
+                    "type": "spawn",
+                    "msg": "蜂蜜：蜜蜂 1/1 出现",
+                    "side": side,
+                    "slot": idx,
+                    "unit": unit_to_dict(bee),
+                })
         if u.cookie:
             self.battle_events.append({"type": "spawn", "msg": "会话饼干已留下"})
-        # monitor：死亡时全队回 2 血
         if u.skill == "monitor":
             for a in self._alive(team):
                 a.hp = min(a.max_hp, a.hp + 2)
             self.battle_events.append({"type": "spawn", "msg": "监控：全队回 2 血"})
-        # botnet：死亡时全队 +1 攻
         if u.skill == "botnet":
             for a in self._alive(team):
                 a.buffed_atk += 1
             self.battle_events.append({"type": "spawn", "msg": "僵尸网络：全队 +1 攻"})
-        # micro：分裂两只半属性小服务
         if u.skill == "micro":
             for _ in range(2):
                 m = Unit.from_spec(WORD_BY_KEY["java"])
                 m.atk = max(1, u.atk // 2)
-                m.hp = max(1, u.hp // 2)
+                m.hp = max(1, u.max_hp // 2)
                 m.max_hp = m.hp
-                self._spawn_into_board(team, m)
-            self.battle_events.append({"type": "spawn", "msg": "微服务分裂"})
-        # git：队友死亡时 +2 攻
-        if team is self.battle_players:
+                idx = self._spawn_into_board(team, m)
+                if idx is not None:
+                    self.battle_events.append({
+                        "type": "spawn",
+                        "msg": "微服务分裂",
+                        "side": side,
+                        "slot": idx,
+                        "unit": unit_to_dict(m),
+                    })
+        if team is self._combat_p:
             for a in self._alive(team):
                 if a.skill == "git" and a is not u:
                     a.dead_atk += 2
@@ -777,8 +934,16 @@ class WordArenaGame:
             if not u.cloned:
                 clone = u.copy_for_battle()
                 clone.cloned = True
-                if self._spawn_into_board(own, clone):
-                    self.battle_events.append({"type": "spawn", "msg": f"{u.word} 镜像复制"})
+                idx = self._spawn_into_board(own, clone)
+                if idx is not None:
+                    side = "p" if own is self._combat_p else "e"
+                    self.battle_events.append({
+                        "type": "spawn",
+                        "msg": f"{u.word} 镜像复制",
+                        "side": side,
+                        "slot": idx,
+                        "unit": unit_to_dict(clone),
+                    })
         elif u.skill == "node":
             idx = self._unit_idx(u)
             if idx < len(own):
@@ -822,7 +987,40 @@ class WordArenaGame:
             self.battle_events.append({"type": "skill", "msg": f"{u.word} 链式增长 +1/+1"})
 
     # ---------- 战斗播放 ----------
+    def _visual_board(self, side: str) -> List[Optional[Unit]]:
+        return self.battle_players if side == "p" else self.battle_enemies
+
+    def _apply_visual(self, ev: dict) -> None:
+        kind = ev.get("type")
+        if kind == "hit":
+            side = ev.get("target_side", "e")
+            slot = int(ev.get("target_slot", 0))
+            board = self._visual_board(side)
+            if 0 <= slot < len(board) and board[slot] is not None:
+                board[slot].hp = int(ev.get("target_hp", board[slot].hp))
+            self.hit_flash[side] = 1.0
+            if ev.get("attacker_side") == "p":
+                self.battle_focus_p = int(ev.get("attacker_slot", 0))
+            elif ev.get("attacker_side") == "e":
+                self.battle_focus_e = int(ev.get("attacker_slot", 0))
+            self._spawn_float_damage(ev)
+        elif kind == "faint":
+            side = ev.get("side", "p")
+            slot = int(ev.get("slot", 0))
+            board = self._visual_board(side)
+            if 0 <= slot < len(board):
+                board[slot] = None
+        elif kind == "spawn" and ev.get("unit"):
+            side = ev.get("side", "p")
+            slot = int(ev.get("slot", 0))
+            board = self._visual_board(side)
+            spawned = unit_from_dict(ev.get("unit"))
+            if spawned is not None and 0 <= slot < len(board):
+                board[slot] = spawned
+
     def _update_battle(self, dt: float) -> None:
+        self.hit_flash["p"] = max(0.0, self.hit_flash["p"] - dt * 2.5)
+        self.hit_flash["e"] = max(0.0, self.hit_flash["e"] - dt * 2.5)
         self.battle_event_cooldown -= dt
         if self.battle_event_cooldown > 0:
             return
@@ -836,24 +1034,39 @@ class WordArenaGame:
         if ev["type"] == "end":
             self._on_battle_end(ev)
             return
-        if ev.get("target_idx") is not None:
-            self._spawn_float(ev)
+        self._apply_visual(ev)
         self._set_log(ev["msg"])
 
-    def _spawn_float(self, ev: dict) -> None:
-        # 在对应单位头上飘伤害数字
-        idx = ev.get("target_idx", 0)
-        if idx < 100 and idx < len(self.battle_players) and self.battle_players[idx]:
-            u = self.battle_players[idx]
-            x, y = 420 + idx * 150, 320
-        else:
-            j = idx - 100
-            if 0 <= j < len(self.battle_enemies) and self.battle_enemies[j]:
-                u = self.battle_enemies[j]
-                x, y = 420 + j * 150, 150
-            else:
-                return
-        self.float_texts.append({"x": x, "y": y, "text": ev["msg"].split(" -")[-1], "t": 0.0})
+    def _battle_slot_rect(self, side: str, slot: int) -> "pygame.Rect":
+        x0, w, gap = 548, 96, 8
+        y = 128 if side == "e" else 338
+        dy = 0
+        if side == "p" and slot == self.battle_focus_p and self.hit_flash["e"] > 0:
+            dy = -16
+        if side == "e" and slot == self.battle_focus_e and self.hit_flash["p"] > 0:
+            dy = 16
+        return pygame.Rect(x0 + slot * (w + gap), y + dy, w, 108)
+
+    def _battle_slot_center(self, side: str, slot: int) -> Tuple[int, int]:
+        r = self._battle_slot_rect(side, slot)
+        return r.centerx, r.y + 8
+
+    def _spawn_float_damage(self, ev: dict) -> None:
+        side = str(ev.get("target_side", "e"))
+        slot = int(ev.get("target_slot", 0))
+        x, y = self._battle_slot_center(side, slot)
+        self.float_texts.append({
+            "x": x, "y": y, "ttl": 0.9, "text": f"-{int(ev.get('damage', 1))}",
+        })
+
+    def _update_float_texts(self, dt: float) -> None:
+        alive: List[dict] = []
+        for t in self.float_texts:
+            t["ttl"] -= dt
+            t["y"] -= dt * 38
+            if t["ttl"] > 0:
+                alive.append(t)
+        self.float_texts = alive
 
     def _on_battle_end(self, ev: dict) -> None:
         self.battle_over = True
@@ -906,16 +1119,15 @@ class WordArenaGame:
 
     def _draw_header(self) -> None:
         pygame.draw.rect(self.screen, COL_PANEL, (0, 0, W, 54))
-        self.screen.blit(self.font.render(f"金币 {self.gold:.1f}", True, COL_GOLD), (16, 10))
-        self.screen.blit(self.font.render(f"钻石 {self.diamond:.1f}", True, COL_DIAM), (160, 10))
-        self.screen.blit(self.font.render(f"回合 {max(1, self.round_no)}", True, COL_TEXT), (330, 10))
-        self.screen.blit(self.font_sm.render(f"层级 {TIER_NAMES[self.available_tiers-1]}", True, COL_MUTED), (470, 16))
-        # 奖杯
-        self.screen.blit(self.font_sm.render(f"奖杯 {self.trophies}/{WIN_TROPHIES}", True, COL_STAR), (620, 16))
-        # 生命
+        self.screen.blit(self.font.render(f"铜币 {int(self.copper)}", True, COL_COPPER), (16, 10))
+        self.screen.blit(self.font.render(f"金币 {self.gold:.1f}", True, COL_GOLD), (160, 10))
+        self.screen.blit(self.font.render(f"钻石 {self.diamond:.1f}", True, COL_DIAM), (310, 10))
+        self.screen.blit(self.font.render(f"回合 {max(1, self.round_no)}", True, COL_TEXT), (460, 10))
+        self.screen.blit(self.font_sm.render(f"层级 {TIER_NAMES[self.available_tiers-1]}", True, COL_MUTED), (600, 16))
+        self.screen.blit(self.font_sm.render(f"奖杯 {self.trophies}/{WIN_TROPHIES}", True, COL_STAR), (730, 16))
         for i in range(self.lives):
-            pygame.draw.circle(self.screen, COL_HP, (W - 40 - i * 26, 26), 8)
-        self.screen.blit(self.font_sm.render(f"胜 {self.wins} 负 {self.losses}", True, COL_MUTED), (W - 240, 16))
+            pygame.draw.circle(self.screen, COL_HP, (W - 40 - i * 22, 26), 7)
+        self.screen.blit(self.font_sm.render(f"胜 {self.wins} 负 {self.losses}", True, COL_MUTED), (W - 280, 16))
 
     def _draw_title(self) -> None:
         lines = [
@@ -923,7 +1135,8 @@ class WordArenaGame:
             ("用英语计算机词汇当棋子，边玩边学", self.font_sm, COL_MUTED),
             ("点击商店买词汇/食物 → 三合升星 → 自动战斗 → 10 奖杯通关", self.font_sm, COL_MUTED),
             ("", self.font_sm, COL_MUTED),
-            (f"入场费 {ENTRY_FEE} 金币", self.font_sm, COL_GOLD),
+            (f"入场费已从背包扣除 {ENTRY_FEE} 金币", self.font_sm, COL_GOLD),
+            (f"局内用铜币买棋；商店可花 {LIFE_GOLD_COST} 金币买 1 命", self.font_sm, COL_COPPER),
         ]
         y = 88
         for text, f, c in lines:
@@ -958,7 +1171,7 @@ class WordArenaGame:
         if shop_live:
             self._register_click(pygame.Rect(330, 82, 90, 32), "refresh")
         pygame.draw.rect(self.screen, COL_CARD, (330, 82, 90, 32), border_radius=8)
-        self.screen.blit(self.font_sm.render("刷新 -1", True, COL_GOLD), (344, 90))
+        self.screen.blit(self.font_sm.render("刷新 -1", True, COL_COPPER), (344, 90))
         for i, slot in enumerate(self.shop):
             x, y = 30, 130 + i * 120
             pygame.draw.rect(self.screen, COL_CARD, (x, y, 390, 105), border_radius=10)
@@ -979,13 +1192,13 @@ class WordArenaGame:
                 self.screen.blit(self.font_sm.render(f"T{spec.tier} {spec.cn}", True, COL_TEXT), (x + 20, y + 42))
                 self.screen.blit(self.font_sm.render(f"攻{spec.base_atk} 血{spec.base_hp}", True, COL_MUTED), (x + 150, y + 12))
                 self.screen.blit(self.font_sm.render(spec.skill_cn, True, COL_MUTED), (x + 20, y + 66))
-                self.screen.blit(self.font_sm.render(f"${spec.cost}", True, COL_GOLD), (x + 340, y + 70))
+                self.screen.blit(self.font_sm.render(f"{spec.cost}铜", True, COL_COPPER), (x + 328, y + 70))
             else:
                 f = slot.spec
                 self.screen.blit(self.font.render(f.name, True, COL_FOOD), (x + 20, y + 12))
                 self.screen.blit(self.font_sm.render(f.cn, True, COL_TEXT), (x + 20, y + 42))
                 self.screen.blit(self.font_sm.render(f.desc, True, COL_MUTED), (x + 20, y + 66))
-                self.screen.blit(self.font_sm.render(f"${f.cost}", True, COL_GOLD), (x + 340, y + 70))
+                self.screen.blit(self.font_sm.render(f"{f.cost}铜", True, COL_COPPER), (x + 328, y + 70))
         # 队伍
         pygame.draw.rect(self.screen, COL_PANEL, (16, 520, 420, 165), border_radius=12)
         self.screen.blit(self.font.render("我的队伍", True, COL_TEXT), (30, 536))
@@ -1014,6 +1227,14 @@ class WordArenaGame:
             self._register_click(pygame.Rect(560, 520, 200, 50), "start_battle")
             pygame.draw.rect(self.screen, COL_ACCENT, (560, 520, 200, 50), border_radius=12)
             self.screen.blit(self.font.render("开战", True, COL_TEXT), (620, 532))
+            life_btn = pygame.Rect(780, 520, 220, 50)
+            pygame.draw.rect(self.screen, COL_CARD, life_btn, border_radius=12)
+            pygame.draw.rect(self.screen, COL_GOLD, life_btn, 1, border_radius=12)
+            self._register_click(life_btn, "buy_life")
+            self.screen.blit(
+                self.font_sm.render(f"买命 -{LIFE_GOLD_COST} 金", True, COL_GOLD),
+                (800, 534),
+            )
             # 敌方预览
             pygame.draw.rect(self.screen, COL_PANEL, (520, 70, 560, 430), border_radius=12)
             self.screen.blit(self.font.render("敌方（预览）", True, COL_ENEMY), (540, 86))
@@ -1029,7 +1250,10 @@ class WordArenaGame:
             # 战斗中/结算：双方对阵
             pygame.draw.rect(self.screen, COL_PANEL, (520, 70, 560, 430), border_radius=12)
             self.screen.blit(self.font.render("战斗", True, COL_ENEMY), (540, 86))
+            self.screen.blit(self.font_sm.render("敌方", True, COL_ENEMY), (548, 108))
+            self.screen.blit(self.font_sm.render("我方", True, COL_TEXT), (548, 318))
             self._draw_battle_units()
+            self._draw_float_texts()
             if self.phase == "battle_res":
                 self._register_click(pygame.Rect(820, 580, 240, 52), "next_round")
                 pygame.draw.rect(self.screen, COL_ACCENT, (820, 580, 240, 52), border_radius=12)
@@ -1040,44 +1264,43 @@ class WordArenaGame:
             self._next_round_or_end()
 
     def _draw_battle_units(self) -> None:
-        # 我方（左侧）
-        for i, u in enumerate(self.battle_players):
-            if u is None:
-                continue
-            x, y = 540 + i * 100, 160
-            c = TIER_COLORS[u.tier - 1]
-            pygame.draw.rect(self.screen, COL_CARD, (x, y, 90, 110), border_radius=10)
-            if not u.alive:
-                pygame.draw.rect(self.screen, (30, 32, 45), (x, y, 90, 110), border_radius=10)
-                self.screen.blit(self.font_sm.render("倒下", True, COL_MUTED), (x + 24, y + 40))
-                continue
-            self.screen.blit(self.font_sm.render(u.word, True, c), (x + 8, y + 8))
-            self.screen.blit(self.font_sm.render(f"{u.total_atk}/{u.hp}", True, COL_TEXT), (x + 8, y + 34))
-            self.screen.blit(self.font_sm.render("★" * u.star, True, COL_STAR), (x + 8, y + 56))
-        # 敌方（右侧）
-        for i, u in enumerate(self.battle_enemies):
-            if u is None:
-                continue
-            x, y = 740 + i * 100, 160
-            c = TIER_COLORS[u.tier - 1]
-            pygame.draw.rect(self.screen, COL_CARD, (x, y, 90, 110), border_radius=10)
-            if not u.alive:
-                pygame.draw.rect(self.screen, (30, 32, 45), (x, y, 90, 110), border_radius=10)
-                self.screen.blit(self.font_sm.render("倒下", True, COL_MUTED), (x + 24, y + 40))
-                continue
-            self.screen.blit(self.font_sm.render(u.word, True, c), (x + 8, y + 8))
-            self.screen.blit(self.font_sm.render(f"{u.total_atk}/{u.hp}", True, COL_TEXT), (x + 8, y + 34))
-            self.screen.blit(self.font_sm.render("★" * u.star, True, COL_STAR), (x + 8, y + 56))
+        vs = self.font_lg.render("VS", True, COL_ACCENT)
+        self.screen.blit(vs, (760, 248))
+        for side, board in (("e", self.battle_enemies), ("p", self.battle_players)):
+            for i, u in enumerate(board):
+                rect = self._battle_slot_rect(side, i)
+                if u is None:
+                    pygame.draw.rect(self.screen, COL_CARD, rect, border_radius=10)
+                    continue
+                flash = self.hit_flash.get(side, 0.0)
+                focus = self.battle_focus_e if side == "e" else self.battle_focus_p
+                bg = COL_CARD
+                if i == focus and flash > 0:
+                    bg = (92, 44, 44) if side == "e" else (42, 80, 46)
+                    pygame.draw.rect(self.screen, COL_ACCENT, rect.inflate(4, 4), 2, border_radius=10)
+                pygame.draw.rect(self.screen, bg, rect, border_radius=10)
+                if not u.alive:
+                    self.screen.blit(self.font_sm.render("倒下", True, COL_MUTED), (rect.x + 24, rect.y + 40))
+                    continue
+                c = TIER_COLORS[u.tier - 1] if side == "p" else COL_ENEMY
+                self.screen.blit(self.font_sm.render(u.word, True, c), (rect.x + 8, rect.y + 8))
+                self.screen.blit(
+                    self.font_sm.render(f"{u.total_atk}/{u.hp}", True, COL_TEXT),
+                    (rect.x + 8, rect.y + 34),
+                )
+                self.screen.blit(self.font_sm.render("★" * u.star, True, COL_STAR), (rect.x + 8, rect.y + 56))
+                bar_w = int((rect.w - 8) * max(0.0, u.hp / max(1, u.max_hp)))
+                pygame.draw.rect(self.screen, (70, 76, 96), (rect.x + 4, rect.bottom - 10, rect.w - 8, 5), border_radius=2)
+                if bar_w > 0:
+                    bar_c = (220, 100, 100) if side == "e" else (120, 220, 140)
+                    pygame.draw.rect(self.screen, bar_c, (rect.x + 4, rect.bottom - 10, bar_w, 5), border_radius=2)
 
     def _draw_float_texts(self) -> None:
         for f in self.float_texts:
-            f["t"] += 1 / FPS
-            if f["t"] > 0.9:
-                continue
-            alpha = int(255 * (1 - f["t"] / 0.9))
-            s = self.font_sm.render(f["text"], True, (255, 255, 255)).copy()
+            alpha = max(0, min(255, int(255 * (f["ttl"] / 0.9))))
+            s = self.font_sm.render(f["text"], True, (255, 140, 140)).copy()
             s.set_alpha(alpha)
-            self.screen.blit(s, (int(f["x"]), int(f["y"]) - int(f["t"] * 30)))
+            self.screen.blit(s, (int(f["x"]) - s.get_width() // 2, int(f["y"])))
 
     def _draw_footer(self) -> None:
         pygame.draw.rect(self.screen, COL_PANEL, (0, H - 40, W, 40))
@@ -1098,7 +1321,7 @@ class WordArenaGame:
     def _dummy_step(self, dt: float) -> None:
         self.dummy_t += dt
         if self.phase == "title":
-            if self.gold >= ENTRY_FEE and not self.entry_paid:
+            if not self.entry_paid:
                 self._pay_entry()
                 return
             if self.entry_paid and self.dummy_t > 0.3:
@@ -1109,7 +1332,7 @@ class WordArenaGame:
             if self.dummy_t < 1.0:
                 # 有金币就买第一个可买的
                 for i, slot in enumerate(self.shop):
-                    if slot.spec is not None and self.gold >= slot.spec.cost:
+                    if slot.spec is not None and self.copper >= slot.spec.cost:
                         self._click_buy_shop(i)
                         return
                 # 都买不起：刷新（金币不足时会被拒绝）
@@ -1137,6 +1360,7 @@ class WordArenaGame:
             diamond_delta=self.diamond - self.initial_diamond,
             waves_cleared=self.round_no,
             letters=self.letters_awarded,
+            word_lineups=self.new_lineups,
             message=f"词汇自走棋：{self.trophies} 奖杯 · {self.wins}胜{self.losses}负 · 最高回合 {self.round_no}",
         )
         result.write(self.session.result_path())
