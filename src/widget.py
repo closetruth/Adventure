@@ -583,7 +583,11 @@ class FloatingWidget(QWidget):
         """条上周期与存档 ease_chests 对齐，避免重启重复领。"""
         bar = self.roll_progress_bar
         ec = self.state.ease_chests
-        if (not ec.holding) and ec.cycle_id != bar.cycle_id:
+        if (
+            ec.origin_units <= 0
+            and (not ec.holding)
+            and ec.cycle_id != bar.cycle_id
+        ):
             ec.reset_for_cycle(bar.cycle_id)
         else:
             ec.cycle_id = bar.cycle_id
@@ -599,17 +603,18 @@ class FloatingWidget(QWidget):
         self._paint_global_stats()
         self._fly_chest_to_bag(index, rarity)
         if index == 0:
-            ec.holding = False
             units = self._running_goal_units()
-            if units is not None:
-                self.roll_progress_bar.set_progress(
-                    units,
-                    freeze_at_end=False,
-                    holding=False,
-                )
-                if ec.cycle_id != self.roll_progress_bar.cycle_id:
-                    ec.reset_for_cycle(self.roll_progress_bar.cycle_id)
-                    self.roll_progress_bar.apply_claimed(ec.claimed)
+            if units is None:
+                units = ec.origin_units
+            ec.begin_next_cycle(units)
+            self.roll_progress_bar.set_progress(
+                units,
+                freeze_at_end=True,
+                holding=False,
+                held_cycle_id=ec.cycle_id,
+                origin_units=ec.origin_units,
+            )
+            self.roll_progress_bar.apply_claimed(ec.claimed)
         self.chest_bagged.emit()
 
     def _update_roll_bar(self) -> None:
@@ -625,6 +630,7 @@ class FloatingWidget(QWidget):
                 freeze_at_end=not ec.claimed[0],
                 holding=ec.holding,
                 held_cycle_id=ec.cycle_id,
+                origin_units=ec.origin_units,
             )
             self._sync_ease_chests_claimed()
         chance_label = (

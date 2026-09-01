@@ -77,8 +77,16 @@ def resolve_held_cycle(
     freeze_at_end: bool,
     holding: bool,
     held_cycle_id: int,
+    origin_units: int = 0,
 ) -> Tuple[int, int, int, bool]:
-    """满格且本轮箱子未领时钳在 100%；返回 progress, span, cycle_id, holding。"""
+    """满格且本轮箱子未领时钳在 100%；origin_units>0 时从该起点涨、不吃积压。"""
+    if origin_units > 0:
+        cid = int(held_cycle_id)
+        span = _ease_span_for_cycle(cid)
+        progress = max(0, int(units) - int(origin_units))
+        if freeze_at_end and (holding or (span > 0 and progress >= span)):
+            return span, span, cid, True
+        return min(progress, span), span, cid, False
     progress, span, cid = _independent_cycle(units)
     if not freeze_at_end:
         return progress, span, cid, False
@@ -368,13 +376,15 @@ class EasedProgressBar(QWidget):
         freeze_at_end: bool = False,
         holding: bool = False,
         held_cycle_id: int = 0,
+        origin_units: int = 0,
     ) -> bool:
         """按运行中目标的 units 刷新。满格且 freeze_at_end 时停住不换轮。"""
         progress, span, cycle_id, now_holding = resolve_held_cycle(
             units,
             freeze_at_end=freeze_at_end,
             holding=holding,
-            held_cycle_id=held_cycle_id if holding else self._cycle_id,
+            held_cycle_id=held_cycle_id if (holding or origin_units > 0) else self._cycle_id,
+            origin_units=origin_units,
         )
         cycle_changed = span != self._span or cycle_id != self._cycle_id
         if cycle_changed:

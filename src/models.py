@@ -514,6 +514,7 @@ class EaseChestsState:
     cycle_id: int = 0
     claimed: Tuple[bool, ...] = (False,)
     holding: bool = False  # 满格停住、等点本轮箱子
+    origin_units: int = 0  # 领取后下一轮从 0 涨；相对该起点计进度
 
     @classmethod
     def from_dict(cls, data: Dict) -> "EaseChestsState":
@@ -530,6 +531,7 @@ class EaseChestsState:
             cycle_id=int(data.get("cycle_id", 0)),
             claimed=claimed,
             holding=bool(data.get("holding", False)),
+            origin_units=max(0, int(data.get("origin_units", 0))),
         )
 
     def to_dict(self) -> Dict:
@@ -537,10 +539,18 @@ class EaseChestsState:
             "cycle_id": int(self.cycle_id),
             "claimed": [bool(self.claimed[0]) if self.claimed else False],
             "holding": bool(self.holding),
+            "origin_units": int(self.origin_units),
         }
 
     def reset_for_cycle(self, cycle_id: int) -> None:
         self.cycle_id = int(cycle_id)
+        self.claimed = (False,)
+        self.holding = False
+
+    def begin_next_cycle(self, units: int) -> None:
+        """点完箱子：丢掉满格等待时的积压，从 0 开下一轮。"""
+        self.origin_units = max(0, int(units))
+        self.cycle_id = int(self.cycle_id) + 1
         self.claimed = (False,)
         self.holding = False
 

@@ -57,9 +57,18 @@ class EaseChestsModelTests(unittest.TestCase):
         self.assertEqual(ec.claimed, (True,))
 
     def test_reset_for_cycle_clears_claimed(self):
-        ec = EaseChestsState(cycle_id=1, claimed=(True,), holding=True)
+        ec = EaseChestsState(cycle_id=1, claimed=(True,), holding=True, origin_units=90)
         ec.reset_for_cycle(2)
         self.assertEqual(ec.cycle_id, 2)
+        self.assertEqual(ec.claimed, (False,))
+        self.assertFalse(ec.holding)
+        self.assertEqual(ec.origin_units, 90)
+
+    def test_begin_next_cycle_from_claim(self):
+        ec = EaseChestsState(cycle_id=3, claimed=(True,), holding=True, origin_units=10)
+        ec.begin_next_cycle(400)
+        self.assertEqual(ec.cycle_id, 4)
+        self.assertEqual(ec.origin_units, 400)
         self.assertEqual(ec.claimed, (False,))
         self.assertFalse(ec.holding)
 
@@ -90,7 +99,20 @@ class EaseChestsModelTests(unittest.TestCase):
                 self.assertEqual(loaded.inventory.chests[1].rarity, 4)
                 self.assertEqual(loaded.ease_chests.cycle_id, 7)
                 self.assertEqual(loaded.ease_chests.claimed, (True,))
+                self.assertEqual(loaded.ease_chests.origin_units, 0)
                 self.assertIsNone(validate_state_invariants(loaded))
+
+    def test_roundtrip_origin_units(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("src.storage.get_data_dir", return_value=Path(tmp)):
+                state = AppState()
+                state.ease_chests = EaseChestsState(
+                    cycle_id=5, origin_units=320, holding=False
+                )
+                save_state(state)
+                loaded = load_state()
+                self.assertEqual(loaded.ease_chests.origin_units, 320)
+                self.assertEqual(loaded.ease_chests.cycle_id, 5)
 
     def test_legacy_three_claimed_uses_last_slot(self):
         waiting = EaseChestsState.from_dict(
@@ -136,18 +158,35 @@ class HoldAtEndTests(unittest.TestCase):
         _p, _s, natural_cid = _independent_cycle(span0 + 80)
         self.assertNotEqual(natural_cid, 0)
 
-    def test_release_carries_overflow_to_next_cycle(self):
+    def test_claim_starts_next_cycle_at_zero(self):
+        """满格等待时攒的进度丢掉；领取后从 0 开下一轮。"""
         span0 = _ease_span_for_cycle(0)
-        overflow = 80
+        units_at_claim = span0 + 80
         progress, span, cid, holding = resolve_held_cycle(
-            span0 + overflow,
-            freeze_at_end=False,
+            units_at_claim,
+            freeze_at_end=True,
             holding=False,
-            held_cycle_id=0,
+            held_cycle_id=1,
+            origin_units=units_at_claim,
         )
         self.assertFalse(holding)
         self.assertEqual(cid, 1)
-        self.assertEqual(progress, overflow)
+        self.assertEqual(progress, 0)
+        self.assertEqual(span, _ease_span_for_cycle(1))
+
+    def test_next_cycle_fills_from_origin(self):
+        span0 = _ease_span_for_cycle(0)
+        origin = span0 + 80
+        progress, span, cid, holding = resolve_held_cycle(
+            origin + 10,
+            freeze_at_end=True,
+            holding=False,
+            held_cycle_id=1,
+            origin_units=origin,
+        )
+        self.assertFalse(holding)
+        self.assertEqual(cid, 1)
+        self.assertEqual(progress, 10)
         self.assertEqual(span, _ease_span_for_cycle(1))
 
 
