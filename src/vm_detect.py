@@ -66,13 +66,15 @@ def grabbed_input_should_count(
     now_mono: float,
     last_op_mono: float,
     cooldown_sec: float,
+    moved: bool = False,
 ) -> bool:
     """虚拟机抢走键鼠时：LastInput 变了、光标几乎没动 → 视为一次点击/按键。
 
     按下和松开都会刷新 LastInput，且 Raw Input 可能已经记过，
     所以 ``last_op_mono`` 起 cooldown 内不再记。
+    本轮已有位移时不当点击（移动按路程另计）。
     """
-    if already_counted or not vm_active:
+    if already_counted or not vm_active or moved:
         return False
     if last_tick is None or prev_tick is None:
         return False

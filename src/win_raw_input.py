@@ -20,6 +20,7 @@ RIDEV_REMOVE = 0x00000001
 RIM_TYPEMOUSE = 0
 RIM_TYPEKEYBOARD = 1
 RI_KEY_BREAK = 0x01
+MOUSE_MOVE_ABSOLUTE = 0x01
 
 _RI_MOUSE_DOWN = (
     (0x0001, 0x01),
@@ -111,12 +112,14 @@ class RawInputFilter(QAbstractNativeEventFilter):
         on_mouse_up: Callable[[int], None],
         on_key_down: Callable[[int], None],
         on_key_up: Callable[[int], None],
+        on_mouse_move: Callable[[int, int], None],
     ):
         super().__init__()
         self._on_mouse_down = on_mouse_down
         self._on_mouse_up = on_mouse_up
         self._on_key_down = on_key_down
         self._on_key_up = on_key_up
+        self._on_mouse_move = on_mouse_move
 
     def nativeEventFilter(self, eventType, message) -> bool:
         try:
@@ -131,6 +134,7 @@ class RawInputFilter(QAbstractNativeEventFilter):
                 self._on_mouse_up,
                 self._on_key_down,
                 self._on_key_up,
+                self._on_mouse_move,
             )
         except Exception:
             logger.debug("Raw Input 解析失败", exc_info=True)
@@ -142,6 +146,7 @@ def install_raw_input(
     on_mouse_up: Callable[[int], None],
     on_key_down: Callable[[int], None],
     on_key_up: Callable[[int], None],
+    on_mouse_move: Callable[[int, int], None],
 ) -> tuple[Optional[RawInputFilter], Optional[QWidget]]:
     if not is_windows():
         return None, None
@@ -157,7 +162,13 @@ def install_raw_input(
         logger.warning("RegisterRawInputDevices 失败")
         widget.deleteLater()
         return None, None
-    filt = RawInputFilter(on_mouse_down, on_mouse_up, on_key_down, on_key_up)
+    filt = RawInputFilter(
+        on_mouse_down,
+        on_mouse_up,
+        on_key_down,
+        on_key_up,
+        on_mouse_move,
+    )
     app.installNativeEventFilter(filt)
     logger.info("Raw Input 已注册 (INPUTSINK)")
     return filt, widget
@@ -224,6 +235,7 @@ def _dispatch_raw(
     on_mouse_up: Callable[[int], None],
     on_key_down: Callable[[int], None],
     on_key_up: Callable[[int], None],
+    on_mouse_move: Callable[[int, int], None],
 ) -> None:
     user32 = _user32_dll()
     header_size = ctypes.sizeof(RAWINPUTHEADER)
@@ -249,6 +261,12 @@ def _dispatch_raw(
         for bit, vk in _RI_MOUSE_UP:
             if flags & bit:
                 on_mouse_up(vk)
+        if int(mouse.usFlags) & MOUSE_MOVE_ABSOLUTE:
+            return
+        dx = int(mouse.lLastX)
+        dy = int(mouse.lLastY)
+        if dx or dy:
+            on_mouse_move(dx, dy)
     elif header.dwType == RIM_TYPEKEYBOARD:
         kb = RAWKEYBOARD.from_buffer_copy(buf, header_size)
         vk = int(kb.VKey)

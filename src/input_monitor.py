@@ -6,15 +6,17 @@
 备选模式（非 Windows / 显式指定）：pynput 全局钩子。
 
 每次独立的按键按下 / 鼠标按下视为一次「操作」。
+鼠标移动按路程累计，每满 80 像素记一次，最快约 10 次/秒。
 点到本应用窗口、点到虚拟机里面都计入。
-虚拟机抢走键鼠时：Raw Input + LastInput 回退补计数；同一次点击只记一次。
-光标滑出虚拟机时不计（松开/抢鼠标的假点击）。
+虚拟机抢走键鼠时：Raw Input + LastInput 回退补按下；同一次点击只记一次。
+光标滑出虚拟机时不计假点击（移动本身仍计）。
 UI 刷新在鼠标按下期间推迟，避免吃掉点击。
 """
 from __future__ import annotations
 
 import ctypes
 import logging
+import math
 import threading
 import time
 from typing import Callable, Optional
@@ -61,6 +63,8 @@ _POLL_INTERVAL_MS = 50
 _SLEEP_GAP_SEC = 1.5
 
 _VM_OP_DEDUP_SEC = 0.25
+_MOVE_OP_PIXELS = 80.0
+_MOVE_OP_MIN_SEC = 0.1
 
 
 class InputMonitor:
@@ -91,8 +95,12 @@ class InputMonitor:
         self._prev_last_input: Optional[int] = None
         self._prev_cursor: Optional[tuple[int, int]] = None
         self._last_op_mono: float = -1.0
+        self._last_move_mono: float = -1.0
         self._was_over_vm = False
         self._ignore_until = 0.0
+        self._move_accum = 0.0
+        self._raw_move_dx = 0.0
+        self._raw_move_dy = 0.0
         self._raw_filter = None
         self._raw_widget = None
 
@@ -183,6 +191,7 @@ class InputMonitor:
                 on_mouse_up=self._on_raw_mouse_up,
                 on_key_down=self._on_raw_key_down,
                 on_key_up=self._on_raw_key_up,
+                on_mouse_move=self._on_raw_mouse_move,
             )
         except Exception:
             logger.debug("Raw Input 启动失败", exc_info=True)
@@ -210,6 +219,10 @@ class InputMonitor:
                 self._buttons_down.clear()
                 self._prev_last_input = None
                 self._prev_cursor = None
+                self._move_accum = 0.0
+                self._raw_move_dx = 0.0
+                self._raw_move_dy = 0.0
+                self._last_move_mono = -1.0
                 self._last_poll_time = now
                 return
             self._last_poll_time = now
@@ -235,7 +248,11 @@ class InputMonitor:
                             self._on_key_pressed()
                     else:
                         self._keys_down.discard(vk)
-            self._maybe_count_grabbed_vm(already_counted=self._op_seq != seq_before)
+            moved = self._settle_mouse_motion(cursor_screen_pos())
+            self._maybe_count_grabbed_vm(
+                already_counted=self._op_seq != seq_before,
+                moved=moved,
+            )
         except Exception:
             logger.debug("输入轮询异常", exc_info=True)
 
@@ -246,7 +263,10 @@ class InputMonitor:
             on_press=self._on_key_press_hook,
             on_release=self._on_key_release_hook,
         )
-        self._mouse_listener = mouse.Listener(on_click=self._on_click_hook)
+        self._mouse_listener = mouse.Listener(
+            on_click=self._on_click_hook,
+            on_move=self._on_move_hook,
+        )
         self._kb_listener.daemon = True
         self._mouse_listener.daemon = True
         self._kb_listener.start()
@@ -273,6 +293,9 @@ class InputMonitor:
                 self._hook_buttons_down.discard(button)
                 return
         self._on_mouse_pressed()
+
+    def _on_move_hook(self, x, y) -> None:
+        self._settle_mouse_motion((int(x), int(y)))
 
     # ---------- 共用 ----------
     def _cursor_over_vm(self) -> bool:
@@ -313,7 +336,46 @@ class InputMonitor:
     def _on_raw_key_up(self, vk: int) -> None:
         self._keys_down.discard(vk)
 
-    def _maybe_count_grabbed_vm(self, already_counted: bool) -> None:
+    def _on_raw_mouse_move(self, dx: int, dy: int) -> None:
+        self._raw_move_dx += dx
+        self._raw_move_dy += dy
+
+    def _apply_mouse_motion(self, dist: float) -> None:
+        if dist <= 0:
+            return
+        self._move_accum += dist
+        if self._move_accum < _MOVE_OP_PIXELS:
+            return
+        now = time.perf_counter()
+        if self._last_move_mono >= 0 and (now - self._last_move_mono) < _MOVE_OP_MIN_SEC:
+            self._move_accum = _MOVE_OP_PIXELS
+            return
+        self._move_accum -= _MOVE_OP_PIXELS
+        self._count_op(kind="move")
+
+    def _settle_mouse_motion(self, pos: Optional[tuple[int, int]]) -> bool:
+        screen_dist = 0.0
+        if self._prev_cursor is not None and pos is not None:
+            screen_dist = math.hypot(
+                pos[0] - self._prev_cursor[0],
+                pos[1] - self._prev_cursor[1],
+            )
+        raw_dist = math.hypot(self._raw_move_dx, self._raw_move_dy)
+        self._raw_move_dx = 0.0
+        self._raw_move_dy = 0.0
+        moved = False
+        if screen_dist >= 1.0:
+            self._apply_mouse_motion(screen_dist)
+            moved = True
+        elif raw_dist > 0.0:
+            self._apply_mouse_motion(raw_dist)
+            moved = True
+        self._prev_cursor = pos
+        return moved
+
+    def _maybe_count_grabbed_vm(
+        self, already_counted: bool, moved: bool = False
+    ) -> None:
         tick = last_input_tick()
         pos = cursor_screen_pos()
         if grabbed_input_should_count(
@@ -326,23 +388,26 @@ class InputMonitor:
             now_mono=time.perf_counter(),
             last_op_mono=self._last_op_mono,
             cooldown_sec=_VM_OP_DEDUP_SEC,
+            moved=moved,
         ):
             self._count_op()
         self._prev_last_input = tick
-        self._prev_cursor = pos
 
-    def _count_op(self) -> None:
+    def _count_op(self, kind: str = "press") -> None:
         now = time.perf_counter()
         self._note_cursor_vm_state()
-        if self._ignore_until > 0 and now < self._ignore_until:
-            return
-        if (
-            self._was_over_vm
-            and self._last_op_mono >= 0
-            and (now - self._last_op_mono) < _VM_OP_DEDUP_SEC
-        ):
-            return
+        if kind == "press":
+            if self._ignore_until > 0 and now < self._ignore_until:
+                return
+            if (
+                self._was_over_vm
+                and self._last_op_mono >= 0
+                and (now - self._last_op_mono) < _VM_OP_DEDUP_SEC
+            ):
+                return
         self._last_op_mono = now
+        if kind == "move":
+            self._last_move_mono = now
         self._op_seq += 1
         try:
             self._on_op()

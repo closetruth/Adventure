@@ -155,6 +155,23 @@ class GrabbedInputFallbackTests(unittest.TestCase):
             )
         )
 
+    def test_skips_when_moved_this_tick(self):
+        """本轮已有位移时 LastInput 不得再当点击，否则虚拟机里移动会双计。"""
+        self.assertFalse(
+            grabbed_input_should_count(
+                vm_active=True,
+                last_tick=100,
+                prev_tick=90,
+                cursor=(10, 10),
+                prev_cursor=(10, 10),
+                already_counted=False,
+                now_mono=1.0,
+                last_op_mono=0.0,
+                cooldown_sec=0.25,
+                moved=True,
+            )
+        )
+
 
 class MouseAndKeyCountTests(unittest.TestCase):
     def test_mouse_press_counts_even_over_vm(self):
@@ -219,3 +236,115 @@ class MouseAndKeyCountTests(unittest.TestCase):
             mon._ignore_until = 0.0
             mon._count_op()
         self.assertEqual(ops, [1])
+
+
+class MouseMotionCountTests(unittest.TestCase):
+    def test_eighty_pixels_counts_once(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        mon._prev_cursor = (0, 0)
+        mon._settle_mouse_motion((80, 0))
+        self.assertEqual(len(ops), 1)
+
+    def test_remainder_carries_to_next_tick(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        mon._prev_cursor = (0, 0)
+        mon._settle_mouse_motion((40, 0))
+        self.assertEqual(ops, [])
+        mon._settle_mouse_motion((80, 0))
+        self.assertEqual(len(ops), 1)
+
+    def test_forty_pixels_does_not_count(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        mon._prev_cursor = (0, 0)
+        mon._settle_mouse_motion((40, 0))
+        self.assertEqual(len(ops), 0)
+
+    def test_second_move_within_50ms_does_not_count(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        clock = {"t": 1000.0}
+
+        def now() -> float:
+            return clock["t"]
+
+        with mock.patch("src.input_monitor.time.perf_counter", side_effect=now):
+            mon._prev_cursor = (0, 0)
+            mon._settle_mouse_motion((80, 0))
+            self.assertEqual(len(ops), 1)
+            clock["t"] += 0.05
+            mon._settle_mouse_motion((160, 0))
+        self.assertEqual(len(ops), 1)
+
+    def test_second_move_after_100ms_counts(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        clock = {"t": 1000.0}
+
+        def now() -> float:
+            return clock["t"]
+
+        with mock.patch("src.input_monitor.time.perf_counter", side_effect=now):
+            mon._prev_cursor = (0, 0)
+            mon._settle_mouse_motion((80, 0))
+            self.assertEqual(len(ops), 1)
+            clock["t"] += 0.1
+            mon._settle_mouse_motion((160, 0))
+        self.assertEqual(len(ops), 2)
+
+    def test_first_sample_does_not_count(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        mon._settle_mouse_motion((100, 100))
+        self.assertEqual(ops, [])
+
+    def test_frozen_cursor_uses_raw_delta(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        mon._prev_cursor = (50, 50)
+        mon._on_raw_mouse_move(80, 0)
+        mon._settle_mouse_motion((50, 50))
+        self.assertEqual(len(ops), 1)
+
+    def test_screen_move_does_not_double_count_raw(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        mon._prev_cursor = (0, 0)
+        mon._on_raw_mouse_move(80, 0)
+        mon._settle_mouse_motion((80, 0))
+        self.assertEqual(len(ops), 1)
+
+    def test_move_counts_inside_vm(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        with mock.patch.object(mon, "_cursor_over_vm", return_value=True):
+            mon._prev_cursor = (0, 0)
+            mon._settle_mouse_motion((80, 0))
+        self.assertEqual(len(ops), 1)
+
+    def test_move_not_blocked_by_vm_press_dedupe(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        with mock.patch.object(mon, "_cursor_over_vm", return_value=True):
+            mon._count_op()
+            mon._prev_cursor = (0, 0)
+            mon._settle_mouse_motion((80, 0))
+        self.assertEqual(len(ops), 2)
+
+    def test_slide_out_ignores_press_but_counts_move(self):
+        ops: list[int] = []
+        mon = InputMonitor(on_op=lambda: ops.append(1), method="poll")
+        over = True
+
+        def cursor_over() -> bool:
+            return over
+
+        with mock.patch.object(mon, "_cursor_over_vm", side_effect=cursor_over):
+            mon._note_cursor_vm_state()
+            over = False
+            mon._count_op()
+            mon._prev_cursor = (0, 0)
+            mon._settle_mouse_motion((80, 0))
+        self.assertEqual(len(ops), 1)
