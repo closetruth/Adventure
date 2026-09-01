@@ -579,19 +579,24 @@ class FloatingWidget(QWidget):
             return int(sub.active_seconds) + int(sub.operations) // 10
         return int(active.active_seconds) + int(active.operations) // 10
 
+    def _ease_goal_key(self) -> Optional[str]:
+        """当前计入缓动条的任务/叶子，用于切目标时只加增量。"""
+        active = self.state.active_task()
+        if active is None:
+            return None
+        if active.subtasks:
+            sub = active.current_subtask()
+            if sub is None:
+                return None
+            return f"{active.id}:{sub.id}"
+        return f"{active.id}:"
+
     def _sync_ease_chests_claimed(self) -> None:
         """条上周期与存档 ease_chests 对齐，避免重启重复领。"""
         bar = self.roll_progress_bar
         ec = self.state.ease_chests
-        if (
-            ec.origin_units <= 0
-            and (not ec.holding)
-            and ec.cycle_id != bar.cycle_id
-        ):
-            ec.reset_for_cycle(bar.cycle_id)
-        else:
-            ec.cycle_id = bar.cycle_id
-            ec.holding = bar.holding
+        ec.cycle_id = bar.cycle_id
+        ec.holding = bar.holding
         bar.apply_claimed(ec.claimed)
 
     def _on_chest_claimed(self, index: int, rarity: int) -> None:
@@ -603,16 +608,13 @@ class FloatingWidget(QWidget):
         self._paint_global_stats()
         self._fly_chest_to_bag(index, rarity)
         if index == 0:
-            units = self._running_goal_units()
-            if units is None:
-                units = ec.origin_units
-            ec.begin_next_cycle(units)
+            ec.begin_next_cycle()
             self.roll_progress_bar.set_progress(
-                units,
+                ec.work_units,
                 freeze_at_end=True,
                 holding=False,
                 held_cycle_id=ec.cycle_id,
-                origin_units=ec.origin_units,
+                relative=True,
             )
             self.roll_progress_bar.apply_claimed(ec.claimed)
         self.chest_bagged.emit()
@@ -623,14 +625,16 @@ class FloatingWidget(QWidget):
         remaining = max(0, span - progress)
         near_full_steps = remaining if 0 < remaining <= 4 else 0
         units = self._running_goal_units()
-        if units is not None:
+        key = self._ease_goal_key()
+        if units is not None and key is not None:
             ec = self.state.ease_chests
+            ec.note_running(units, key)
             self.roll_progress_bar.set_progress(
-                units,
+                ec.work_units,
                 freeze_at_end=not ec.claimed[0],
                 holding=ec.holding,
                 held_cycle_id=ec.cycle_id,
-                origin_units=ec.origin_units,
+                relative=True,
             )
             self._sync_ease_chests_claimed()
         chance_label = (

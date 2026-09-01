@@ -514,7 +514,10 @@ class EaseChestsState:
     cycle_id: int = 0
     claimed: Tuple[bool, ...] = (False,)
     holding: bool = False  # 满格停住、等点本轮箱子
-    origin_units: int = 0  # 领取后下一轮从 0 涨；相对该起点计进度
+    work_units: int = 0  # 本轮已计入的工作量（切叶子只加增量，不搬绝对值）
+    seen_units: int = 0  # 上次见到的当前叶子 units
+    seen_key: str = ""  # 上次见到的任务:叶子
+    origin_units: int = 0  # 旧存档字段，不再用于计进度
 
     @classmethod
     def from_dict(cls, data: Dict) -> "EaseChestsState":
@@ -531,7 +534,10 @@ class EaseChestsState:
             cycle_id=int(data.get("cycle_id", 0)),
             claimed=claimed,
             holding=bool(data.get("holding", False)),
-            origin_units=max(0, int(data.get("origin_units", 0))),
+            work_units=max(0, int(data.get("work_units", 0))),
+            seen_units=max(0, int(data.get("seen_units", 0))),
+            seen_key=str(data.get("seen_key", "") or ""),
+            origin_units=0,
         )
 
     def to_dict(self) -> Dict:
@@ -539,7 +545,10 @@ class EaseChestsState:
             "cycle_id": int(self.cycle_id),
             "claimed": [bool(self.claimed[0]) if self.claimed else False],
             "holding": bool(self.holding),
-            "origin_units": int(self.origin_units),
+            "work_units": int(self.work_units),
+            "seen_units": int(self.seen_units),
+            "seen_key": str(self.seen_key),
+            "origin_units": 0,
         }
 
     def reset_for_cycle(self, cycle_id: int) -> None:
@@ -547,12 +556,30 @@ class EaseChestsState:
         self.claimed = (False,)
         self.holding = False
 
-    def begin_next_cycle(self, units: int) -> None:
-        """点完箱子：丢掉满格等待时的积压，从 0 开下一轮。"""
-        self.origin_units = max(0, int(units))
+    def begin_next_cycle(self) -> None:
+        """点完箱子：丢掉满格等待时的积压，从 0 开下一轮。监视点保留以免把等待量灌进来。"""
+        self.work_units = 0
+        self.origin_units = 0
         self.cycle_id = int(self.cycle_id) + 1
         self.claimed = (False,)
         self.holding = False
+
+    def note_running(self, units: int, goal_key: str) -> None:
+        """把当前叶子的 units 增量累进本轮；换叶子不导入对方生涯总量。"""
+        key = str(goal_key or "")
+        cur = max(0, int(units))
+        if key != self.seen_key:
+            self.seen_key = key
+            self.seen_units = cur
+            return
+        if cur < self.seen_units:
+            self.seen_units = cur
+            return
+        delta = cur - self.seen_units
+        self.seen_units = cur
+        if self.holding:
+            return
+        self.work_units += delta
 
     def mark_claimed(self, index: int) -> bool:
         """标记领取；已领过返回 False。"""

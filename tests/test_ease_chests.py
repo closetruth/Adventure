@@ -57,20 +57,29 @@ class EaseChestsModelTests(unittest.TestCase):
         self.assertEqual(ec.claimed, (True,))
 
     def test_reset_for_cycle_clears_claimed(self):
-        ec = EaseChestsState(cycle_id=1, claimed=(True,), holding=True, origin_units=90)
+        ec = EaseChestsState(cycle_id=1, claimed=(True,), holding=True, work_units=90)
         ec.reset_for_cycle(2)
         self.assertEqual(ec.cycle_id, 2)
         self.assertEqual(ec.claimed, (False,))
         self.assertFalse(ec.holding)
-        self.assertEqual(ec.origin_units, 90)
+        self.assertEqual(ec.work_units, 90)
 
     def test_begin_next_cycle_from_claim(self):
-        ec = EaseChestsState(cycle_id=3, claimed=(True,), holding=True, origin_units=10)
-        ec.begin_next_cycle(400)
+        ec = EaseChestsState(
+            cycle_id=3,
+            claimed=(True,),
+            holding=True,
+            work_units=400,
+            seen_units=800,
+            seen_key="a",
+        )
+        ec.begin_next_cycle()
         self.assertEqual(ec.cycle_id, 4)
-        self.assertEqual(ec.origin_units, 400)
+        self.assertEqual(ec.work_units, 0)
         self.assertEqual(ec.claimed, (False,))
         self.assertFalse(ec.holding)
+        self.assertEqual(ec.seen_units, 800)
+        self.assertEqual(ec.seen_key, "a")
 
     def test_roundtrip_holding_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -99,20 +108,33 @@ class EaseChestsModelTests(unittest.TestCase):
                 self.assertEqual(loaded.inventory.chests[1].rarity, 4)
                 self.assertEqual(loaded.ease_chests.cycle_id, 7)
                 self.assertEqual(loaded.ease_chests.claimed, (True,))
-                self.assertEqual(loaded.ease_chests.origin_units, 0)
+                self.assertEqual(loaded.ease_chests.work_units, 0)
                 self.assertIsNone(validate_state_invariants(loaded))
 
-    def test_roundtrip_origin_units(self):
+    def test_roundtrip_work_units(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch("src.storage.get_data_dir", return_value=Path(tmp)):
                 state = AppState()
                 state.ease_chests = EaseChestsState(
-                    cycle_id=5, origin_units=320, holding=False
+                    cycle_id=5,
+                    work_units=40,
+                    seen_units=918,
+                    seen_key="task:leaf",
+                    holding=False,
                 )
                 save_state(state)
                 loaded = load_state()
-                self.assertEqual(loaded.ease_chests.origin_units, 320)
+                self.assertEqual(loaded.ease_chests.work_units, 40)
+                self.assertEqual(loaded.ease_chests.seen_units, 918)
+                self.assertEqual(loaded.ease_chests.seen_key, "task:leaf")
                 self.assertEqual(loaded.ease_chests.cycle_id, 5)
+
+    def test_legacy_origin_units_are_dropped(self):
+        waiting = EaseChestsState.from_dict(
+            {"cycle_id": 2, "claimed": [False], "holding": False, "origin_units": 323629}
+        )
+        self.assertEqual(waiting.origin_units, 0)
+        self.assertEqual(waiting.work_units, 0)
 
     def test_legacy_three_claimed_uses_last_slot(self):
         waiting = EaseChestsState.from_dict(
@@ -188,6 +210,70 @@ class HoldAtEndTests(unittest.TestCase):
         self.assertEqual(cid, 1)
         self.assertEqual(progress, 10)
         self.assertEqual(span, _ease_span_for_cycle(1))
+
+    def test_relative_work_uses_held_cycle_span(self):
+        """work_units 是本轮进度，必须用 held_cycle_id 的 span，不能再按叶子绝对值映射。"""
+        progress, span, cid, holding = resolve_held_cycle(
+            10,
+            freeze_at_end=True,
+            holding=False,
+            held_cycle_id=2,
+            relative=True,
+        )
+        self.assertFalse(holding)
+        self.assertEqual(progress, 10)
+        self.assertEqual(cid, 2)
+        self.assertEqual(span, _ease_span_for_cycle(2))
+
+
+class EaseWorkAdvanceTests(unittest.TestCase):
+    def test_switch_to_smaller_leaf_then_work_fills(self):
+        """领取时记下大叶子的绝对值后，切到小叶子不能把条钉在 0%。"""
+        ec = EaseChestsState(cycle_id=2)
+        ec.note_running(323629, "task:legacy")
+        self.assertEqual(ec.work_units, 0)
+        ec.note_running(908, "task:current")
+        self.assertEqual(ec.work_units, 0)
+        ec.note_running(918, "task:current")
+        self.assertEqual(ec.work_units, 10)
+
+    def test_same_leaf_work_accumulates(self):
+        ec = EaseChestsState()
+        ec.note_running(100, "a")
+        ec.note_running(130, "a")
+        self.assertEqual(ec.work_units, 30)
+
+    def test_holding_discards_overflow(self):
+        ec = EaseChestsState(
+            work_units=258, holding=True, seen_units=500, seen_key="a"
+        )
+        ec.note_running(580, "a")
+        self.assertEqual(ec.work_units, 258)
+        self.assertEqual(ec.seen_units, 580)
+
+    def test_claim_drops_wait_then_fills_from_zero(self):
+        ec = EaseChestsState(
+            cycle_id=1,
+            work_units=300,
+            holding=True,
+            seen_units=800,
+            seen_key="a",
+        )
+        ec.begin_next_cycle()
+        self.assertEqual(ec.work_units, 0)
+        self.assertFalse(ec.holding)
+        self.assertEqual(ec.cycle_id, 2)
+        self.assertEqual(ec.seen_units, 800)
+        self.assertEqual(ec.seen_key, "a")
+        ec.note_running(805, "a")
+        self.assertEqual(ec.work_units, 5)
+
+    def test_units_drop_on_same_key_resyncs_without_subtracting(self):
+        ec = EaseChestsState(work_units=40, seen_units=100, seen_key="a")
+        ec.note_running(20, "a")
+        self.assertEqual(ec.work_units, 40)
+        ec.note_running(25, "a")
+        self.assertEqual(ec.work_units, 45)
 
 
 if __name__ == "__main__":
