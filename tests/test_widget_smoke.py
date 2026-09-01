@@ -14,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
@@ -230,6 +231,48 @@ class RollBarInitRegressionTest(unittest.TestCase):
         self.assertTrue(widget.roll_bar._chance_label)
         widget.close()
         widget.deleteLater()
+
+
+class FillFlashIntervalTests(unittest.TestCase):
+    def test_start_does_not_flash(self):
+        from src.ui_roll_bar import fill_flash_interval_ms
+
+        self.assertIsNone(fill_flash_interval_ms(0.0))
+        self.assertIsNone(fill_flash_interval_ms(0.19))
+
+    def test_closer_to_end_is_faster(self):
+        from src.ui_roll_bar import fill_flash_interval_ms
+
+        mid = fill_flash_interval_ms(0.5)
+        late = fill_flash_interval_ms(0.95)
+        self.assertIsNotNone(mid)
+        self.assertIsNotNone(late)
+        self.assertGreater(mid, late)
+
+    def test_full_is_near_180ms(self):
+        from src.ui_roll_bar import fill_flash_interval_ms
+
+        full = fill_flash_interval_ms(1.0)
+        self.assertIsNotNone(full)
+        self.assertGreaterEqual(full, 160)
+        self.assertLessEqual(full, 180)
+
+
+class FillFlashColorTests(unittest.TestCase):
+    def test_legend_hot_is_lighter_than_rest(self):
+        from src.ui_roll_bar import _RARITY_LEGEND, fill_flash_hex
+
+        rest = QColor(fill_flash_hex(_RARITY_LEGEND, flash_on=False))
+        hot = QColor(fill_flash_hex(_RARITY_LEGEND, flash_on=True))
+        self.assertNotEqual(rest.name(), hot.name())
+        self.assertGreater(hot.lightness(), rest.lightness())
+
+    def test_rare_hot_is_not_old_blue(self):
+        from src.ui_roll_bar import _RARITY_RARE, fill_flash_hex
+
+        hot = fill_flash_hex(_RARITY_RARE, flash_on=True)
+        self.assertNotEqual(hot.lower(), "#b8d0ff")
+        self.assertEqual(hot.lower(), "#dce8ff")
 
 
 class EaseChestClickTests(unittest.TestCase):

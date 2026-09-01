@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import random
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QPolygonF, QRadialGradient
@@ -36,6 +36,14 @@ _RARITY_PALETTE = (
 _RARITY_WEIGHTS = (22, 25, 25, 18, 10)
 CHEST_RARITY_NAMES = ("普通", "罕见", "稀有", "史诗", "传奇")
 CHEST_RARITY_COLORS = ("#c8c0b4", "#7dcc96", "#7aa2ff", "#c9a0ff", "#ffd56a")
+# 填充暗档 / 亮档，跟箱子稀有度走
+_FILL_FLASH_COLORS = (
+    ("#5c5348", "#f0ebe4"),
+    ("#1e4a2e", "#b8ffce"),
+    ("#1a3a7a", "#dce8ff"),
+    ("#3a1e78", "#f0e0ff"),
+    ("#7a5a08", "#fff0b8"),
+)
 
 
 def _ease_span_for_cycle(cycle_id: int) -> int:
@@ -100,6 +108,20 @@ def _cycle_chest_rarities(span: int, cycle_id: int = 0) -> Tuple[int, ...]:
             rarity = idx
             break
     return (rarity,)
+
+
+def fill_flash_interval_ms(eased: float) -> Optional[int]:
+    """填充闪烁间隔：前期不闪，越接近终点越快。"""
+    u = max(0.0, min(1.0, eased)) ** 2
+    if u < 0.04:
+        return None
+    return max(160, int(800 - 620 * u))
+
+
+def fill_flash_hex(rarity: int, *, flash_on: bool) -> str:
+    idx = max(0, min(_RARITY_LEGEND, int(rarity)))
+    rest, hot = _FILL_FLASH_COLORS[idx]
+    return hot if flash_on else rest
 
 
 def _with_alpha(color: QColor, alpha: int) -> QColor:
@@ -423,7 +445,10 @@ class EasedProgressBar(QWidget):
         return False
 
     def _sync_flash_timer(self) -> None:
-        if self._any_claimable():
+        interval = fill_flash_interval_ms(self._eased_fraction())
+        want = self._any_claimable() or interval is not None
+        if want:
+            self._flash_timer.setInterval(interval if interval is not None else 400)
             if not self._flash_timer.isActive():
                 self._flash_on = True
                 self._flash_timer.start()
@@ -475,7 +500,9 @@ class EasedProgressBar(QWidget):
         fill_w = inset + eased * (w - 2 * inset) + inset if eased > 0 else 0.0
         fill_w = max(0.0, min(w, fill_w))
         if fill_w > 0:
-            painter.setBrush(QColor("#7aa2ff"))
+            fill_flash = self._flash_timer.isActive() and self._flash_on
+            rarity = self._rarities[0] if self._rarities else _RARITY_COMMON
+            painter.setBrush(QColor(fill_flash_hex(rarity, flash_on=fill_flash)))
             painter.drawRoundedRect(QRectF(0, track_y, fill_w, track_h), radius, radius)
 
         # 已走过/当前段：本段完成度按 raw 先快后慢；稀有度字 + 深色描边；1 位小数
@@ -535,7 +562,7 @@ class EasedProgressBar(QWidget):
                 _CHEST_SIZE,
                 reached=reached,
                 rarity=rarity,
-                flash_on=self._flash_on,
+                flash_on=self._flash_on and reached and not opened,
                 opened=opened,
             )
 
