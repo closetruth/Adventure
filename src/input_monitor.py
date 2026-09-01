@@ -6,7 +6,10 @@
 备选模式（非 Windows / 显式指定）：pynput 全局钩子。
 
 每次独立的按键按下 / 鼠标按下视为一次「操作」。
-点击本应用窗口本身不计入（避免 press→刷新 吃掉点击）。
+点到本应用窗口、点到虚拟机里面都计入。
+虚拟机抢走键鼠时：Raw Input + LastInput 回退补计数；同一次点击只记一次。
+光标滑出虚拟机时不计（松开/抢鼠标的假点击）。
+UI 刷新在鼠标按下期间推迟，避免吃掉点击。
 """
 from __future__ import annotations
 
@@ -17,9 +20,14 @@ import time
 from typing import Callable, Optional
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QApplication
 
+from .vm_detect import (
+    cursor_over_vm,
+    cursor_screen_pos,
+    foreground_is_vm,
+    grabbed_input_should_count,
+    last_input_tick,
+)
 from .win_utils import is_windows
 
 logger = logging.getLogger(__name__)
@@ -52,6 +60,8 @@ _POLL_INTERVAL_MS = 50
 # 休眠唤醒检测阈值（秒）：间隔超此值视为刚唤醒，清脏状态
 _SLEEP_GAP_SEC = 1.5
 
+_VM_OP_DEDUP_SEC = 0.25
+
 
 class InputMonitor:
     """全局键鼠监听器。
@@ -77,6 +87,14 @@ class InputMonitor:
         self._keys_down: set[int] = set()
         self._buttons_down: set[int] = set()
         self._last_poll_time: float = 0.0
+        self._op_seq = 0
+        self._prev_last_input: Optional[int] = None
+        self._prev_cursor: Optional[tuple[int, int]] = None
+        self._last_op_mono: float = -1.0
+        self._was_over_vm = False
+        self._ignore_until = 0.0
+        self._raw_filter = None
+        self._raw_widget = None
 
         # --- 钩子模式状态（后台线程） ---
         self._kb_listener = None
@@ -112,6 +130,7 @@ class InputMonitor:
 
         if use_poll:
             self._start_poll()
+            self._start_raw_input()
         else:
             self._start_hook()
 
@@ -125,6 +144,7 @@ class InputMonitor:
                 except Exception:
                     pass
                 self._poll_timer = None
+            self._stop_raw_input()
             # 停止钩子
             if self._kb_listener is not None:
                 try:
@@ -154,6 +174,31 @@ class InputMonitor:
         self._poll_timer.timeout.connect(self._poll)
         self._poll_timer.start()
 
+    def _start_raw_input(self) -> None:
+        try:
+            from .win_raw_input import install_raw_input
+
+            self._raw_filter, self._raw_widget = install_raw_input(
+                on_mouse_down=self._on_raw_mouse_down,
+                on_mouse_up=self._on_raw_mouse_up,
+                on_key_down=self._on_raw_key_down,
+                on_key_up=self._on_raw_key_up,
+            )
+        except Exception:
+            logger.debug("Raw Input 启动失败", exc_info=True)
+            self._raw_filter = None
+            self._raw_widget = None
+
+    def _stop_raw_input(self) -> None:
+        try:
+            from .win_raw_input import uninstall_raw_input
+
+            uninstall_raw_input(self._raw_filter, self._raw_widget)
+        except Exception:
+            logger.debug("Raw Input 停止失败", exc_info=True)
+        self._raw_filter = None
+        self._raw_widget = None
+
     def _poll(self) -> None:
         """QTimer 回调：扫描所有 VK 码，检测首次按下。"""
         try:
@@ -163,10 +208,14 @@ class InputMonitor:
             if self._last_poll_time > 0 and (now - self._last_poll_time) > _SLEEP_GAP_SEC:
                 self._keys_down.clear()
                 self._buttons_down.clear()
+                self._prev_last_input = None
+                self._prev_cursor = None
                 self._last_poll_time = now
                 return
             self._last_poll_time = now
 
+            self._note_cursor_vm_state()
+            seq_before = self._op_seq
             user32 = ctypes.windll.user32
             for vk in _VK_RANGE:
                 state = user32.GetAsyncKeyState(vk)
@@ -176,17 +225,17 @@ class InputMonitor:
                     if is_down:
                         if vk not in self._buttons_down:
                             self._buttons_down.add(vk)
-                            if not self._cursor_over_app_window():
-                                self._count_op()
+                            self._on_mouse_pressed()
                     else:
                         self._buttons_down.discard(vk)
                 else:
                     if is_down:
                         if vk not in self._keys_down:
                             self._keys_down.add(vk)
-                            self._count_op()
+                            self._on_key_pressed()
                     else:
                         self._keys_down.discard(vk)
+            self._maybe_count_grabbed_vm(already_counted=self._op_seq != seq_before)
         except Exception:
             logger.debug("输入轮询异常", exc_info=True)
 
@@ -208,7 +257,7 @@ class InputMonitor:
             if key in self._hook_keys_down:
                 return
             self._hook_keys_down.add(key)
-        self._count_op()
+        self._on_key_pressed()
 
     def _on_key_release_hook(self, key) -> None:
         with self._hook_lock:
@@ -223,21 +272,78 @@ class InputMonitor:
             else:
                 self._hook_buttons_down.discard(button)
                 return
-        # 钩子在后台线程，不能调 Qt GUI API 判断是否点在本窗
-        self._count_op()
+        self._on_mouse_pressed()
 
     # ---------- 共用 ----------
-    def _cursor_over_app_window(self) -> bool:
-        """光标在本进程顶层窗上时不计鼠标操作，避免 press→刷新吃掉点击。"""
-        app = QApplication.instance()
-        if app is None:
-            return False
-        try:
-            return app.topLevelAt(QCursor.pos()) is not None
-        except Exception:
-            return False
+    def _cursor_over_vm(self) -> bool:
+        return cursor_over_vm()
+
+    def _foreground_is_vm(self) -> bool:
+        return foreground_is_vm()
+
+    def _vm_active(self) -> bool:
+        return self._cursor_over_vm() or self._foreground_is_vm()
+
+    def _note_cursor_vm_state(self) -> None:
+        """光标刚离开虚拟机时开启短忽略窗，吞掉松开/抢鼠标的假点击。"""
+        over = self._cursor_over_vm()
+        if self._was_over_vm and not over:
+            self._ignore_until = time.perf_counter() + _VM_OP_DEDUP_SEC
+        self._was_over_vm = over
+
+    def _on_mouse_pressed(self) -> None:
+        self._count_op()
+
+    def _on_key_pressed(self) -> None:
+        self._count_op()
+
+    def _on_raw_mouse_down(self, vk: int) -> None:
+        if vk not in self._buttons_down:
+            self._buttons_down.add(vk)
+            self._count_op()
+
+    def _on_raw_mouse_up(self, vk: int) -> None:
+        self._buttons_down.discard(vk)
+
+    def _on_raw_key_down(self, vk: int) -> None:
+        if vk not in self._keys_down:
+            self._keys_down.add(vk)
+            self._count_op()
+
+    def _on_raw_key_up(self, vk: int) -> None:
+        self._keys_down.discard(vk)
+
+    def _maybe_count_grabbed_vm(self, already_counted: bool) -> None:
+        tick = last_input_tick()
+        pos = cursor_screen_pos()
+        if grabbed_input_should_count(
+            vm_active=self._cursor_over_vm(),
+            last_tick=tick,
+            prev_tick=self._prev_last_input,
+            cursor=pos,
+            prev_cursor=self._prev_cursor,
+            already_counted=already_counted,
+            now_mono=time.perf_counter(),
+            last_op_mono=self._last_op_mono,
+            cooldown_sec=_VM_OP_DEDUP_SEC,
+        ):
+            self._count_op()
+        self._prev_last_input = tick
+        self._prev_cursor = pos
 
     def _count_op(self) -> None:
+        now = time.perf_counter()
+        self._note_cursor_vm_state()
+        if self._ignore_until > 0 and now < self._ignore_until:
+            return
+        if (
+            self._was_over_vm
+            and self._last_op_mono >= 0
+            and (now - self._last_op_mono) < _VM_OP_DEDUP_SEC
+        ):
+            return
+        self._last_op_mono = now
+        self._op_seq += 1
         try:
             self._on_op()
         except Exception:
