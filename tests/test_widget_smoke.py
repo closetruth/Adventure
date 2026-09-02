@@ -338,7 +338,7 @@ class CurrencyCountUpWidgetTests(unittest.TestCase):
         widget.close()
         widget.deleteLater()
 
-    def test_pending_roll_moves_global_display(self):
+    def test_pending_roll_does_not_move_global_display(self):
         state = AppState()
         manager = TaskManager(state, PowerMonitor())
         widget = FloatingWidget(state, manager)
@@ -351,12 +351,10 @@ class CurrencyCountUpWidgetTests(unittest.TestCase):
         widget._currency.snap_to(start_g, state.inventory.diamond)
         leaf.pending_rewards.append(Reward(gold=2.0))
         widget.kick_currency_display()
-        self.assertTrue(widget._currency_timer.isActive())
-        QTest.qWait(400)
-        self.assertGreater(widget._currency.gold, start_g)
-        self.assertLess(widget._currency.gold, start_g + 2.0)
-        self.assertGreater(widget.gold_reel.amount(), start_g)
-        self.assertLess(widget.gold_reel.amount(), start_g + 2.0)
+        _app.processEvents()
+        self.assertFalse(widget._currency_timer.isActive())
+        self.assertAlmostEqual(widget._currency.gold, start_g)
+        self.assertAlmostEqual(widget.gold_reel.amount(), start_g)
         widget.close()
         widget.deleteLater()
 

@@ -94,7 +94,7 @@ class InvariantTests(unittest.TestCase):
 
 
 class VisibleCurrencyTests(unittest.TestCase):
-    def test_includes_leaf_pending(self):
+    def test_global_is_backpack_only(self):
         s = AppState()
         s.inventory.gold = 10.0
         s.inventory.diamond = 1.0
@@ -103,10 +103,10 @@ class VisibleCurrencyTests(unittest.TestCase):
         t = Task(title="父", status=TaskStatus.PAUSED, subtasks=[leaf])
         s.tasks = [t]
         gold, diamond = s.visible_gold_diamond()
-        self.assertAlmostEqual(gold, 10.5)
-        self.assertAlmostEqual(diamond, 1.2)
+        self.assertAlmostEqual(gold, 10.0)
+        self.assertAlmostEqual(diamond, 1.0)
 
-    def test_skips_completed_tasks(self):
+    def test_skips_completed_and_pending(self):
         s = AppState()
         s.inventory.gold = 3.0
         leaf = Subtask(title="A")
