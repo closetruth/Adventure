@@ -226,7 +226,12 @@ class WeekSliceTests(unittest.TestCase):
     def test_week_query_excludes_other_weeks(self):
         log = RuntimeIntervalLog()
         log.tick(recording=True, task_id="T", title="顶", now=_local(2026, 8, 20, 10))
+        # Keep recording at 11:00 so the 2h span does not hit CLOCK_JUMP_SEC.
+        log.tick(recording=True, task_id="T", title="顶", now=_local(2026, 8, 20, 11))
         log.tick(recording=False, task_id=None, now=_local(2026, 8, 20, 12))
+        self.assertEqual(len(log.intervals), 1)
+        self.assertAlmostEqual(log.intervals[0].start, _local(2026, 8, 20, 10), places=5)
+        self.assertAlmostEqual(log.intervals[0].end, _local(2026, 8, 20, 12), places=5)
         week = local_week_start(_local(2026, 8, 31, 12))
         self.assertEqual(slices_for_week(log, week, _local(2026, 9, 2, 0)), [])
 
