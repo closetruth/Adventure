@@ -177,10 +177,18 @@ def load_log(
     try:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
+        if not isinstance(data, dict):
+            raise TypeError("runtime intervals root must be an object")
         raw_intervals = data.get("intervals") or []
+        if not isinstance(raw_intervals, list):
+            raise TypeError("intervals must be a list")
+        if any(not isinstance(x, dict) for x in raw_intervals):
+            raise TypeError("interval entries must be objects")
         log.intervals = [RuntimeInterval.from_dict(x) for x in raw_intervals]
         open_d = data.get("open")
         if open_d:
+            if not isinstance(open_d, dict):
+                raise TypeError("open must be an object")
             opened = RuntimeInterval.from_dict(open_d)
             if opened.end is not None:
                 log.intervals.append(opened)
@@ -189,7 +197,7 @@ def load_log(
                 if recover:
                     log.recover_open(data_mtime=data_mtime, now=now)
         return log
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
         logger.warning("运行日志损坏，已重置: %s", path)
         _archive_corrupt(path)
         reset = RuntimeIntervalLog()

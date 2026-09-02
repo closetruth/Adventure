@@ -126,6 +126,15 @@ class IntervalPersistTests(unittest.TestCase):
         broken = list(Path(self._tmp.name).glob("runtime_intervals.broken.*.json"))
         self.assertEqual(len(broken), 1)
 
+    def test_non_object_json_archived_and_reset(self):
+        self.path.write_text("[]", encoding="utf-8")
+        loaded = load_log(self.path, now=1.0)
+        self.assertTrue(loaded.load_reset)
+        self.assertEqual(loaded.intervals, [])
+        self.assertIsNone(loaded.open)
+        broken = list(Path(self._tmp.name).glob("runtime_intervals.broken.*.json"))
+        self.assertEqual(len(broken), 1)
+
     def test_crash_recover_uses_mtime(self):
         payload = {
             "version": 1,
