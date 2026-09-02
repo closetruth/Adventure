@@ -5,7 +5,9 @@ import logging
 import os
 import tempfile
 import time
+import zlib
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +20,17 @@ MERGE_GAP_SEC = 2.0
 CLOCK_JUMP_SEC = 3600.0
 CRASH_MAX_AGE_SEC = 3600.0
 FILE_NAME = "runtime_intervals.json"
+
+PALETTE = (
+    "#6ee7a0",
+    "#5ec8f2",
+    "#f5c842",
+    "#ff9f6b",
+    "#c4b5fd",
+    "#f472b6",
+    "#94a3b8",
+    "#9ec5ff",
+)
 
 
 @dataclass
@@ -58,6 +71,112 @@ class RuntimeInterval:
             start=float(data["start"]),
             end=None if end is None else float(end),
         )
+
+
+@dataclass
+class DaySlice:
+    date: str
+    t0: float
+    t1: float
+    task_id: str
+    title: str
+    leaf_id: Optional[str]
+    leaf_title: Optional[str]
+
+    def identity(self) -> tuple[str, Optional[str]]:
+        return (self.task_id, self.leaf_id)
+
+
+def identity_color(task_id: str, leaf_id: Optional[str]) -> str:
+    key = f"{task_id}\0{leaf_id or ''}".encode("utf-8")
+    return PALETTE[zlib.crc32(key) % len(PALETTE)]
+
+
+def local_week_start(now: float) -> float:
+    dt = datetime.fromtimestamp(now)
+    monday = (dt - timedelta(days=dt.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return monday.timestamp()
+
+
+def add_weeks(week_start: float, n: int) -> float:
+    return (datetime.fromtimestamp(week_start) + timedelta(weeks=n)).timestamp()
+
+
+def _wall_hour(ts: float) -> float:
+    dt = datetime.fromtimestamp(ts)
+    return (
+        dt.hour
+        + dt.minute / 60.0
+        + dt.second / 3600.0
+        + dt.microsecond / 3_600_000_000.0
+    )
+
+
+def _day_start(ts: float) -> datetime:
+    return datetime.fromtimestamp(ts).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+
+def _closed_view(log: RuntimeIntervalLog, now: float) -> list[RuntimeInterval]:
+    items = list(log.intervals)
+    if log.open is not None:
+        items.append(
+            RuntimeInterval(
+                task_id=log.open.task_id,
+                title=log.open.title,
+                leaf_id=log.open.leaf_id,
+                leaf_title=log.open.leaf_title,
+                start=log.open.start,
+                end=now,
+            )
+        )
+    return items
+
+
+def _split_days(iv: RuntimeInterval, a: float, b: float) -> list[DaySlice]:
+    out: list[DaySlice] = []
+    cur = a
+    while cur < b - 1e-9:
+        day0 = _day_start(cur)
+        day1_ts = (day0 + timedelta(days=1)).timestamp()
+        end = min(b, day1_ts)
+        t0 = _wall_hour(cur)
+        t1 = 24.0 if end >= day1_ts - 1e-6 else _wall_hour(end)
+        if t1 > t0:
+            out.append(
+                DaySlice(
+                    date=day0.strftime("%Y-%m-%d"),
+                    t0=t0,
+                    t1=t1,
+                    task_id=iv.task_id,
+                    title=iv.title,
+                    leaf_id=iv.leaf_id,
+                    leaf_title=iv.leaf_title,
+                )
+            )
+        cur = end
+    return out
+
+
+def slices_for_week(
+    log: RuntimeIntervalLog,
+    week_start: float,
+    now: float,
+) -> list[DaySlice]:
+    week_end = add_weeks(week_start, 1)
+    out: list[DaySlice] = []
+    for iv in _closed_view(log, now):
+        if iv.end is None:
+            continue
+        a = max(iv.start, week_start)
+        b = min(iv.end, week_end)
+        if b <= a:
+            continue
+        out.extend(_split_days(iv, a, b))
+    return out
 
 
 class RuntimeIntervalLog:
