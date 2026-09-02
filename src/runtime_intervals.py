@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
+import tempfile
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
+
+from .storage import get_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +17,7 @@ MIN_DURATION_SEC = 1.0
 MERGE_GAP_SEC = 2.0
 CLOCK_JUMP_SEC = 3600.0
 CRASH_MAX_AGE_SEC = 3600.0
+FILE_NAME = "runtime_intervals.json"
 
 
 @dataclass
@@ -126,3 +134,89 @@ class RuntimeIntervalLog:
                 return True
         self.intervals.append(cur)
         return True
+
+    def recover_open(self, *, data_mtime: Optional[float], now: float) -> None:
+        if self.open is None:
+            return
+        if data_mtime is None:
+            self.open = None
+            return
+        if data_mtime >= self.open.start and (now - data_mtime) <= CRASH_MAX_AGE_SEC:
+            self.close_open(data_mtime)
+            return
+        self.open = None
+
+
+def intervals_path() -> Path:
+    return get_data_dir() / FILE_NAME
+
+
+def _archive_corrupt(path: Path) -> None:
+    if not path.exists():
+        return
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    dest = path.with_name(f"runtime_intervals.broken.{stamp}.json")
+    try:
+        path.replace(dest)
+    except OSError:
+        logger.warning("无法归档损坏的运行日志 %s", path)
+
+
+def load_log(
+    path: Optional[Path] = None,
+    *,
+    data_mtime: Optional[float] = None,
+    now: Optional[float] = None,
+    recover: bool = True,
+) -> RuntimeIntervalLog:
+    now = time.time() if now is None else now
+    path = path or intervals_path()
+    log = RuntimeIntervalLog()
+    if not path.exists():
+        return log
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        raw_intervals = data.get("intervals") or []
+        log.intervals = [RuntimeInterval.from_dict(x) for x in raw_intervals]
+        open_d = data.get("open")
+        if open_d:
+            opened = RuntimeInterval.from_dict(open_d)
+            if opened.end is not None:
+                log.intervals.append(opened)
+            else:
+                log.open = opened
+                if recover:
+                    log.recover_open(data_mtime=data_mtime, now=now)
+        return log
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        logger.warning("运行日志损坏，已重置: %s", path)
+        _archive_corrupt(path)
+        reset = RuntimeIntervalLog()
+        reset.load_reset = True
+        return reset
+
+
+def save_log(log: RuntimeIntervalLog, path: Optional[Path] = None) -> None:
+    path = path or intervals_path()
+    payload = {
+        "version": 1,
+        "intervals": [item.to_dict() for item in log.intervals],
+        "open": None if log.open is None else log.open.to_dict(),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        prefix="adventure_rt_", suffix=".json", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
