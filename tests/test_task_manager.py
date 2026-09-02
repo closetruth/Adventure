@@ -18,7 +18,11 @@ from src.task_manager import TaskManager
 
 def _make():
     state = AppState()
-    return state, TaskManager(state, PowerMonitor())
+    tmp = tempfile.TemporaryDirectory()
+    manager = TaskManager(state, PowerMonitor())
+    manager._intervals_path = Path(tmp.name) / "runtime_intervals.json"
+    manager._test_tmp_dir = tmp  # keep temp dir alive for test duration
+    return state, manager
 
 
 class TaskManagerFlowTests(unittest.TestCase):
@@ -202,11 +206,7 @@ class TaskManagerFlowTests(unittest.TestCase):
 
 class RuntimeLogHookTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.path = Path(self._tmp.name) / "runtime_intervals.json"
         self.state, self.manager = _make()
-        self.manager._intervals_path = self.path
         self.manager.note_activity()
 
     def test_tick_opens_for_flat_task(self):
@@ -255,7 +255,7 @@ class RuntimeLogHookTests(unittest.TestCase):
         with mock.patch("src.task_manager.time.time", return_value=1_020.0):
             self.manager.pause(self.state.active_task().id)
             self.manager.tick_active_time()
-        loaded = load_log(self.path, now=1_020.0)
+        loaded = load_log(self.manager._intervals_path, now=1_020.0)
         self.assertEqual(len(loaded.intervals), 1)
 
 
