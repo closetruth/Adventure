@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Iterator, List, Optional, Set, Tuple
 
 from .active_time import ActiveTimeTracker
 from .migrate_accounting import detach_subtask_progress_to_legacy, detach_task_progress_to_legacy
 from .models import AppState, Reward, Subtask, Task, TaskStatus
 from .power_monitor import PowerMonitor
+from .runtime_intervals import RuntimeIntervalLog, intervals_path, load_log, save_log
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,8 @@ class TaskManager:
         self.state = state
         self.power_monitor = power_monitor or PowerMonitor()
         self._active_time = ActiveTimeTracker()
+        self.runtime_log = RuntimeIntervalLog()
+        self._intervals_path: Optional[Path] = None
         self._last_activity_mono = time.monotonic()
         self._subtask_expanded: dict[str, Set[str]] = {}
         self.last_repaired_claimed_count = 0
@@ -718,10 +722,51 @@ class TaskManager:
             return False
         return (time.monotonic() - self._last_activity_mono) >= minutes * 60.0
 
+    def _recording_identity(
+        self, counting: bool
+    ) -> tuple[bool, Optional[str], str, Optional[str], Optional[str]]:
+        if not counting:
+            return False, None, "", None, None
+        active = self.state.active_task()
+        if active is None:
+            return False, None, "", None, None
+        if active.subtasks:
+            sub = active.current_subtask()
+            if sub is None:
+                return False, None, "", None, None
+            return True, active.id, active.title, sub.id, sub.title
+        return True, active.id, active.title, None, None
+
+    def persist_runtime_log(self) -> None:
+        path = self._intervals_path or intervals_path()
+        try:
+            save_log(self.runtime_log, path)
+        except OSError:
+            logger.warning("写入运行日志失败", exc_info=True)
+
+    def load_runtime_log(self, *, data_mtime: Optional[float] = None) -> None:
+        path = self._intervals_path or intervals_path()
+        self.runtime_log = load_log(path, data_mtime=data_mtime, now=time.time())
+
+    def close_runtime_log(self, now: Optional[float] = None) -> None:
+        self.runtime_log.close_open(time.time() if now is None else now)
+        self.persist_runtime_log()
+
     def tick_active_time(self) -> bool:
         """每秒调用：累加聚焦叶子或扁平目标时长（关屏 / 空闲不计）。"""
         counting = self.power_monitor.should_count_time() and not self._is_idle()
         seconds = self._active_time.tick(counting_enabled=counting)
+        rec, task_id, title, leaf_id, leaf_title = self._recording_identity(counting)
+        mutated = self.runtime_log.tick(
+            recording=rec,
+            task_id=task_id,
+            title=title,
+            leaf_id=leaf_id,
+            leaf_title=leaf_title,
+            now=time.time(),
+        )
+        if mutated:
+            self.persist_runtime_log()
         active = self.state.active_task()
         if active is None or seconds <= 0:
             return False

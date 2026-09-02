@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.models import AppState, Reward
 from src.power_monitor import PowerMonitor
+from src.runtime_intervals import load_log
 from src.task_manager import TaskManager
 
 
@@ -195,6 +198,65 @@ class TaskManagerFlowTests(unittest.TestCase):
             m.tick_active_time()
             m.tick_active_time()
         self.assertEqual(sub.active_seconds, 0.0)
+
+
+class RuntimeLogHookTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = Path(self._tmp.name) / "runtime_intervals.json"
+        self.state, self.manager = _make()
+        self.manager._intervals_path = self.path
+        self.manager.note_activity()
+
+    def test_tick_opens_for_flat_task(self):
+        t = self.manager.create("甲")
+        with mock.patch("src.task_manager.time.time", return_value=1_000.0):
+            self.manager.tick_active_time()
+        self.assertIsNotNone(self.manager.runtime_log.open)
+        self.assertEqual(self.manager.runtime_log.open.task_id, t.id)
+        self.assertIsNone(self.manager.runtime_log.open.leaf_id)
+
+    def test_pause_closes_interval(self):
+        t = self.manager.create("甲")
+        with mock.patch("src.task_manager.time.time", return_value=1_000.0):
+            self.manager.tick_active_time()
+        self.manager.pause(t.id)
+        with mock.patch("src.task_manager.time.time", return_value=1_030.0):
+            self.manager.tick_active_time()
+        self.assertIsNone(self.manager.runtime_log.open)
+        self.assertEqual(self.manager.runtime_log.intervals[0].end, 1_030.0)
+
+    def test_switch_leaf_splits(self):
+        t = self.manager.create("甲")
+        a = self.manager.add_subtask(t.id, "A", target_minutes=10)
+        b = self.manager.add_subtask(t.id, "B", target_minutes=10)
+        self.manager.focus_subtask(t.id, a.id)
+        with mock.patch("src.task_manager.time.time", return_value=1_000.0):
+            self.manager.tick_active_time()
+        self.manager.focus_subtask(t.id, b.id)
+        with mock.patch("src.task_manager.time.time", return_value=1_040.0):
+            self.manager.tick_active_time()
+        self.assertEqual(self.manager.runtime_log.intervals[0].leaf_id, a.id)
+        self.assertEqual(self.manager.runtime_log.open.leaf_id, b.id)
+
+    def test_unfocused_tree_does_not_record(self):
+        t = self.manager.create("甲")
+        self.manager.add_subtask(t.id, "A", target_minutes=10)
+        t.current_subtask_id = None
+        with mock.patch("src.task_manager.time.time", return_value=1_000.0):
+            self.manager.tick_active_time()
+        self.assertIsNone(self.manager.runtime_log.open)
+
+    def test_persist_on_close(self):
+        self.manager.create("甲")
+        with mock.patch("src.task_manager.time.time", return_value=1_000.0):
+            self.manager.tick_active_time()
+        with mock.patch("src.task_manager.time.time", return_value=1_020.0):
+            self.manager.pause(self.state.active_task().id)
+            self.manager.tick_active_time()
+        loaded = load_log(self.path, now=1_020.0)
+        self.assertEqual(len(loaded.intervals), 1)
 
 
 if __name__ == "__main__":

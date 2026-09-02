@@ -46,7 +46,14 @@ from .reward_system import (
     reshuffle_roll_params,
 )
 from .sfx import SfxPlayer
-from .storage import SaveRejectedError, get_data_dir, load_state, save_state, take_load_warning
+from .storage import (
+    SaveRejectedError,
+    get_data_dir,
+    get_data_file,
+    load_state,
+    save_state,
+    take_load_warning,
+)
 from .task_dialog import TaskDialog
 from .task_manager import TaskManager
 from .ui_text import format_reward_gain
@@ -76,6 +83,9 @@ class Application(QObject):
         ensure_roll_runtime(self.state)
         self.power_monitor = PowerMonitor()
         self.manager = TaskManager(self.state, self.power_monitor)
+        data_path = get_data_file()
+        mtime = data_path.stat().st_mtime if data_path.exists() else None
+        self.manager.load_runtime_log(data_mtime=mtime)
         if self.manager.recover_stuck_subtask_rewards():
             n = self.manager.last_repaired_claimed_count
             logger.info(
@@ -504,8 +514,18 @@ class Application(QObject):
             self.sfx.shutdown()
         except Exception:
             pass
+        try:
+            self.manager.close_runtime_log()
+        except Exception:
+            logger.warning("退出时关闭运行段失败", exc_info=True)
         self._safe_save()
         self.qt_app.quit()
+
+    def _persist_runtime_quiet(self) -> None:
+        try:
+            self.manager.persist_runtime_log()
+        except Exception:
+            logger.warning("运行日志保存失败", exc_info=True)
 
     def _safe_save(self) -> None:
         """保存状态，失败时弹窗提示用户。"""
@@ -528,6 +548,7 @@ class Application(QObject):
                 "保存失败",
                 f"数据保存失败，请检查磁盘空间和权限。\n\n{exc}",
             )
+        self._persist_runtime_quiet()
 
     def _auto_save(self) -> None:
         """定时自动保存：静默失败；拒绝写入时托盘通知一次。"""
@@ -547,6 +568,7 @@ class Application(QObject):
                     )
         except Exception:
             pass
+        self._persist_runtime_quiet()
 
     def run(self) -> int:
         return self.qt_app.exec()
