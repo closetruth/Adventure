@@ -4,12 +4,14 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
-from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QToolTip,
     QVBoxLayout,
@@ -20,6 +22,7 @@ from .models import AppState
 from .runtime_intervals import (
     DaySlice,
     add_weeks,
+    enrich_slices,
     identity_color,
     local_week_start,
     slices_for_week,
@@ -32,6 +35,42 @@ from .ui_text import format_duration
 WEEKDAYS = "一二三四五六日"
 GUTTER = 28
 HEADER = 22
+MIN_BLOCK_PX = 4
+ZOOM_MIN_SPAN = 3.0
+GRID_MIN_PX = 280
+GRID_PX_PER_HOUR = 32
+LEGEND_MAX_PX = 88
+# Match QTabWidget::pane in task_dialog; opaque so tall grid/legend clip.
+WEEK_PANE_BG = "#1a1b24"
+WEEK_SCROLL_QSS = f"""
+QScrollArea#WeekGridScroll, QScrollArea#WeekLegendScroll {{
+    background-color: {WEEK_PANE_BG};
+    border: none;
+}}
+QScrollArea#WeekGridScroll > QWidget > QWidget,
+QScrollArea#WeekLegendScroll > QWidget > QWidget {{
+    background-color: {WEEK_PANE_BG};
+}}
+"""
+
+
+def grid_min_height(view_lo: float, view_hi: float) -> int:
+    span = max(0.5, float(view_hi) - float(view_lo))
+    return max(GRID_MIN_PX, round(span * GRID_PX_PER_HOUR))
+
+
+def _opaque_week_scroll(scroll: QScrollArea) -> None:
+    """Dialog QSS makes QScrollArea transparent; force opaque clip so siblings don't stack."""
+    scroll.setStyleSheet(WEEK_SCROLL_QSS)
+    _paint_week_viewport_opaque(scroll.viewport())
+
+
+def _paint_week_viewport_opaque(vp: QWidget) -> None:
+    vp.setAutoFillBackground(True)
+    vp.setAttribute(Qt.WA_OpaquePaintEvent, True)
+    pal = vp.palette()
+    pal.setColor(vp.backgroundRole(), QColor(WEEK_PANE_BG))
+    vp.setPalette(pal)
 
 
 def format_running_status(state: AppState) -> str:
@@ -95,6 +134,80 @@ def legend_row_specs(
     return rows
 
 
+def clip_hours(
+    t0: float, t1: float, view_lo: float, view_hi: float
+) -> Optional[tuple[float, float]]:
+    a = max(t0, view_lo)
+    b = min(t1, view_hi)
+    if b <= a:
+        return None
+    return a, b
+
+
+def hour_to_y(hour: float, view_lo: float, view_hi: float, top: int, height: int) -> int:
+    span = max(1e-6, view_hi - view_lo)
+    t = (hour - view_lo) / span
+    t = max(0.0, min(1.0, t))
+    return top + int(height * t)
+
+
+def view_hour_ticks(view_lo: float, view_hi: float) -> list[float]:
+    """Label hours inside the visible window (inclusive ends when on integers)."""
+    span = view_hi - view_lo
+    if span <= 6:
+        step = 1.0
+    elif span <= 12:
+        step = 2.0
+    else:
+        step = 6.0
+    ticks: list[float] = []
+    # Start at first multiple of step at or above view_lo
+    start = int(view_lo // step) * step
+    if start < view_lo - 1e-9:
+        start += step
+    h = start
+    while h <= view_hi + 1e-9:
+        ticks.append(float(h))
+        h += step
+    if not ticks or abs(ticks[0] - view_lo) > 1e-6:
+        ticks.insert(0, view_lo)
+    if abs(ticks[-1] - view_hi) > 1e-6:
+        ticks.append(view_hi)
+    # de-dupe near equals
+    out: list[float] = []
+    for x in ticks:
+        if not out or abs(out[-1] - x) > 1e-6:
+            out.append(x)
+    return out
+
+
+def zoom_window(
+    view_lo: float,
+    view_hi: float,
+    *,
+    center: float,
+    factor: float,
+    min_span: float = ZOOM_MIN_SPAN,
+) -> tuple[float, float]:
+    """Shrink (factor<1) or grow (factor>1) the hour window around center, clamped to [0,24]."""
+    span = max(min_span, (view_hi - view_lo) * factor)
+    span = min(24.0, span)
+    lo = center - span / 2.0
+    hi = center + span / 2.0
+    if lo < 0.0:
+        hi -= lo
+        lo = 0.0
+    if hi > 24.0:
+        lo -= hi - 24.0
+        hi = 24.0
+    lo = max(0.0, lo)
+    hi = min(24.0, hi)
+    if hi - lo < min_span:
+        hi = min(24.0, lo + min_span)
+        lo = max(0.0, hi - min_span)
+    return lo, hi
+
+
 class WeekGrid(QWidget):
     column_count = 7
 
@@ -104,15 +217,41 @@ class WeekGrid(QWidget):
         self._week_start = 0.0
         self._now = 0.0
         self._open_identity = None
+        self._view_lo = 0.0
+        self._view_hi = 24.0
         self._col_rects: list[QRect] = []
         self.setMouseTracking(True)
 
-    def set_slices(self, slices, *, week_start, now, open_identity):
+    def sizeHint(self) -> QSize:
+        return QSize(400, grid_min_height(self._view_lo, self._view_hi))
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(200, grid_min_height(self._view_lo, self._view_hi))
+
+    def set_view(self, view_lo: float, view_hi: float) -> None:
+        self._view_lo = max(0.0, min(24.0, float(view_lo)))
+        self._view_hi = max(self._view_lo + 0.5, min(24.0, float(view_hi)))
+        self.updateGeometry()
+        self.update()
+
+    def set_slices(
+        self,
+        slices,
+        *,
+        week_start,
+        now,
+        open_identity,
+        view_lo: float | None = None,
+        view_hi: float | None = None,
+    ):
         self._slices = slices
         self._week_start = week_start
         self._now = now
         self._open_identity = open_identity
-        self.update()
+        if view_lo is not None and view_hi is not None:
+            self.set_view(view_lo, view_hi)
+        else:
+            self.update()
 
     def _body_rect(self) -> QRect:
         return QRect(
@@ -122,10 +261,21 @@ class WeekGrid(QWidget):
             max(1, self.height() - HEADER),
         )
 
+    def _block_rect(self, col: QRect, t0: float, t1: float) -> Optional[QRect]:
+        clipped = clip_hours(t0, t1, self._view_lo, self._view_hi)
+        if clipped is None:
+            return None
+        a, b = clipped
+        y0 = hour_to_y(a, self._view_lo, self._view_hi, col.y(), col.height())
+        y1 = hour_to_y(b, self._view_lo, self._view_hi, col.y(), col.height())
+        h = max(MIN_BLOCK_PX, y1 - y0)
+        return QRect(col.x() + 2, y0, col.width() - 4, h)
+
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, False)
         p.setFont(QFont("Microsoft YaHei UI", 8))
+        p.fillRect(self.rect(), QColor(WEEK_PANE_BG))
         body = self._body_rect()
         col_w = body.width() / 7.0
         self._col_rects = []
@@ -134,15 +284,16 @@ class WeekGrid(QWidget):
             w = int(body.x() + (i + 1) * col_w) - x
             self._col_rects.append(QRect(x, body.y(), w, body.height()))
         p.setPen(QColor(TEXT_MUTED))
-        for hour in (0, 6, 12, 18, 24):
-            y = body.y() + int(body.height() * (hour / 24.0))
+        for hour in view_hour_ticks(self._view_lo, self._view_hi):
+            y = hour_to_y(hour, self._view_lo, self._view_hi, body.y(), body.height())
+            label = str(int(round(hour))) if abs(hour - round(hour)) < 1e-6 else f"{hour:.1f}"
             p.drawText(
                 0,
                 y - 6,
                 GUTTER - 2,
                 12,
                 int(Qt.AlignRight | Qt.AlignVCenter),
-                str(hour),
+                label,
             )
         mon = datetime.fromtimestamp(self._week_start)
         today = datetime.fromtimestamp(self._now).date()
@@ -163,10 +314,9 @@ class WeekGrid(QWidget):
             idx = (datetime.strptime(sl.date, "%Y-%m-%d").date() - mon.date()).days
             if idx < 0 or idx > 6:
                 continue
-            rect = self._col_rects[idx]
-            y0 = rect.y() + int(rect.height() * (sl.t0 / 24.0))
-            y1 = rect.y() + int(rect.height() * (sl.t1 / 24.0))
-            block = QRect(rect.x() + 2, y0, rect.width() - 4, max(2, y1 - y0))
+            block = self._block_rect(self._col_rects[idx], sl.t0, sl.t1)
+            if block is None:
+                continue
             color = QColor(identity_color(sl.task_id, sl.leaf_id))
             p.fillRect(block, color)
             if (
@@ -180,9 +330,12 @@ class WeekGrid(QWidget):
             idx = (now_dt.date() - mon.date()).days
             rect = self._col_rects[idx]
             hour = now_dt.hour + now_dt.minute / 60.0 + now_dt.second / 3600.0
-            y = rect.y() + int(rect.height() * (hour / 24.0))
-            p.setPen(QPen(QColor("#e8eaf0"), 1))
-            p.drawLine(rect.left(), y, rect.right(), y)
+            if self._view_lo <= hour <= self._view_hi:
+                y = hour_to_y(
+                    hour, self._view_lo, self._view_hi, rect.y(), rect.height()
+                )
+                p.setPen(QPen(QColor("#e8eaf0"), 1))
+                p.drawLine(rect.left(), y, rect.right(), y)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = event.position().toPoint()
@@ -191,11 +344,8 @@ class WeekGrid(QWidget):
             idx = (datetime.strptime(sl.date, "%Y-%m-%d").date() - mon.date()).days
             if idx < 0 or idx > 6 or idx >= len(self._col_rects):
                 continue
-            rect = self._col_rects[idx]
-            y0 = rect.y() + int(rect.height() * (sl.t0 / 24.0))
-            y1 = rect.y() + int(rect.height() * (sl.t1 / 24.0))
-            block = QRect(rect.x() + 2, y0, rect.width() - 4, max(2, y1 - y0))
-            if block.contains(pos):
+            block = self._block_rect(self._col_rects[idx], sl.t0, sl.t1)
+            if block is not None and block.contains(pos):
                 QToolTip.showText(
                     event.globalPosition().toPoint(), format_slice_hover(sl), self
                 )
@@ -209,6 +359,8 @@ class WeekRuntimePanel(QWidget):
         self.state = state
         self.manager = manager
         self._week_start = local_week_start(time.time())
+        self._view_lo = 0.0
+        self._view_hi = 24.0
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self.refresh)
@@ -222,30 +374,88 @@ class WeekRuntimePanel(QWidget):
         nav.addWidget(self.btn_prev)
         nav.addWidget(self.lbl_range, 1)
         nav.addWidget(self.btn_next)
+
+        zoom = QHBoxLayout()
+        self.btn_full = QPushButton("全日")
+        self.btn_day = QPushButton("白天")
+        self.btn_zoom_in = QPushButton("+")
+        self.btn_zoom_out = QPushButton("-")
+        self.btn_full.setToolTip("显示 0–24 点")
+        self.btn_day.setToolTip("放大到 8–24 点")
+        self.btn_zoom_in.setToolTip("放大（更细）")
+        self.btn_zoom_out.setToolTip("缩小")
+        self.btn_full.clicked.connect(self._view_full)
+        self.btn_day.clicked.connect(self._view_daytime)
+        self.btn_zoom_in.clicked.connect(self._zoom_in)
+        self.btn_zoom_out.clicked.connect(self._zoom_out)
+        for b in (self.btn_full, self.btn_day, self.btn_zoom_in, self.btn_zoom_out):
+            zoom.addWidget(b)
+        zoom.addStretch(1)
+
         self.lbl_status = QLabel("")
         self.lbl_reset = QLabel("运行记录已重置")
         self.lbl_reset.setStyleSheet(f"color: {TEXT_MUTED};")
         self.lbl_reset.hide()
         self.grid = WeekGrid(self)
-        self.grid.setMinimumHeight(280)
-        self.grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.legend = QWidget(self)
+        self.grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.grid_scroll = QScrollArea()
+        self.grid_scroll.setObjectName("WeekGridScroll")
+        self.grid_scroll.setWidgetResizable(True)
+        self.grid_scroll.setFrameShape(QFrame.NoFrame)
+        self.grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.grid_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.grid_scroll.setWidget(self.grid)
+        _opaque_week_scroll(self.grid_scroll)
+        self.legend = QWidget()
         self.legend_layout = QVBoxLayout(self.legend)
         self.legend_layout.setContentsMargins(0, 4, 0, 0)
         self.legend_layout.setSpacing(4)
+        self.legend_scroll = QScrollArea()
+        self.legend_scroll.setObjectName("WeekLegendScroll")
+        self.legend_scroll.setWidgetResizable(True)
+        self.legend_scroll.setFrameShape(QFrame.NoFrame)
+        self.legend_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.legend_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.legend_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self.legend_scroll.setMaximumHeight(LEGEND_MAX_PX)
+        self.legend_scroll.setWidget(self.legend)
+        _opaque_week_scroll(self.legend_scroll)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(nav)
+        lay.addLayout(zoom)
         lay.addWidget(self.lbl_status)
         lay.addWidget(self.lbl_reset)
-        lay.addWidget(self.grid, 1)
-        lay.addWidget(self.legend)
+        lay.addWidget(self.grid_scroll, 1)
+        lay.addWidget(self.legend_scroll)
+        self.grid_scroll.viewport().installEventFilter(self)
+        self.legend_scroll.viewport().installEventFilter(self)
         self.refresh()
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Type.Polish, QEvent.Type.StyleChange):
+            if obj is self.grid_scroll.viewport() or obj is self.legend_scroll.viewport():
+                _paint_week_viewport_opaque(obj)
+        return super().eventFilter(obj, event)
+
+    def event(self, event):
+        result = super().event(event)
+        # Dialog stylesheet polish clears viewport autoFillBackground after addTab.
+        if event.type() in (QEvent.Type.Polish, QEvent.Type.StyleChange):
+            if hasattr(self, "grid_scroll"):
+                _paint_week_viewport_opaque(self.grid_scroll.viewport())
+                _paint_week_viewport_opaque(self.legend_scroll.viewport())
+        return result
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._timer.start()
         self.refresh()
+        QTimer.singleShot(0, self._reopaque_scrolls)
+
+    def _reopaque_scrolls(self) -> None:
+        _opaque_week_scroll(self.grid_scroll)
+        _opaque_week_scroll(self.legend_scroll)
 
     def hideEvent(self, event) -> None:
         self._timer.stop()
@@ -261,6 +471,41 @@ class WeekRuntimePanel(QWidget):
             self._week_start = nxt
             self.refresh()
 
+    def _view_full(self) -> None:
+        self._view_lo, self._view_hi = 0.0, 24.0
+        self.refresh()
+
+    def _view_daytime(self) -> None:
+        self._view_lo, self._view_hi = 8.0, 24.0
+        self.refresh()
+
+    def _zoom_center(self) -> float:
+        now = time.time()
+        mon = datetime.fromtimestamp(self._week_start).date()
+        today = datetime.fromtimestamp(now).date()
+        if mon <= today <= mon + timedelta(days=6):
+            dt = datetime.fromtimestamp(now)
+            return dt.hour + dt.minute / 60.0 + dt.second / 3600.0
+        return (self._view_lo + self._view_hi) / 2.0
+
+    def _zoom_in(self) -> None:
+        self._view_lo, self._view_hi = zoom_window(
+            self._view_lo,
+            self._view_hi,
+            center=self._zoom_center(),
+            factor=0.5,
+        )
+        self.refresh()
+
+    def _zoom_out(self) -> None:
+        self._view_lo, self._view_hi = zoom_window(
+            self._view_lo,
+            self._view_hi,
+            center=self._zoom_center(),
+            factor=2.0,
+        )
+        self.refresh()
+
     def refresh(self) -> None:
         now = time.time()
         current = local_week_start(now)
@@ -272,15 +517,27 @@ class WeekRuntimePanel(QWidget):
         )
         self.lbl_status.setText(format_running_status(self.state))
         self.lbl_reset.setVisible(self.manager.runtime_log.load_reset)
-        slices = slices_for_week(self.manager.runtime_log, self._week_start, now)
+        raw = slices_for_week(self.manager.runtime_log, self._week_start, now)
+        slices = enrich_slices(self.state, raw)
         ident = None
         rec, task_id, _t, leaf_id, _lt = self.manager.recording_identity()
         if rec and task_id:
             ident = (task_id, leaf_id)
         self.grid.set_slices(
-            slices, week_start=self._week_start, now=now, open_identity=ident
+            slices,
+            week_start=self._week_start,
+            now=now,
+            open_identity=ident,
+            view_lo=self._view_lo,
+            view_hi=self._view_hi,
         )
+        self._sync_grid_height()
         self._fill_legend(legend_row_specs(slices, ident))
+
+    def _sync_grid_height(self) -> None:
+        h = grid_min_height(self._view_lo, self._view_hi)
+        self.grid.setMinimumHeight(h)
+        self.grid.updateGeometry()
 
     def _fill_legend(self, rows: list[tuple[str, str]]) -> None:
         clear_layout(self.legend_layout)

@@ -10,14 +10,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.models import AppState
 from src.power_monitor import PowerMonitor
-from src.runtime_intervals import DaySlice, identity_color
+from src.runtime_intervals import DaySlice, enrich_slices, identity_color, resolve_runtime_labels
 from src.task_manager import TaskManager
 from src.ui_week_runtime import (
+    clip_hours,
     format_clock_hours,
     format_legend_label,
     format_running_status,
     format_slice_hover,
     legend_row_specs,
+    zoom_window,
 )
 
 
@@ -91,4 +93,31 @@ class WeekRuntimeTextTests(unittest.TestCase):
         self.assertEqual(rows[0][1], "写文档 · 第 3 章  运行中")
         self.assertEqual(rows[1][0], identity_color("T", None))
         self.assertEqual(rows[1][1], "写文档")
-        self.assertNotEqual(rows[0][0], rows[1][0])
+        self.assertEqual(rows[0][0], rows[1][0])
+
+    def test_resolve_leaf_looks_up_top_level(self):
+        state, m = _make(self)
+        t = m.create("写文档")
+        leaf = m.add_subtask(t.id, "第 3 章", target_minutes=10)
+        title, leaf_title = resolve_runtime_labels(state, "wrong-id", leaf.id)
+        self.assertEqual(title, "写文档")
+        self.assertEqual(leaf_title, "第 3 章")
+        # rename top — enrich should pick live title
+        t.title = "文档改名"
+        sl = DaySlice(
+            date="2026-09-02", t0=9.0, t1=10.0,
+            task_id=t.id, title="写文档", leaf_id=leaf.id, leaf_title="旧名",
+        )
+        enriched = enrich_slices(state, [sl])[0]
+        self.assertEqual(enriched.title, "文档改名")
+        self.assertEqual(enriched.leaf_title, "第 3 章")
+
+    def test_clip_and_zoom_window(self):
+        self.assertEqual(clip_hours(7.0, 9.0, 8.0, 24.0), (8.0, 9.0))
+        self.assertIsNone(clip_hours(1.0, 2.0, 8.0, 24.0))
+        lo, hi = zoom_window(0.0, 24.0, center=12.0, factor=0.5)
+        self.assertAlmostEqual(hi - lo, 12.0)
+        self.assertGreaterEqual(lo, 0.0)
+        self.assertLessEqual(hi, 24.0)
+        lo2, hi2 = zoom_window(8.0, 24.0, center=12.0, factor=0.5)
+        self.assertLess(hi2 - lo2, hi - lo)

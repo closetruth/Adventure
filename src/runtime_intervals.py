@@ -11,7 +11,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from typing import TYPE_CHECKING
+
 from .storage import get_data_dir
+
+if TYPE_CHECKING:
+    from .models import AppState
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +92,10 @@ class DaySlice:
         return (self.task_id, self.leaf_id)
 
 
-def identity_color(task_id: str, leaf_id: Optional[str]) -> str:
-    key = f"{task_id}\0{leaf_id or ''}".encode("utf-8")
-    return PALETTE[zlib.crc32(key) % len(PALETTE)]
+def identity_color(task_id: str, leaf_id: Optional[str] = None) -> str:
+    """Stable palette color by top-level task; leaf_id ignored (same top => same color)."""
+    _ = leaf_id
+    return PALETTE[zlib.crc32(task_id.encode("utf-8")) % len(PALETTE)]
 
 
 def local_week_start(now: float) -> float:
@@ -176,6 +182,57 @@ def slices_for_week(
         if b <= a:
             continue
         out.extend(_split_days(iv, a, b))
+    return out
+
+
+def resolve_runtime_labels(
+    state: "AppState",
+    task_id: str,
+    leaf_id: Optional[str],
+    *,
+    fallback_title: str = "",
+    fallback_leaf_title: Optional[str] = None,
+) -> tuple[str, Optional[str]]:
+    """有叶子则从树上现查顶层；扁平目标用 task_id。删掉的用快照回退。"""
+    if leaf_id:
+        for task in state.tasks:
+            sub = task.find_subtask(leaf_id)
+            if sub is not None:
+                return task.title, sub.title
+        top = fallback_title
+        for task in state.tasks:
+            if task.id == task_id:
+                top = task.title
+                break
+        return (top or fallback_title or "已删除"), fallback_leaf_title
+    for task in state.tasks:
+        if task.id == task_id:
+            return task.title, None
+    return (fallback_title or "已删除"), None
+
+
+def enrich_slices(state: "AppState", slices: list[DaySlice]) -> list[DaySlice]:
+    """显示前用现树刷新顶层/叶子标题。"""
+    out: list[DaySlice] = []
+    for sl in slices:
+        title, leaf_title = resolve_runtime_labels(
+            state,
+            sl.task_id,
+            sl.leaf_id,
+            fallback_title=sl.title,
+            fallback_leaf_title=sl.leaf_title,
+        )
+        out.append(
+            DaySlice(
+                date=sl.date,
+                t0=sl.t0,
+                t1=sl.t1,
+                task_id=sl.task_id,
+                title=title,
+                leaf_id=sl.leaf_id,
+                leaf_title=leaf_title,
+            )
+        )
     return out
 
 

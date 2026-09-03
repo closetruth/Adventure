@@ -244,11 +244,12 @@ class WeekSliceTests(unittest.TestCase):
         self.assertAlmostEqual(parts[0].t0, 9.0, places=5)
         self.assertAlmostEqual(parts[0].t1, 10.0, places=5)
 
-    def test_identity_color_stable_and_leaf_differs(self):
+    def test_identity_color_stable_by_top_level(self):
         a = identity_color("T", "A")
         b = identity_color("T", "B")
         self.assertEqual(a, identity_color("T", "A"))
-        self.assertNotEqual(a, b)
+        self.assertEqual(a, b)
+        self.assertNotEqual(a, identity_color("Other", "A"))
         self.assertTrue(a.startswith("#"))
 
     def test_add_weeks(self):
