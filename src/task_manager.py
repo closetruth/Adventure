@@ -737,6 +737,12 @@ class TaskManager:
             return True, active.id, active.title, sub.id, sub.title
         return True, active.id, active.title, None, None
 
+    def recording_identity(
+        self,
+    ) -> tuple[bool, Optional[str], str, Optional[str], Optional[str]]:
+        counting = self.power_monitor.should_count_time() and not self._is_idle()
+        return self._recording_identity(counting)
+
     def persist_runtime_log(self) -> None:
         path = self._intervals_path or intervals_path()
         try:
