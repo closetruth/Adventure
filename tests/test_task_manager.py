@@ -16,25 +16,25 @@ from src.runtime_intervals import load_log
 from src.task_manager import TaskManager
 
 
-def _make():
+def _make(test_case: unittest.TestCase):
     state = AppState()
     tmp = tempfile.TemporaryDirectory()
+    test_case.addCleanup(tmp.cleanup)
     manager = TaskManager(state, PowerMonitor())
     manager._intervals_path = Path(tmp.name) / "runtime_intervals.json"
-    manager._test_tmp_dir = tmp  # keep temp dir alive for test duration
     return state, manager
 
 
 class TaskManagerFlowTests(unittest.TestCase):
     def test_second_create_is_paused(self):
-        state, m = _make()
+        state, m = _make(self)
         t1 = m.create("甲")
         t2 = m.create("乙")
         self.assertEqual(t1.status.value, "active")
         self.assertEqual(t2.status.value, "paused")
 
     def test_resume_pauses_other(self):
-        state, m = _make()
+        state, m = _make(self)
         t1 = m.create("甲")
         t2 = m.create("乙")
         m.resume(t2.id)
@@ -43,7 +43,7 @@ class TaskManagerFlowTests(unittest.TestCase):
 
     def test_flat_ops_move_to_legacy_on_first_subtask(self):
         """首次加子目标时，扁平目标上的进度必须迁入（原进度）子叶子。"""
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         for _ in range(5):
             m.record_operation(None)
@@ -54,7 +54,7 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertTrue(t.subtasks[-1].is_legacy_progress())
 
     def test_ops_route_to_focused_leaf(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         a = m.add_subtask(t.id, "A", target_minutes=10)
         b = m.add_subtask(t.id, "B", target_minutes=10)
@@ -68,14 +68,14 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertEqual(state.since_roll.gold, 1.0)
 
     def test_focus_rejects_container(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         group = m.add_subtask(t.id, "组", target_minutes=10)
         m.add_subtask(t.id, "子", target_minutes=10, parent_subtask_id=group.id)
         self.assertFalse(m.focus_subtask(t.id, group.id))
 
     def test_claim_adds_bonus_when_done(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=1)
         m.focus_subtask(t.id, sub.id)
@@ -89,7 +89,7 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertTrue(sub.rewards_claimed)
 
     def test_claim_pending_without_done_has_no_bonus(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=1)
         sub.pending_rewards.append(Reward(gold=1.0))
@@ -103,7 +103,7 @@ class TaskManagerFlowTests(unittest.TestCase):
 
     def test_recover_does_not_claim_in_progress_leaf(self):
         """启动恢复不得把进行中叶子标成已领取，否则时长达标后也无法完成。"""
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=10)
         sub.pending_rewards.append(Reward(gold=1.0))
@@ -116,7 +116,7 @@ class TaskManagerFlowTests(unittest.TestCase):
 
     def test_recover_repairs_premature_claimed_leaf(self):
         """未完成却已领取的叶子，启动时应恢复为可完成。"""
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=1)
         sub.active_seconds = sub.target_seconds
@@ -133,7 +133,7 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertTrue(sub.rewards_claimed)
 
     def test_decompose_moves_progress_to_legacy(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=10)
         m.focus_subtask(t.id, sub.id)
@@ -148,7 +148,7 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertEqual(t.current_subtask_id, sub.children[0].id, "聚焦移到第一个新子项")
 
     def test_delete_focused_leaf_moves_focus(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         a = m.add_subtask(t.id, "A", target_minutes=10)
         b = m.add_subtask(t.id, "B", target_minutes=10)
@@ -157,13 +157,13 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertEqual(t.current_subtask_id, b.id)
 
     def test_complete_task_requires_all_leaves_done(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         m.add_subtask(t.id, "A", target_minutes=10)
         self.assertIsNone(m.complete(t.id))
 
     def test_tick_active_time_counts_focused_leaf(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=10)
         m.focus_subtask(t.id, sub.id)
@@ -177,7 +177,7 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertAlmostEqual(sub.active_seconds, 1.0)
 
     def test_tick_active_time_skips_paused(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         m.pause(t.id)
         m.note_activity()
@@ -189,7 +189,7 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertEqual(t.active_seconds, 0.0)
 
     def test_tick_active_time_skips_when_idle(self):
-        state, m = _make()
+        state, m = _make(self)
         t = m.create("甲")
         sub = m.add_subtask(t.id, "A", target_minutes=10)
         m.focus_subtask(t.id, sub.id)
@@ -206,7 +206,7 @@ class TaskManagerFlowTests(unittest.TestCase):
 
 class RuntimeLogHookTests(unittest.TestCase):
     def setUp(self):
-        self.state, self.manager = _make()
+        self.state, self.manager = _make(self)
         self.manager.note_activity()
 
     def test_tick_opens_for_flat_task(self):

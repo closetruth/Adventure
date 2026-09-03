@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -26,13 +28,26 @@ from src.widget import FloatingWidget
 _app = QApplication.instance() or QApplication([])
 
 
+def _make_manager(
+    test_case: unittest.TestCase | None = None,
+    state: AppState | None = None,
+) -> tuple[AppState, TaskManager, tempfile.TemporaryDirectory]:
+    if state is None:
+        state = AppState()
+    tmp = tempfile.TemporaryDirectory()
+    if test_case is not None:
+        test_case.addCleanup(tmp.cleanup)
+    manager = TaskManager(state, PowerMonitor())
+    manager._intervals_path = Path(tmp.name) / "runtime_intervals.json"
+    return state, manager, tmp
+
+
 class WidgetGeometryRegressionTest(unittest.TestCase):
     """回归：窗口 minimumSizeHint 必须 ≤ 600，点击/显示后窗口高度不变。"""
 
     @classmethod
     def setUpClass(cls):
-        state = AppState()
-        manager = TaskManager(state, PowerMonitor())
+        state, manager, cls._intervals_tmp = _make_manager()
         widget = FloatingWidget(state, manager)
         task = manager.create("学习 Qt 小部件布局与渲染管线性能优化")
         manager.add_subtask(task.id, "阅读 PySide6 官方文档布局章节并做笔记", target_minutes=30)
@@ -46,6 +61,13 @@ class WidgetGeometryRegressionTest(unittest.TestCase):
         _app.processEvents()
         _app.processEvents()
         cls.widget = widget
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.widget.close()
+        cls.widget.deleteLater()
+        cls._intervals_tmp.cleanup()
+        _app.processEvents()
 
     def test_show_does_not_grow_window_after_layout(self):
         """回归：显示后不得把窗口撑大（曾从 631 撑回 677）。"""
@@ -223,7 +245,8 @@ class RollBarInitRegressionTest(unittest.TestCase):
         state.last_roll_at = 0
         state.roll_runtime.next_roll_at = 10
         state.roll_runtime.roll_span = 10
-        widget = FloatingWidget(state, TaskManager(state, PowerMonitor()))
+        _, manager, _ = _make_manager(self, state)
+        widget = FloatingWidget(state, manager)
         progress, span = roll_progress(state)
         self.assertEqual(progress, 4)
         self.assertEqual(widget.roll_bar._progress, progress)
@@ -323,8 +346,7 @@ class EaseChestClickTests(unittest.TestCase):
 
 class CurrencyCountUpWidgetTests(unittest.TestCase):
     def test_kick_starts_timer_and_moves_display(self):
-        state = AppState()
-        manager = TaskManager(state, PowerMonitor())
+        state, manager, _ = _make_manager(self)
         widget = FloatingWidget(state, manager)
         widget.show()
         _app.processEvents()
@@ -339,8 +361,7 @@ class CurrencyCountUpWidgetTests(unittest.TestCase):
         widget.deleteLater()
 
     def test_pending_roll_does_not_move_global_display(self):
-        state = AppState()
-        manager = TaskManager(state, PowerMonitor())
+        state, manager, _ = _make_manager(self)
         widget = FloatingWidget(state, manager)
         widget.show()
         _app.processEvents()
@@ -359,8 +380,7 @@ class CurrencyCountUpWidgetTests(unittest.TestCase):
         widget.deleteLater()
 
     def test_detail_reel_snaps_and_chases_earned(self):
-        state = AppState()
-        manager = TaskManager(state, PowerMonitor())
+        state, manager, _ = _make_manager(self)
         widget = FloatingWidget(state, manager)
         widget.show()
         _app.processEvents()
