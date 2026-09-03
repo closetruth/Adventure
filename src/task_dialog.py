@@ -28,6 +28,7 @@ from .ui_qt import make_divider, make_section_title
 from .ui_styles import DARK_BASE_QSS
 from .ui_task_tree import GOAL_TREE_PANEL_QSS, TREE_QSS
 from .ui_text import format_duration
+from .ui_week_runtime import WeekRuntimePanel
 
 DIALOG_STYLESHEET = DARK_BASE_QSS + """
 QTabWidget::pane {
@@ -189,7 +190,7 @@ class TaskDialog(QDialog):
         self._state_change_pending = False
 
         self.setWindowTitle("目标管理 - Adventure")
-        self.resize(540, 640)
+        self.resize(640, 640)
         self.setStyleSheet(DIALOG_STYLESHEET)
         self._build()
         self.refresh()
@@ -228,6 +229,8 @@ class TaskDialog(QDialog):
         self.tabs.addTab(self.tab_active["widget"], "进行中")
         self.tabs.addTab(self.tab_paused["widget"], "已暂停")
         self.tabs.addTab(self.tab_done["widget"], "已完成")
+        self.week_panel = WeekRuntimePanel(self.state, self.manager)
+        self.tabs.addTab(self.week_panel, "本周")
         v.addWidget(self.tabs, 1)
 
     def _make_scroll_tab(self) -> dict:
@@ -399,6 +402,7 @@ class TaskDialog(QDialog):
         for tab in (self.tab_active, self.tab_paused, self.tab_done):
             for card in tab["inner"].findChildren(TaskCard):
                 card.update_stats()
+        self.week_panel.refresh()
 
     def refresh(self) -> None:
         if self._refreshing:
@@ -418,6 +422,7 @@ class TaskDialog(QDialog):
             self.tabs.setTabText(0, f"进行中 ({len(self.manager.by_status(TaskStatus.ACTIVE))})")
             self.tabs.setTabText(1, f"已暂停 ({len(self.manager.by_status(TaskStatus.PAUSED))})")
             self.tabs.setTabText(2, f"已完成 ({len(self.manager.by_status(TaskStatus.COMPLETED))})")
+            self.week_panel.refresh()
         finally:
             self._refreshing = False
 
