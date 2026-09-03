@@ -1,6 +1,6 @@
 # 概率系统设计总览
 
-Adventure 全部核心随机系统的概率设计。开箱系统的详细公式见 [开箱系统概率设计](chest-opening-probabilities.md)。
+Adventure 全部核心随机系统的概率设计。开箱系统的详细公式见 [开箱系统概率设计](chest-opening-probabilities.md)。文档索引见 [README.md](README.md)。
 
 > 范围:开奖系统(`src/reward_system.py`)、开箱系统(`src/chest_opening.py`)、视觉宝箱条(`src/ui_roll_bar.py`)。音效与小游戏的概率不在此文档。
 

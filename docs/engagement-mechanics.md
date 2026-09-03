@@ -2,7 +2,11 @@
 
 面向 Adventure 悬浮窗 + 落点连通开奖的扩展想法。按 **好做程度 × 上瘾程度** 排序，并标注建议改动的模块。
 
-> 原则：机制应强化「真实工作时的正反馈」，避免让人为刷键而刷键。已有防护：App 内输入不计 op、需有活跃任务才记子任务奖励。
+> 原则：机制应强化「真实工作时的正反馈」，避免让人为刷键而刷键。已有防护：需有活跃任务才记子任务奖励；关屏 / 空闲停表。
+
+> **已落地（不必再做）**：开奖暴击（约 8% + 右偏倍率，见 `reward_system.py` / [probability-design.md](probability-design.md)）；缓动宝箱条；皇室战争式开箱 + 字母收集；本周运行时段视图。
+
+文档索引：[README.md](README.md)
 
 ---
 
@@ -11,7 +15,6 @@
 | 机制 | 上瘾点 | 实现要点 | 主要模块 | 难度 |
 |------|--------|----------|----------|------|
 | **将满张力** | 簇差 1 个满（near miss）最想继续敲 | `cluster_size == span - 1` 时画布边框呼吸、落点略放大、轻 tick 音；不改概率 | `ui_roll_bar.py`, `sfx.py` | 低 |
-| **暴击 / 双倍** | 偶发大奖记忆深 | `maybe_roll` 内小概率（如 5%）`gold/diamond *= 2`，Toast 标「暴击」 | `reward_system.py`, `widget.py` | 低 |
 | **Combo 连击** | 短间隔连续操作停不下来 | 距上次 op < 1.5s 则 combo+1，否则清零；画布角标 `x12`，高 combo 落点更亮 | `op_tracker.py`, `main.py`, `ui_roll_bar.py` | 低～中 |
 | **开奖揭晓动画** | 老虎机式等待最上头 | 结果已算好，延迟 0.5～1s 闪动后再出 Toast | `widget.py`, `ui_roll_bar.py` | 中 |
 | **每日首胜** | 每天第一次想先「拿首胜」 | 记 `last_daily_bonus_date`，当天首次开奖 gold_chance 临时 +10% 或保底少量金 | `reward_system.py`, `models.py` | 低 |

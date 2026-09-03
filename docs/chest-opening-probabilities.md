@@ -1,6 +1,6 @@
 # 开箱系统概率设计
 
-皇室战争式开箱的完整概率设计。代码实现见 `src/chest_opening.py`,相关数据模型见 `src/models.py`(ChestItem / Inventory.letters)。
+皇室战争式开箱的完整概率设计。代码实现见 `src/chest_opening.py`,相关数据模型见 `src/models.py`(ChestItem / Inventory.letters)。总览与分布图见 [probability-design.md](probability-design.md)；文档索引见 [README.md](README.md)。
 
 > 设计原则:**右偏** —— 多数时候中规中矩,偶尔大惊喜。所有分布都朝「低值常见、高值罕见」倾斜,避免均匀分布带来的「平淡」。
 
