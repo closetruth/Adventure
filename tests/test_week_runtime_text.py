@@ -10,13 +10,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.models import AppState
 from src.power_monitor import PowerMonitor
-from src.runtime_intervals import DaySlice
+from src.runtime_intervals import DaySlice, identity_color
 from src.task_manager import TaskManager
 from src.ui_week_runtime import (
     format_clock_hours,
     format_legend_label,
     format_running_status,
     format_slice_hover,
+    legend_row_specs,
 )
 
 
@@ -70,3 +71,24 @@ class WeekRuntimeTextTests(unittest.TestCase):
             format_legend_label("写文档", None, running=False),
             "写文档",
         )
+
+    def test_legend_rows_use_identity_color_per_unique(self):
+        leaf = DaySlice(
+            date="2026-09-02", t0=9.0, t1=10.0,
+            task_id="T", title="写文档", leaf_id="L", leaf_title="第 3 章",
+        )
+        leaf_again = DaySlice(
+            date="2026-09-03", t0=9.0, t1=10.0,
+            task_id="T", title="写文档", leaf_id="L", leaf_title="第 3 章",
+        )
+        flat = DaySlice(
+            date="2026-09-02", t0=11.0, t1=12.0,
+            task_id="T", title="写文档", leaf_id=None, leaf_title=None,
+        )
+        rows = legend_row_specs([leaf, leaf_again, flat], running_identity=("T", "L"))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0][0], identity_color("T", "L"))
+        self.assertEqual(rows[0][1], "写文档 · 第 3 章  运行中")
+        self.assertEqual(rows[1][0], identity_color("T", None))
+        self.assertEqual(rows[1][1], "写文档")
+        self.assertNotEqual(rows[0][0], rows[1][0])

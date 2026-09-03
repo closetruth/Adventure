@@ -25,7 +25,8 @@ from .runtime_intervals import (
     slices_for_week,
 )
 from .task_manager import TaskManager
-from .ui_styles import FONT_FAMILY, TEXT_MUTED, TEXT_PRIMARY
+from .ui_qt import clear_layout
+from .ui_styles import BORDER, FONT_FAMILY, TEXT_MUTED, TEXT_PRIMARY
 from .ui_text import format_duration
 
 WEEKDAYS = "一二三四五六日"
@@ -69,6 +70,29 @@ def format_legend_label(title: str, leaf_title: Optional[str], *, running: bool)
     if running:
         return f"{base}  运行中"
     return base
+
+
+def legend_row_specs(
+    slices: list[DaySlice],
+    running_identity: Optional[tuple[str, Optional[str]]] = None,
+) -> list[tuple[str, str]]:
+    """Unique identities in first-seen order: (identity_color hex, legend label)."""
+    seen: list[tuple[str, Optional[str]]] = []
+    rows: list[tuple[str, str]] = []
+    for sl in slices:
+        key = sl.identity()
+        if key in seen:
+            continue
+        seen.append(key)
+        rows.append(
+            (
+                identity_color(sl.task_id, sl.leaf_id),
+                format_legend_label(
+                    sl.title, sl.leaf_title, running=running_identity == key
+                ),
+            )
+        )
+    return rows
 
 
 class WeekGrid(QWidget):
@@ -205,9 +229,10 @@ class WeekRuntimePanel(QWidget):
         self.grid = WeekGrid(self)
         self.grid.setMinimumHeight(280)
         self.grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.legend = QLabel("")
-        self.legend.setWordWrap(True)
-        self.legend.setStyleSheet(f"color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY};")
+        self.legend = QWidget(self)
+        self.legend_layout = QVBoxLayout(self.legend)
+        self.legend_layout.setContentsMargins(0, 4, 0, 0)
+        self.legend_layout.setSpacing(4)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(nav)
@@ -255,13 +280,23 @@ class WeekRuntimePanel(QWidget):
         self.grid.set_slices(
             slices, week_start=self._week_start, now=now, open_identity=ident
         )
-        seen: list[tuple] = []
-        labels = []
-        for sl in slices:
-            key = sl.identity()
-            if key in seen:
-                continue
-            seen.append(key)
-            running = ident == key
-            labels.append(format_legend_label(sl.title, sl.leaf_title, running=running))
-        self.legend.setText("    ".join(labels))
+        self._fill_legend(legend_row_specs(slices, ident))
+
+    def _fill_legend(self, rows: list[tuple[str, str]]) -> None:
+        clear_layout(self.legend_layout)
+        for color, text in rows:
+            row = QWidget(self.legend)
+            row_lay = QHBoxLayout(row)
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            row_lay.setSpacing(8)
+            swatch = QLabel(row)
+            swatch.setFixedSize(12, 12)
+            swatch.setStyleSheet(
+                f"background-color: {color}; border: 1px solid {BORDER};"
+            )
+            lbl = QLabel(text, row)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY};")
+            row_lay.addWidget(swatch, 0, Qt.AlignTop)
+            row_lay.addWidget(lbl, 1)
+            self.legend_layout.addWidget(row)
