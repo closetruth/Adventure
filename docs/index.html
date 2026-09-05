@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Adventure 演示视频</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #0d1117;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: #161b22;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+        }
+        h1 {
+            color: #f0f6fc;
+            font-size: 24px;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: #8b949e;
+            text-align: center;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        .video-wrapper {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .video-wrapper video {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-height: 80vh;
+            background: #000;
+        }
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .file-info {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .file-info a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+        .file-info a:hover {
+            text-decoration: underline;
+        }
+        .btn-download {
+            display: inline-block;
+            background: #238636;
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-download:hover {
+            background: #2ea043;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 16px;
+            }
+            h1 {
+                font-size: 18px;
+            }
+            .footer {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Adventure 演示视频</h1>
+        <p class="subtitle">完整功能演示，建议全屏观看</p>
+
+        <div class="video-wrapper">
+            <video controls preload="metadata" playsinline>
+                <source src="https://github.com/closetruth/Adventure/releases/download/v1.0.7/Adventure.Show.mp4" type="video/mp4">
+                您的浏览器不支持 HTML5 视频播放，请使用最新版 Chrome 或 Edge 浏览器。
+            </video>
+        </div>
+
+        <div class="footer">
+            <span class="file-info">
+                📁 文件：<a href="https://github.com/closetruth/Adventure/releases/download/v1.0.7/Adventure.Show.mp4">Adventure.Show.mp4</a>
+            </span>
+            <a href="https://github.com/closetruth/Adventure/releases/download/v1.0.7/Adventure.Show.mp4" class="btn-download">
+                ⬇️ 下载原视频
+            </a>
+        </div>
+    </div>
+</body>
+</html>
