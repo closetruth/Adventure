@@ -14,7 +14,7 @@
 
 敲键盘、点鼠标、移动光标会累计操作并周期性开奖；奖励先挂在当前目标上，领进背包后才能花。目标像文件夹一样层层拆解，工作时顺手收集金币、钻石、宝箱和字母。
 
-**当前正式版：[v1.0.6](https://github.com/closetruth/Adventure/releases/tag/v1.0.6)** · 变更说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)
+**当前正式版：[v1.0.8](https://github.com/closetruth/Adventure/releases/tag/v1.0.8)** · 变更说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ---
 
@@ -116,7 +116,7 @@ B站地址：https://www.bilibili.com/video/BV1wfbJ6iExF/?spm_id_from=0.0.upload
 ### 💿 正式版（推荐）
 
 1. 🔗 打开 [Releases](https://github.com/closetruth/Adventure/releases/latest)
-2. 📦 下载 `Adventure-vX.Y.Z.zip`（如 `Adventure-v1.0.6.zip`）并解压
+2. 📦 下载 `Adventure-vX.Y.Z.zip`（如 `Adventure-v1.0.8.zip`）并解压
 3. ▶️ 双击 `Adventure.exe`
 
 > SmartScreen：点「更多信息」→「仍要运行」（exe 未签名）。首次启动解压内置依赖会稍慢。
@@ -233,7 +233,7 @@ build.bat
 
 | 常用入口 | 内容 |
 |----------|------|
-| 📝 [RELEASE_NOTES.md](RELEASE_NOTES.md) | 版本变更（当前 v1.0.6） |
+| 📝 [RELEASE_NOTES.md](RELEASE_NOTES.md) | 版本变更（当前 v1.0.8） |
 | 📊 [docs/probability-design.md](docs/probability-design.md) | 开奖 / 开箱 / 缓动条概率总览 |
 | 📦 [docs/chest-opening-probabilities.md](docs/chest-opening-probabilities.md) | 开箱公式与调参 |
 | 💡 [docs/engagement-mechanics.md](docs/engagement-mechanics.md) | 留存 / 反馈机制草案 |
