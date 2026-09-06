@@ -18,14 +18,22 @@ from src.chest_opening import (
     LETTER_COUNT_MAX,
     MAX_UNLOCK_SLOTS,
     UNLOCK_SPANS,
+    finish_unlock,
     generate_open_result,
+    instant_open_total_cost,
     is_ready,
     locked_chests,
+    not_ready_chests,
+    open_all_ready,
     open_chest,
     ready_chests,
     remaining_seconds,
     slots_available,
+    speedup_gold_cost,
     start_unlock,
+    try_instant_open,
+    try_instant_open_n,
+    try_speedup,
     unlock_span_seconds,
     unlocking_chests,
 )
@@ -223,6 +231,86 @@ class PersistenceTests(unittest.TestCase):
         s2 = AppState()
         s2.inventory.letters["A"] = [1, 0, 0, 0]
         self.assertIn("letters", validate_state_invariants(s2) or "")
+
+
+class SpeedupInstantTests(unittest.TestCase):
+    def test_speedup_gold_cost(self):
+        self.assertEqual(speedup_gold_cost(0), 0)
+        self.assertEqual(speedup_gold_cost(1), 1)
+        self.assertEqual(speedup_gold_cost(300), 1)
+        self.assertEqual(speedup_gold_cost(301), 2)
+        self.assertEqual(speedup_gold_cost(1800), 6)
+
+    def test_try_speedup_deducts_and_readies(self):
+        state = AppState()
+        state.inventory.gold = 10.0
+        chest = state.inventory.add_chest(0)
+        start_unlock(state, chest, now=1000.0)
+        ok, msg = try_speedup(state, chest, now=1000.0)
+        self.assertTrue(ok, msg)
+        self.assertEqual(state.inventory.gold, 4.0)  # 10 - 6
+        self.assertTrue(is_ready(chest, now=1000.0))
+        self.assertEqual(unlocking_chests(state, now=1000.0), [])
+
+    def test_try_speedup_insufficient_gold(self):
+        state = AppState()
+        state.inventory.gold = 2.0
+        chest = state.inventory.add_chest(0)
+        ok, msg = try_speedup(state, chest, now=1000.0)
+        self.assertFalse(ok)
+        self.assertIn("不足", msg)
+        self.assertEqual(state.inventory.gold, 2.0)
+        self.assertIsNone(chest.unlock_started_at)
+
+    def test_try_instant_open_locked_no_slot(self):
+        state = AppState()
+        state.inventory.gold = 100.0
+        for _ in range(MAX_UNLOCK_SLOTS):
+            start_unlock(state, state.inventory.add_chest(1), now=1000.0)
+        self.assertFalse(slots_available(state, now=1000.0))
+        chest = state.inventory.add_chest(0)
+        before = len(state.inventory.chests)
+        ok, msg, result = try_instant_open(
+            state, chest, now=1000.0, rng=random.Random(1),
+        )
+        self.assertTrue(ok, msg)
+        self.assertIsNotNone(result)
+        self.assertNotIn(chest, state.inventory.chests)
+        self.assertEqual(len(state.inventory.chests), before - 1)
+        # Still 4 unlocking; locked instant did not take a slot
+        self.assertEqual(len(unlocking_chests(state, now=1000.0)), MAX_UNLOCK_SLOTS)
+        self.assertLess(state.inventory.gold, 100.0)
+
+    def test_try_instant_open_n_count(self):
+        state = AppState()
+        state.inventory.gold = 50.0
+        for _ in range(3):
+            state.inventory.add_chest(0)
+        pending = not_ready_chests(state, 0, now=1000.0)
+        self.assertEqual(len(pending), 3)
+        cost2 = instant_open_total_cost(pending[:2], now=1000.0)
+        self.assertEqual(cost2, 12)  # 2 * 6
+        ok, msg, opens = try_instant_open_n(
+            state, 0, 2, now=1000.0, rng=random.Random(3),
+        )
+        self.assertTrue(ok, msg)
+        self.assertEqual(len(opens), 2)
+        self.assertEqual(len(not_ready_chests(state, 0, now=1000.0)), 1)
+        reward_gold = sum(r.gold for _, r in opens)
+        self.assertAlmostEqual(state.inventory.gold, 50.0 - 12 + reward_gold, places=2)
+
+    def test_open_all_ready(self):
+        state = AppState()
+        a = state.inventory.add_chest(0)
+        b = state.inventory.add_chest(1)
+        finish_unlock(a, now=5000.0)
+        finish_unlock(b, now=5000.0)
+        state.inventory.add_chest(2)  # locked, untouched
+        results = open_all_ready(state, now=5000.0, rng=random.Random(9))
+        self.assertEqual(len(results), 2)
+        self.assertEqual(len(ready_chests(state, now=5000.0)), 0)
+        self.assertEqual(len(state.inventory.chests), 1)
+        self.assertEqual(state.inventory.chests[0].rarity, 2)
 
 
 if __name__ == "__main__":

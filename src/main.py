@@ -386,6 +386,9 @@ class Application(QObject):
             self._inv_dialog.request_play_word_game.connect(self.play_word_arena)
             self._inv_dialog.request_start_unlock.connect(self._on_request_start_unlock)
             self._inv_dialog.request_open_chest.connect(self._on_request_open_chest)
+            self._inv_dialog.request_speedup.connect(self._on_request_speedup)
+            self._inv_dialog.request_instant_open.connect(self._on_request_instant_open)
+            self._inv_dialog.request_open_all_ready.connect(self._on_request_open_all_ready)
         self._inv_dialog.refresh()
         self._inv_dialog.show()
         self._inv_dialog.raise_()
@@ -433,6 +436,77 @@ class Application(QObject):
         }
         dialog = OpenChestDialog(result, rarity, parent=self.widget, letter_totals=totals)
         dialog.exec()
+        self.widget.refresh_stats(roll_changed=False)
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+
+    def _first_chest_of_rarity(self, rarity: int):
+        return next(
+            (c for c in self.state.inventory.chests if c.rarity == rarity),
+            None,
+        )
+
+    def _refresh_after_chest(self) -> None:
+        self._safe_save()
+        self.widget.refresh_stats(roll_changed=False)
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+
+    def _on_request_speedup(self, rarity: int) -> None:
+        """花金币立刻完成该稀有度第一只未就绪箱的解锁。"""
+        chest = self._first_chest_of_rarity(rarity)
+        if chest is None:
+            return
+        ok, msg = chest_opening.try_speedup(self.state, chest)
+        if not ok:
+            QMessageBox.warning(self.widget, "无法加速", msg)
+            if self._inv_dialog is not None:
+                self._inv_dialog.refresh()
+            return
+        logger.info("宝箱加速 (rarity=%d): %s", rarity, msg)
+        self._refresh_after_chest()
+
+    def _on_request_instant_open(self, rarity: int, count: int = 1) -> None:
+        """花金币秒开该稀有度最多 count 只未就绪箱（跳过动画）。"""
+        ok, msg, opens = chest_opening.try_instant_open_n(
+            self.state, rarity, count,
+        )
+        if not ok or not opens:
+            QMessageBox.warning(self.widget, "无法秒开", msg)
+            if self._inv_dialog is not None:
+                self._inv_dialog.refresh()
+            return
+        total_letters = sum(len(r.letters) for _, r in opens)
+        total_gold = sum(r.gold for _, r in opens)
+        total_diam = sum(r.diamond for _, r in opens)
+        logger.info(
+            "宝箱秒开 (rarity=%d, count=%d, letters=%d, gold=%+.2f, diamond=%+.2f): %s",
+            rarity, len(opens), total_letters, total_gold, total_diam, msg,
+        )
+        self._refresh_after_chest()
+        from .ui_chest_summary import show_chest_summary
+        show_chest_summary(
+            self.widget,
+            opens,
+            title="秒开结果",
+        )
+        self.widget.refresh_stats(roll_changed=False)
+        if self._inv_dialog is not None and self._inv_dialog.isVisible():
+            self._inv_dialog.refresh()
+
+    def _on_request_open_all_ready(self) -> None:
+        """批量打开全部已就绪宝箱，跳过逐箱动画。"""
+        opens = chest_opening.open_all_ready(self.state)
+        if not opens:
+            return
+        logger.info("批量开箱 (count=%d)", len(opens))
+        self._refresh_after_chest()
+        from .ui_chest_summary import show_chest_summary
+        show_chest_summary(
+            self.widget,
+            opens,
+            title="批量开箱结果",
+        )
         self.widget.refresh_stats(roll_changed=False)
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
             self._inv_dialog.refresh()

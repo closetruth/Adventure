@@ -13,12 +13,14 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from . import chest_opening
 from .models import AppState, TaskStatus
+from .ui_confirm import ask_yes_no
 from .ui_roll_bar import CHEST_RARITY_COLORS, CHEST_RARITY_NAMES
 from .ui_styles import (
     ACCENT,
@@ -82,6 +84,9 @@ class InventoryDialog(QDialog):
     request_play_word_game = Signal()
     request_start_unlock = Signal(int)  # 稀有度
     request_open_chest = Signal(int)    # 稀有度
+    request_speedup = Signal(int)       # 稀有度：花金币加速
+    request_instant_open = Signal(int, int)  # 稀有度, 数量：花金币秒开
+    request_open_all_ready = Signal()   # 批量开箱（跳过动画）
 
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
@@ -258,6 +263,9 @@ class InventoryDialog(QDialog):
         self.chest_lines: list[QLabel] = []
         self.chest_hint: list[QLabel] = []
         self.chest_btns: list[QPushButton] = []
+        self.chest_speed_btns: list[QPushButton] = []
+        self.chest_instant_btns: list[QPushButton] = []
+        self.chest_instant_spins: list[QSpinBox] = []
         for i, (name, color) in enumerate(zip(CHEST_RARITY_NAMES, CHEST_RARITY_COLORS)):
             row = QHBoxLayout()
             row.setSpacing(8)
@@ -272,31 +280,111 @@ class InventoryDialog(QDialog):
             hint.hide()
             row.addWidget(hint)
             row.addStretch(1)
+            btn_speed = QPushButton("加速")
+            btn_speed.setCursor(Qt.PointingHandCursor)
+            btn_speed.hide()
+            btn_speed.clicked.connect(lambda _=False, r=i: self._on_speedup_clicked(r))
+            row.addWidget(btn_speed)
+            spin = QSpinBox()
+            spin.setMinimum(1)
+            spin.setMaximum(1)
+            spin.setValue(1)
+            spin.setFixedWidth(52)
+            spin.setToolTip("秒开数量")
+            spin.hide()
+            spin.valueChanged.connect(lambda _v, r=i: self._update_instant_button(r))
+            row.addWidget(spin)
+            btn_instant = QPushButton("秒开")
+            btn_instant.setCursor(Qt.PointingHandCursor)
+            btn_instant.hide()
+            btn_instant.clicked.connect(lambda _=False, r=i: self._on_instant_open_clicked(r))
+            row.addWidget(btn_instant)
             btn = QPushButton("解锁")
             btn.setCursor(Qt.PointingHandCursor)
             btn.hide()
-            # 按钮只连一个分发 handler，按当前状态发对应信号
             btn.clicked.connect(lambda _=False, r=i: self._on_chest_row_clicked(r))
             row.addWidget(btn)
             lay.addLayout(row)
             self.chest_lines.append(lbl)
             self.chest_hint.append(hint)
             self.chest_btns.append(btn)
+            self.chest_speed_btns.append(btn_speed)
+            self.chest_instant_btns.append(btn_instant)
+            self.chest_instant_spins.append(spin)
+
+        self.btn_open_all_ready = QPushButton("批量开箱（跳过动画）")
+        self.btn_open_all_ready.setObjectName("OpenReady")
+        self.btn_open_all_ready.setCursor(Qt.PointingHandCursor)
+        self.btn_open_all_ready.hide()
+        self.btn_open_all_ready.clicked.connect(self.request_open_all_ready.emit)
+        lay.addWidget(self.btn_open_all_ready)
         return {"frame": frame}
 
-    def _on_chest_row_clicked(self, rarity: int) -> None:
-        """点击状态按钮：待解锁 → 开始解锁；就绪 → 开箱；解锁中 → 无动作。"""
-        chest = next(
+    def _first_chest(self, rarity: int):
+        return next(
             (c for c in self.state.inventory.chests if c.rarity == rarity),
             None,
         )
+
+    def _on_chest_row_clicked(self, rarity: int) -> None:
+        """点击状态按钮：待解锁 → 开始解锁；就绪 → 开箱；解锁中 → 无动作。"""
+        chest = self._first_chest(rarity)
         if chest is None:
             return
         if chest.unlock_started_at is None:
             self.request_start_unlock.emit(rarity)
         elif chest_opening.is_ready(chest):
             self.request_open_chest.emit(rarity)
-        # 解锁中：点击无动作，等待倒计时结束
+
+    def _on_speedup_clicked(self, rarity: int) -> None:
+        chest = self._first_chest(rarity)
+        if chest is None or chest_opening.is_ready(chest):
+            return
+        cost = chest_opening.speedup_gold_cost(
+            chest_opening.remaining_seconds(chest)
+        )
+        if cost <= 0:
+            return
+        if not ask_yes_no(
+            self,
+            "加速解锁",
+            f"花费 {cost} 金币，立刻完成解锁倒计时？",
+        ):
+            return
+        self.request_speedup.emit(rarity)
+
+    def _on_instant_open_clicked(self, rarity: int) -> None:
+        pending = chest_opening.not_ready_chests(self.state, rarity)
+        if not pending:
+            return
+        spin = self.chest_instant_spins[rarity]
+        count = max(1, min(int(spin.value()), len(pending)))
+        targets = pending[:count]
+        cost = chest_opening.instant_open_total_cost(targets)
+        if cost <= 0:
+            return
+        if not ask_yes_no(
+            self,
+            "秒开宝箱",
+            f"花费 {cost} 金币，立刻开 {count} 个并跳过动画？",
+        ):
+            return
+        self.request_instant_open.emit(rarity, count)
+
+    def _update_instant_button(self, rarity: int) -> None:
+        pending = chest_opening.not_ready_chests(self.state, rarity)
+        btn = self.chest_instant_btns[rarity]
+        spin = self.chest_instant_spins[rarity]
+        if not pending:
+            btn.setText("秒开")
+            return
+        count = max(1, min(int(spin.value()), len(pending)))
+        cost = chest_opening.instant_open_total_cost(pending[:count])
+        if count > 1:
+            btn.setText(f"秒开×{count} · {cost}金")
+        else:
+            btn.setText(f"秒开 · {cost}金")
+        btn.setToolTip(f"花费 {cost} 金币立刻开 {count} 个（跳过动画）")
 
     def _refresh_chest_lines(self) -> None:
         """宝箱行：数量 + 状态按钮/倒计时。由 refresh() 与 1s 定时器调用。"""
@@ -310,19 +398,30 @@ class InventoryDialog(QDialog):
             by_rarity[c.rarity].append(c)
 
         can_unlock = chest_opening.slots_available(s)
+        ready_n = len(chest_opening.ready_chests(s))
 
         for i, name in enumerate(CHEST_RARITY_NAMES):
             n = counts[i]
             lbl = self.chest_lines[i]
             btn = self.chest_btns[i]
             hint = self.chest_hint[i]
+            btn_speed = self.chest_speed_btns[i]
+            btn_instant = self.chest_instant_btns[i]
+            spin = self.chest_instant_spins[i]
             if n == 0:
                 lbl.hide()
                 btn.hide()
                 hint.hide()
+                btn_speed.hide()
+                btn_instant.hide()
+                spin.hide()
                 continue
 
             chest = by_rarity[i][0]
+            pending = chest_opening.not_ready_chests(s, i)
+            cost_one = chest_opening.speedup_gold_cost(
+                chest_opening.remaining_seconds(chest)
+            )
             if chest.unlock_started_at is None:
                 state_str = "待解锁"
                 btn.setText("解锁")
@@ -331,6 +430,8 @@ class InventoryDialog(QDialog):
                 btn.setToolTip("解锁槽已满" if not can_unlock else "开始解锁倒计时")
                 btn.show()
                 hint.hide()
+                btn_speed.hide()
+                self._show_instant_controls(i, pending)
             elif chest_opening.is_ready(chest):
                 state_str = "点击开箱"
                 btn.setText("开箱")
@@ -338,6 +439,12 @@ class InventoryDialog(QDialog):
                 btn.setEnabled(True)
                 btn.show()
                 hint.hide()
+                btn_speed.hide()
+                if pending:
+                    self._show_instant_controls(i, pending)
+                else:
+                    btn_instant.hide()
+                    spin.hide()
             else:
                 rem = chest_opening.remaining_seconds(chest)
                 h, m_, sec = rem // 3600, (rem % 3600) // 60, rem % 60
@@ -345,11 +452,45 @@ class InventoryDialog(QDialog):
                 btn.hide()
                 hint.setText(state_str)
                 hint.show()
+                btn_speed.setText(f"加速 · {cost_one}金")
+                btn_speed.setEnabled(True)
+                btn_speed.setToolTip(f"花费 {cost_one} 金币立刻完成解锁")
+                btn_speed.show()
+                self._show_instant_controls(i, pending)
 
             lbl.setText(f"{name} × {n}  ·  {state_str}")
             lbl.show()
             btn.style().unpolish(btn)
             btn.style().polish(btn)
+
+        if ready_n > 0:
+            self.btn_open_all_ready.setText(f"批量开箱（跳过动画）· {ready_n}")
+            self.btn_open_all_ready.show()
+            self.btn_open_all_ready.style().unpolish(self.btn_open_all_ready)
+            self.btn_open_all_ready.style().polish(self.btn_open_all_ready)
+        else:
+            self.btn_open_all_ready.hide()
+
+    def _show_instant_controls(self, rarity: int, pending: list) -> None:
+        spin = self.chest_instant_spins[rarity]
+        btn_instant = self.chest_instant_btns[rarity]
+        if not pending:
+            spin.hide()
+            btn_instant.hide()
+            return
+        max_n = len(pending)
+        spin.blockSignals(True)
+        spin.setMaximum(max_n)
+        spin.setMinimum(1)
+        if spin.value() > max_n:
+            spin.setValue(max_n)
+        elif spin.value() < 1:
+            spin.setValue(1)
+        spin.blockSignals(False)
+        spin.setVisible(max_n > 1)
+        btn_instant.setEnabled(True)
+        btn_instant.show()
+        self._update_instant_button(rarity)
 
     def _make_letters_card(self) -> dict:
         frame = QFrame()

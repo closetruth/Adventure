@@ -162,3 +162,154 @@ def open_chest(state: AppState, chest: ChestItem, result: OpenResult) -> None:
         state.inventory.add_letter(letter, rar)
     state.inventory.gold += result.gold
     state.inventory.diamond += result.diamond
+
+
+# 加速/秒开：约每 5 分钟 1 金币
+SPEEDUP_SECONDS_PER_GOLD = 300
+
+
+def speedup_gold_cost(remaining_seconds: int) -> int:
+    """按剩余解锁秒数折算金币；已就绪为 0。"""
+    rem = max(0, int(remaining_seconds))
+    if rem <= 0:
+        return 0
+    return max(1, int(math.ceil(rem / float(SPEEDUP_SECONDS_PER_GOLD))))
+
+
+def finish_unlock(chest: ChestItem, now: Optional[float] = None) -> bool:
+    """将箱子标记为已就绪（回拨 unlock_started_at）。不检查背包归属。"""
+    now = time.time() if now is None else now
+    span = unlock_span_seconds(chest.rarity)
+    chest.unlock_started_at = float(now) - float(span)
+    return True
+
+
+def try_speedup(
+    state: AppState,
+    chest: ChestItem,
+    now: Optional[float] = None,
+) -> Tuple[bool, str]:
+    """花金币将未就绪箱子立刻变为可开箱。已就绪则失败。"""
+    if chest not in state.inventory.chests:
+        return False, "宝箱不存在"
+    now = time.time() if now is None else now
+    if is_ready(chest, now=now):
+        return False, "宝箱已可开箱"
+    rem = remaining_seconds(chest, now=now)
+    cost = speedup_gold_cost(rem)
+    if cost <= 0:
+        return False, "宝箱已可开箱"
+    if state.inventory.gold + 1e-9 < cost:
+        return False, f"金币不足（需要 {cost}）"
+    state.inventory.gold = round(state.inventory.gold - cost, 2)
+    finish_unlock(chest, now=now)
+    return True, f"已加速，花费 {cost} 金币"
+
+
+def try_instant_open(
+    state: AppState,
+    chest: ChestItem,
+    now: Optional[float] = None,
+    rng: Optional[random.Random] = None,
+) -> Tuple[bool, str, Optional[OpenResult]]:
+    """花金币（若未就绪）立刻开箱入账；不占解锁槽。已就绪时费用为 0。"""
+    ok, msg, opens = try_instant_open_n(
+        state, chest.rarity, 1, now=now, rng=rng, chests=[chest],
+    )
+    if not ok:
+        return False, msg, None
+    if not opens:
+        return False, msg or "开箱失败", None
+    return True, msg, opens[0][1]
+
+
+def not_ready_chests(
+    state: AppState,
+    rarity: int,
+    now: Optional[float] = None,
+) -> List[ChestItem]:
+    """指定稀有度下尚未可开箱的箱子（待解锁或解锁中）。"""
+    now = time.time() if now is None else now
+    rarity = max(0, min(4, int(rarity)))
+    return [
+        c for c in state.inventory.chests
+        if c.rarity == rarity and not is_ready(c, now=now)
+    ]
+
+
+def instant_open_total_cost(
+    chests: List[ChestItem],
+    now: Optional[float] = None,
+) -> int:
+    """多箱秒开总金币。"""
+    now = time.time() if now is None else now
+    return sum(
+        speedup_gold_cost(remaining_seconds(c, now=now))
+        for c in chests
+    )
+
+
+def try_instant_open_n(
+    state: AppState,
+    rarity: int,
+    count: int,
+    now: Optional[float] = None,
+    rng: Optional[random.Random] = None,
+    chests: Optional[List[ChestItem]] = None,
+) -> Tuple[bool, str, List[Tuple[int, OpenResult]]]:
+    """秒开指定稀有度下最多 count 只未就绪箱；先校验总费用再逐只开。
+
+    chests 若传入则只开该列表（仍须属于本背包）；否则取该稀有度前 count 只未就绪。
+    """
+    now = time.time() if now is None else now
+    count = max(0, int(count))
+    if count <= 0:
+        return False, "数量无效", []
+    if chests is None:
+        targets = not_ready_chests(state, rarity, now=now)[:count]
+    else:
+        targets = []
+        for c in chests:
+            if c not in state.inventory.chests:
+                return False, "宝箱不存在", []
+            if is_ready(c, now=now):
+                continue
+            targets.append(c)
+            if len(targets) >= count:
+                break
+    if not targets:
+        return False, "没有可秒开的宝箱", []
+    total_cost = instant_open_total_cost(targets, now=now)
+    if total_cost > 0 and state.inventory.gold + 1e-9 < total_cost:
+        return False, f"金币不足（需要 {total_cost}）", []
+    if total_cost > 0:
+        state.inventory.gold = round(state.inventory.gold - total_cost, 2)
+    opens: List[Tuple[int, OpenResult]] = []
+    for chest in targets:
+        rar = chest.rarity
+        result = generate_open_result(rar, rng=rng)
+        open_chest(state, chest, result)
+        opens.append((rar, result))
+    n = len(opens)
+    if total_cost > 0:
+        msg = f"秒开 {n} 个，花费 {total_cost} 金币"
+    else:
+        msg = f"开箱 {n} 个"
+    return True, msg, opens
+
+
+
+def open_all_ready(
+    state: AppState,
+    now: Optional[float] = None,
+    rng: Optional[random.Random] = None,
+) -> List[Tuple[int, OpenResult]]:
+    """打开全部已就绪宝箱（无动画、无额外金币）。"""
+    now = time.time() if now is None else now
+    out: List[Tuple[int, OpenResult]] = []
+    for chest in list(ready_chests(state, now=now)):
+        rarity = chest.rarity
+        result = generate_open_result(rarity, rng=rng)
+        open_chest(state, chest, result)
+        out.append((rarity, result))
+    return out
