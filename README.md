@@ -35,9 +35,7 @@
 
 ## 演示
 
-https://github.com/user-attachments/assets/1e629403-fa90-4cbe-847e-aedf050f35ad
-
-本地也可查看 [`docs/demo.mp4`](docs/demo.mp4)。
+https://github.com/user-attachments/assets/009c0b74-6018-4a5d-9810-1adb240dbb8c
 
 ---
 
