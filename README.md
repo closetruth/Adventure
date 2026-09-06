@@ -1,7 +1,7 @@
 # Adventure
 
 <p align="center">
-  <strong>桌面悬浮的「目标树 + 键鼠奖励」小部件</strong><br>
+  <strong>🌲 桌面悬浮的「目标树 + 键鼠奖励」小部件</strong><br>
   Windows 10 / 11 · 本地存档 · 三个小游戏
 </p>
 
@@ -18,56 +18,58 @@
 
 ---
 
-## 目录
+<h2 id="目录">📑 目录</h2>
 
-- [演示](#演示)
-- [亮点](#亮点)
-- [功能说明](#功能说明)
-- [快速开始](#快速开始)
-- [开发](#开发)
-- [使用说明](#使用说明)
-- [数据与隐私](#数据与隐私)
-- [文档](#文档)
-- [项目结构](#项目结构)
-- [许可](#许可)
+- [🎬 演示](#演示)
+- [✨ 亮点](#亮点)
+- [🧩 功能说明](#功能说明)
+- [🚀 快速开始](#快速开始)
+- [🛠️ 开发](#开发)
+- [🖱️ 使用说明](#使用说明)
+- [🔒 数据与隐私](#数据与隐私)
+- [📚 文档](#文档)
+- [📁 项目结构](#项目结构)
+- [⚖️ 许可](#许可)
 
 ---
 
-## 演示
+<h2 id="演示">🎬 演示</h2>
 
 https://github.com/user-attachments/assets/009c0b74-6018-4a5d-9810-1adb240dbb8c
 
+B站地址：https://www.bilibili.com/video/BV1wfbJ6iExF/?spm_id_from=0.0.upload.video_card.click&vd_source=68ce22f01f3c3394fe4f021266842422
+
 ---
 
-## 亮点
+<h2 id="亮点">✨ 亮点</h2>
 
 | | |
 |---|---|
-| **目标树** | 大目标 / 文件夹 / 文件，像资源管理器一样展开；聚焦叶子才计时与开奖 |
-| **本周视图** | 目标管理里看周一到周日真实运行时段（顶层 + 叶子） |
-| **键鼠开奖** | 每 6～14 次操作开一轮；金币 / 钻石独立判定；约 8% 暴击 |
-| **缓动宝箱条** | 约 5 分钟一轮，满格停住点领；五档稀有度 |
-| **开箱收集** | 解锁倒计时 + A–Z × 5 稀有度字母（130 种） |
-| **小游戏** | 小动物竞技场 · 像素格子战场 · 词汇自走棋 |
+| 🌲 **目标树** | 大目标 / 文件夹 / 文件，像资源管理器一样展开；聚焦叶子才计时与开奖 |
+| 📅 **本周视图** | 目标管理里看周一到周日真实运行时段（顶层 + 叶子） |
+| 🎰 **键鼠开奖** | 每 6～14 次操作开一轮；金币 / 钻石独立判定；约 8% 暴击 |
+| 📦 **缓动宝箱条** | 约 5 分钟一轮，满格停住点领；五档稀有度 |
+| 💌 **开箱收集** | 解锁倒计时 + A–Z × 5 稀有度字母（130 种） |
+| 🎮 **小游戏** | 小动物竞技场 · 像素格子战场 · 词汇自走棋 |
 
 ---
 
-## 功能说明
+<h2 id="功能说明">🧩 功能说明</h2>
 
-### 目标（文件夹 / 文件）
+### 📁 目标（文件夹 / 文件）
 
 | 比喻 | 含义 |
 |------|------|
-| **文件夹** | 可继续建子项；本身不直接计时，显示子项完成数与加总进度 |
-| **文件** | 叶子节点，有目标分钟；做满才能完成 |
-| **文件夹大小** | 子树操作数、时长、金币等自动 rollup |
+| 📂 **文件夹** | 可继续建子项；本身不直接计时，显示子项完成数与加总进度 |
+| 📄 **文件** | 叶子节点，有目标分钟；做满才能完成 |
+| 📊 **文件夹大小** | 子树操作数、时长、金币等自动 rollup |
 
 - 同一时间只能有一个「进行中」的大目标
 - 有子树时必须选中**文件**并点「开始运行」才会累计；路径会高亮
 - **分解**：文件 → 新文件夹 + 多个新文件（旧进度可单独保留）
 - 暂停 / 关屏 / 休眠 / 约 10 分钟无操作 → 不计时
 
-### 本周运行时段
+### 📅 本周运行时段
 
 目标管理 → **本周**：七列（周一～日）× 0–24 点。
 
@@ -77,7 +79,7 @@ https://github.com/user-attachments/assets/009c0b74-6018-4a5d-9810-1adb240dbb8c
 
 设计细节：[周视图规格](docs/superpowers/specs/2026-09-02-weekly-runtime-intervals-design.md)
 
-### 奖励与悬浮窗
+### 💰 奖励与悬浮窗
 
 - **操作**：按键 / 鼠标按下计 1 次（长按不重复）；移动约每 80 像素计 1 次；本窗口与虚拟机内也计入
 - **开奖**：6～14 操作一轮；金 / 钻独立；命中后约 8% 暴击（倍率右偏）；每 10 分钟重抽概率与金额范围
@@ -87,7 +89,7 @@ https://github.com/user-attachments/assets/009c0b74-6018-4a5d-9810-1adb240dbb8c
 
 概率总览与分布图：[docs/probability-design.md](docs/probability-design.md)
 
-### 奖励背包与开箱
+### 🎒 奖励背包与开箱
 
 - 资产、统计、完整开奖历史、三个游戏入口
 - 宝箱解锁：普通 30 分 → 传奇 8 小时；最多 4 个同时解锁（真实时间，关应用也走）
@@ -95,13 +97,13 @@ https://github.com/user-attachments/assets/009c0b74-6018-4a5d-9810-1adb240dbb8c
 
 公式与调参：[docs/chest-opening-probabilities.md](docs/chest-opening-probabilities.md)
 
-### 小游戏
+### 🎮 小游戏
 
 | 游戏 | 入场 | 玩法一句话 |
 |------|------|------------|
-| 小动物竞技场 | 10 金 | 5 槽布阵，5 vs 5 对位 |
-| 像素格子战场 | 12 金 | 6×4 格子对战 |
-| 词汇自走棋 | 10 金 | 计算机英语词棋；铜币商店；前排对撞；站位配合与成长词 |
+| 🐾 小动物竞技场 | 10 金 | 5 槽布阵，5 vs 5 对位 |
+| 👾 像素格子战场 | 12 金 | 6×4 格子对战 |
+| 🔤 词汇自走棋 | 10 金 | 计算机英语词棋；铜币商店；前排对撞；站位配合与成长词 |
 
 `ESC` 结算回背包。主程序用子进程 + JSON 会话通信。
 
@@ -109,17 +111,19 @@ https://github.com/user-attachments/assets/009c0b74-6018-4a5d-9810-1adb240dbb8c
 
 ---
 
-## 快速开始
+<h2 id="快速开始">🚀 快速开始</h2>
 
-### 正式版（推荐）
+### 💿 正式版（推荐）
 
-1. 打开 [Releases](https://github.com/closetruth/Adventure/releases/latest)
-2. 下载 `Adventure-vX.Y.Z.zip`（如 `Adventure-v1.0.6.zip`）并解压
-3. 双击 `Adventure.exe`
+1. 🔗 打开 [Releases](https://github.com/closetruth/Adventure/releases/latest)
+2. 📦 下载 `Adventure-vX.Y.Z.zip`（如 `Adventure-v1.0.6.zip`）并解压
+3. ▶️ 双击 `Adventure.exe`
 
 > SmartScreen：点「更多信息」→「仍要运行」（exe 未签名）。首次启动解压内置依赖会稍慢。
+>
+> 钻石命中 / 缓动条满格的音效**不会随仓库或安装包附带**，需自己放到 `assets/sounds/diamond/`（正式版 exe 则放 `_internal/assets/sounds/diamond/`）。
 
-### 从源码运行
+### 🧬 从源码运行
 
 > 推荐 **Python 3.12 / 3.13**。Python **3.14** 必须用 `pygame-ce`（`requirements.txt` 已指定）。
 
@@ -138,9 +142,9 @@ run.bat
 
 ---
 
-## 开发
+<h2 id="开发">🛠️ 开发</h2>
 
-### 环境
+### 💻 环境
 
 ```bash
 python -m venv .venv
@@ -149,7 +153,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-### 游戏子进程（调试）
+### 🎮 游戏子进程（调试）
 
 ```bat
 python run.py --game pet  <session_in.json>
@@ -157,7 +161,7 @@ python run.py --game grid <session_in.json>
 python run.py --game word <session_in.json>
 ```
 
-### 测试
+### 🧪 测试
 
 ```bat
 .venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -165,7 +169,7 @@ python run.py --game word <session_in.json>
 
 `tests/test_widget_smoke.py` 使用 `QT_QPA_PLATFORM=offscreen` 做 UI 回归。
 
-### 打包
+### 📦 打包
 
 ```bat
 build.bat
@@ -177,32 +181,32 @@ build.bat
 
 ---
 
-## 使用说明
+<h2 id="使用说明">🖱️ 使用说明</h2>
 
 | 操作 | 说明 |
 |------|------|
-| 左键拖动 | 移动悬浮窗 |
-| 右键 | 置顶 / 全桌面 / 开机自启 / 退出 |
-| 点选一行 | 选中大目标 / 文件夹 / 文件 |
-| `>` / `v` | 收起 / 展开 |
-| 开始运行 | 聚焦选中的**文件**并开始累计 |
-| 暂停 | 暂停整个大目标 |
-| 分解 | 文件 → 文件夹 + 多个新文件 |
-| 添加子项 | 在选中文件夹下新建；未选则在根下 |
-| 任务管理 | 目标 CRUD + **本周**时段 |
-| 奖励背包 | 资产 / 开箱 / 历史 / 游戏 |
-| 托盘单击 | 重新显示悬浮窗 |
+| 🖐️ 左键拖动 | 移动悬浮窗 |
+| 📋 右键 | 置顶 / 全桌面 / 开机自启 / 退出 |
+| 👆 点选一行 | 选中大目标 / 文件夹 / 文件 |
+| 📂 `>` / `v` | 收起 / 展开 |
+| ▶️ 开始运行 | 聚焦选中的**文件**并开始累计 |
+| ⏸️ 暂停 | 暂停整个大目标 |
+| ✂️ 分解 | 文件 → 文件夹 + 多个新文件 |
+| ➕ 添加子项 | 在选中文件夹下新建；未选则在根下 |
+| 🗂️ 任务管理 | 目标 CRUD + **本周**时段 |
+| 🎒 奖励背包 | 资产 / 开箱 / 历史 / 游戏 |
+| 📌 托盘单击 | 重新显示悬浮窗 |
 
 ---
 
-## 数据与隐私
+<h2 id="数据与隐私">🔒 数据与隐私</h2>
 
 | 路径 | 用途 |
 |------|------|
-| `%APPDATA%\Adventure\data.json` | 主存档（目标、背包、开奖…） |
-| `%APPDATA%\Adventure\runtime_intervals.json` | 本周时段日志 |
-| `%APPDATA%\Adventure\game_sessions\` | 小游戏临时会话 |
-| `%APPDATA%\Adventure\sfx_cache\` | 非原生音效转码缓存 |
+| 💾 `%APPDATA%\Adventure\data.json` | 主存档（目标、背包、开奖…） |
+| 📅 `%APPDATA%\Adventure\runtime_intervals.json` | 本周时段日志 |
+| 🎮 `%APPDATA%\Adventure\game_sessions\` | 小游戏临时会话 |
+| 🔊 `%APPDATA%\Adventure\sfx_cache\` | 非原生音效转码缓存 |
 
 - 约每 **15 秒**自动保存，退出时再存一次
 - 损坏时尝试 `.bak*` / `.anchor` / `.snap.*` 恢复，并备份为 `data.broken.*.json`
@@ -210,33 +214,40 @@ build.bat
 
 `data.json` 主要字段：`inventory`、`tasks[]`、`total_operations`、`roll_runtime`、`ease_chests`、`roll_history[]`、`settings`。实际开奖以 `roll_runtime` 为准；`settings` 里旧 roll 字段仅供迁移。常量见 `src/reward_system.py`。
 
-### 音效（可选）
+### 🔊 音效（可选）
 
-放入 `assets/sounds/`：`roll_gold.*` 中金币；`diamond/` 中钻石或缓动条满格（可多个随机）。支持 wav/ogg/mp3 等；部分格式需本机 ffmpeg。仓库默认不附带钻石音效。
+仓库**不附带钻石音效**，要自己加文件才会在钻石命中、缓动条满格时出声：
+
+| 放哪里 | 何时播放 |
+|--------|----------|
+| `assets/sounds/roll_gold.*` | 金币开奖 |
+| `assets/sounds/diamond/` 下任意若干文件 | 钻石开奖 / 缓动条满格（多文件则随机抽） |
+
+正式版 exe 把同样路径放到解压目录的 `_internal/` 下（即 `_internal/assets/sounds/diamond/`）。支持 wav / ogg / mp3 等；部分格式需本机 ffmpeg。右键菜单可开关开奖音效。
 
 ---
 
-## 文档
+<h2 id="文档">📚 文档</h2>
 
 完整目录见 **[docs/README.md](docs/README.md)**（概率图、设计规格、实现计划、协作者速查）。
 
 | 常用入口 | 内容 |
 |----------|------|
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | 版本变更（当前 v1.0.6） |
-| [docs/probability-design.md](docs/probability-design.md) | 开奖 / 开箱 / 缓动条概率总览 |
-| [docs/chest-opening-probabilities.md](docs/chest-opening-probabilities.md) | 开箱公式与调参 |
-| [docs/engagement-mechanics.md](docs/engagement-mechanics.md) | 留存 / 反馈机制草案 |
-| [CLAUDE.md](CLAUDE.md) · [AGENTS.md](AGENTS.md) | 架构与命令（给协作者 / AI） |
+| 📝 [RELEASE_NOTES.md](RELEASE_NOTES.md) | 版本变更（当前 v1.0.6） |
+| 📊 [docs/probability-design.md](docs/probability-design.md) | 开奖 / 开箱 / 缓动条概率总览 |
+| 📦 [docs/chest-opening-probabilities.md](docs/chest-opening-probabilities.md) | 开箱公式与调参 |
+| 💡 [docs/engagement-mechanics.md](docs/engagement-mechanics.md) | 留存 / 反馈机制草案 |
+| 🤖 [CLAUDE.md](CLAUDE.md) · [AGENTS.md](AGENTS.md) | 架构与命令（给协作者 / AI） |
 
 ---
 
-## 项目结构
+<h2 id="项目结构">📁 项目结构</h2>
 
 ```
 Adventure/
 ├── run.py / run.bat / install.bat / build.bat / fix_game.bat
 ├── Adventure.spec · requirements.txt · LICENSE
-├── assets/sounds/          # roll_gold.* ；diamond/ 默认可空
+├── assets/sounds/          # roll_gold.* ；diamond/ 需自备，仓库不附带
 ├── docs/                   # 概率、开箱、设计规格、demo
 ├── games/
 │   ├── pet_arena.py        # 小动物竞技场
@@ -254,12 +265,18 @@ Adventure/
 
 可选：`install.ps1`。`run_game.bat` 仅提示用，正常从背包进游戏。
 
-### 性能
+### 💡 想法
+- 做操作的音效，挥剑，魔法，防御等
+- 挂机小游戏悬浮窗
+- 加点画面反馈
+- 
+
+### ⚡ 性能
 
 平时只开悬浮窗时负载很低（Windows 上定时器轮询键鼠，不装系统钩子）。开着「任务管理」狂打字可能因重建卡片略顿。小游戏在独立子进程，不拖慢主窗。
 
 ---
 
-## 许可
+<h2 id="许可">⚖️ 许可</h2>
 
 [GNU General Public License v2.0](LICENSE)
