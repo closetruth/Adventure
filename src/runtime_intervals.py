@@ -236,6 +236,54 @@ def enrich_slices(state: "AppState", slices: list[DaySlice]) -> list[DaySlice]:
     return out
 
 
+def filter_slices_by_task(
+    slices: list[DaySlice],
+    task_id: Optional[str],
+) -> list[DaySlice]:
+    """None = 全部顶层；否则只保留该 task_id。"""
+    if task_id is None:
+        return list(slices)
+    return [s for s in slices if s.task_id == task_id]
+
+
+def seconds_from_slices(slices: list[DaySlice]) -> float:
+    """切片时长合计（秒）；跨叶子同顶层由调用方先按 task_id 过滤。"""
+    total = 0.0
+    for s in slices:
+        total += max(0.0, (s.t1 - s.t0) * 3600.0)
+    return total
+
+
+def day_seconds_for_week(
+    slices: list[DaySlice],
+    week_start: float,
+) -> list[float]:
+    """周一～周日每日合计秒数（长度 7）。"""
+    totals = [0.0] * 7
+    mon = datetime.fromtimestamp(week_start).date()
+    for s in slices:
+        try:
+            d = datetime.strptime(s.date, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        idx = (d - mon).days
+        if 0 <= idx <= 6:
+            totals[idx] += max(0.0, (s.t1 - s.t0) * 3600.0)
+    return totals
+
+
+def top_level_titles_from_slices(slices: list[DaySlice]) -> list[tuple[str, str]]:
+    """本周出现过的顶层：(task_id, title)，按首次出现顺序。"""
+    seen: list[str] = []
+    out: list[tuple[str, str]] = []
+    for s in slices:
+        if s.task_id in seen:
+            continue
+        seen.append(s.task_id)
+        out.append((s.task_id, s.title or "已删除"))
+    return out
+
+
 class RuntimeIntervalLog:
     def __init__(self) -> None:
         self.intervals: list[RuntimeInterval] = []

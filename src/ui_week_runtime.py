@@ -7,6 +7,7 @@ from typing import Optional
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -22,10 +23,14 @@ from .models import AppState
 from .runtime_intervals import (
     DaySlice,
     add_weeks,
+    day_seconds_for_week,
     enrich_slices,
+    filter_slices_by_task,
     identity_color,
     local_week_start,
+    seconds_from_slices,
     slices_for_week,
+    top_level_titles_from_slices,
 )
 from .task_manager import TaskManager
 from .ui_qt import clear_layout
@@ -34,12 +39,13 @@ from .ui_text import format_duration
 
 WEEKDAYS = "一二三四五六日"
 GUTTER = 28
-HEADER = 22
+HEADER = 36
 MIN_BLOCK_PX = 4
 ZOOM_MIN_SPAN = 3.0
 GRID_MIN_PX = 280
 GRID_PX_PER_HOUR = 32
 LEGEND_MAX_PX = 88
+ALL_GOALS_LABEL = "全部目标"
 # Match QTabWidget::pane in task_dialog; opaque so tall grid/legend clip.
 WEEK_PANE_BG = "#1a1b24"
 WEEK_SCROLL_QSS = f"""
@@ -219,6 +225,7 @@ class WeekGrid(QWidget):
         self._open_identity = None
         self._view_lo = 0.0
         self._view_hi = 24.0
+        self._day_seconds: list[float] = [0.0] * 7
         self._col_rects: list[QRect] = []
         self.setMouseTracking(True)
 
@@ -243,11 +250,19 @@ class WeekGrid(QWidget):
         open_identity,
         view_lo: float | None = None,
         view_hi: float | None = None,
+        day_seconds: list[float] | None = None,
     ):
         self._slices = slices
         self._week_start = week_start
         self._now = now
         self._open_identity = open_identity
+        if day_seconds is None:
+            self._day_seconds = [0.0] * 7
+        else:
+            secs = list(day_seconds[:7])
+            while len(secs) < 7:
+                secs.append(0.0)
+            self._day_seconds = secs
         if view_lo is not None and view_hi is not None:
             self.set_view(view_lo, view_hi)
         else:
@@ -304,9 +319,19 @@ class WeekGrid(QWidget):
                 rect.x(),
                 0,
                 rect.width(),
-                HEADER,
-                int(Qt.AlignCenter),
+                18,
+                int(Qt.AlignCenter | Qt.AlignBottom),
                 f"{WEEKDAYS[i]} {day.day:02d}",
+            )
+            p.setPen(QColor(TEXT_MUTED))
+            sec = self._day_seconds[i] if i < len(self._day_seconds) else 0.0
+            p.drawText(
+                rect.x(),
+                16,
+                rect.width(),
+                18,
+                int(Qt.AlignCenter | Qt.AlignTop),
+                format_duration(sec),
             )
             p.setPen(QColor("#2a2d38"))
             p.drawRect(rect.adjusted(0, 0, -1, -1))
@@ -361,6 +386,7 @@ class WeekRuntimePanel(QWidget):
         self._week_start = local_week_start(time.time())
         self._view_lo = 0.0
         self._view_hi = 24.0
+        self._filter_task_id: Optional[str] = None
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self.refresh)
@@ -374,6 +400,13 @@ class WeekRuntimePanel(QWidget):
         nav.addWidget(self.btn_prev)
         nav.addWidget(self.lbl_range, 1)
         nav.addWidget(self.btn_next)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("顶层目标"))
+        self.combo_goal = QComboBox()
+        self.combo_goal.setMinimumWidth(160)
+        self.combo_goal.currentIndexChanged.connect(self._on_goal_filter_changed)
+        filter_row.addWidget(self.combo_goal, 1)
 
         zoom = QHBoxLayout()
         self.btn_full = QPushButton("全日")
@@ -393,6 +426,8 @@ class WeekRuntimePanel(QWidget):
         zoom.addStretch(1)
 
         self.lbl_status = QLabel("")
+        self.lbl_week_total = QLabel("")
+        self.lbl_week_total.setStyleSheet(f"color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY};")
         self.lbl_reset = QLabel("运行记录已重置")
         self.lbl_reset.setStyleSheet(f"color: {TEXT_MUTED};")
         self.lbl_reset.hide()
@@ -423,8 +458,10 @@ class WeekRuntimePanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(nav)
+        lay.addLayout(filter_row)
         lay.addLayout(zoom)
         lay.addWidget(self.lbl_status)
+        lay.addWidget(self.lbl_week_total)
         lay.addWidget(self.lbl_reset)
         lay.addWidget(self.grid_scroll, 1)
         lay.addWidget(self.legend_scroll)
@@ -506,6 +543,29 @@ class WeekRuntimePanel(QWidget):
         )
         self.refresh()
 
+    def _on_goal_filter_changed(self, index: int) -> None:
+        task_id = self.combo_goal.itemData(index)
+        self._filter_task_id = None if not task_id else str(task_id)
+        self.refresh()
+
+    def _sync_goal_combo(self, options: list[tuple[str, str]]) -> None:
+        """Rebuild combo while preserving selection when still present."""
+        wanted = self._filter_task_id
+        self.combo_goal.blockSignals(True)
+        self.combo_goal.clear()
+        self.combo_goal.addItem(ALL_GOALS_LABEL, None)
+        for task_id, title in options:
+            self.combo_goal.addItem(title, task_id)
+        idx = 0
+        if wanted is not None:
+            found = self.combo_goal.findData(wanted)
+            if found >= 0:
+                idx = found
+            else:
+                self._filter_task_id = None
+        self.combo_goal.setCurrentIndex(idx)
+        self.combo_goal.blockSignals(False)
+
     def refresh(self) -> None:
         now = time.time()
         current = local_week_start(now)
@@ -518,7 +578,12 @@ class WeekRuntimePanel(QWidget):
         self.lbl_status.setText(format_running_status(self.state))
         self.lbl_reset.setVisible(self.manager.runtime_log.load_reset)
         raw = slices_for_week(self.manager.runtime_log, self._week_start, now)
-        slices = enrich_slices(self.state, raw)
+        all_slices = enrich_slices(self.state, raw)
+        self._sync_goal_combo(top_level_titles_from_slices(all_slices))
+        slices = filter_slices_by_task(all_slices, self._filter_task_id)
+        day_secs = day_seconds_for_week(slices, self._week_start)
+        week_secs = seconds_from_slices(slices)
+        self.lbl_week_total.setText(f"本周合计  {format_duration(week_secs)}")
         ident = None
         rec, task_id, _t, leaf_id, _lt = self.manager.recording_identity()
         if rec and task_id:
@@ -530,6 +595,7 @@ class WeekRuntimePanel(QWidget):
             open_identity=ident,
             view_lo=self._view_lo,
             view_hi=self._view_hi,
+            day_seconds=day_secs,
         )
         self._sync_grid_height()
         self._fill_legend(legend_row_specs(slices, ident))

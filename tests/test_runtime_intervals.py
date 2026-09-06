@@ -11,13 +11,18 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.runtime_intervals import (
+    DaySlice,
     RuntimeIntervalLog,
     add_weeks,
+    day_seconds_for_week,
+    filter_slices_by_task,
     identity_color,
     load_log,
     local_week_start,
     save_log,
+    seconds_from_slices,
     slices_for_week,
+    top_level_titles_from_slices,
 )
 
 
@@ -256,3 +261,28 @@ class WeekSliceTests(unittest.TestCase):
         week = local_week_start(_local(2026, 8, 31, 12))
         nxt = add_weeks(week, 1)
         self.assertEqual(datetime.fromtimestamp(nxt).day, 7)
+
+    def test_filter_and_day_totals_by_top_level(self):
+        week = local_week_start(_local(2026, 8, 31, 12))
+        slices = [
+            DaySlice("2026-08-31", 10.0, 11.0, "A", "甲", "L1", "叶1"),
+            DaySlice("2026-08-31", 14.0, 14.5, "A", "甲", "L2", "叶2"),
+            DaySlice("2026-09-01", 9.0, 10.0, "B", "乙", None, None),
+            DaySlice("2026-09-02", 8.0, 9.0, "A", "甲", None, None),
+        ]
+        only_a = filter_slices_by_task(slices, "A")
+        self.assertEqual(len(only_a), 3)
+        self.assertEqual(filter_slices_by_task(slices, None), slices)
+        # Same top, two leaves on Mon: 1h + 0.5h = 1.5h
+        days_a = day_seconds_for_week(only_a, week)
+        self.assertEqual(len(days_a), 7)
+        self.assertAlmostEqual(days_a[0], 1.5 * 3600, places=3)
+        self.assertAlmostEqual(days_a[1], 0.0, places=3)
+        self.assertAlmostEqual(days_a[2], 1.0 * 3600, places=3)
+        self.assertAlmostEqual(seconds_from_slices(only_a), 2.5 * 3600, places=3)
+        days_all = day_seconds_for_week(slices, week)
+        self.assertAlmostEqual(days_all[1], 1.0 * 3600, places=3)
+        self.assertEqual(day_seconds_for_week([], week), [0.0] * 7)
+        self.assertAlmostEqual(seconds_from_slices([]), 0.0, places=5)
+        titles = top_level_titles_from_slices(slices)
+        self.assertEqual(titles, [("A", "甲"), ("B", "乙")])
