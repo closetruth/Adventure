@@ -254,7 +254,6 @@ class SubtaskActionCallbacks:
     on_complete: Optional[Callable[[], None]] = None
     on_decompose: Optional[Callable[[], None]] = None
     on_delete: Optional[Callable[[], None]] = None
-    on_add_child: Optional[Callable[[], None]] = None
 
 
 def _connect_callback(
@@ -321,12 +320,6 @@ def build_subtask_action_buttons(
         _connect_callback(btn, callbacks.on_complete)
         lay.addWidget(btn)
 
-    if sub.is_container() and not sub.is_claimable():
-        if is_active and not (sub.done and sub.rewards_claimed) and callbacks.on_add_child is not None:
-            btn = _make_action_btn("+", tooltip="添加子项", parent=wrap)
-            _connect_callback(btn, callbacks.on_add_child)
-            lay.addWidget(btn)
-
     wrap.setVisible(False)
     return wrap
 
@@ -363,14 +356,6 @@ def append_subtask_detail_actions(
     can_modify = can_start
 
     if sub.is_container():
-        if is_active and callbacks.on_add_child is not None:
-            btn = _make_detail_action_btn(
-                "添加子项",
-                object_name="Ghost",
-                tooltip="在此分组下添加子目标",
-            )
-            _connect_callback(btn, callbacks.on_add_child)
-            layout.addWidget(btn)
         if not (sub.done and sub.rewards_claimed) and callbacks.on_delete is not None:
             btn = _make_detail_action_btn(
                 "删除",

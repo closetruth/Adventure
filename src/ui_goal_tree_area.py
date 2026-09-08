@@ -978,7 +978,6 @@ class GoalTreeArea(QWidget):
                 on_complete=lambda tid=task.id, s=sid: self._on_sub_complete(tid, s),
                 on_decompose=lambda tid=task.id, s=sid: self._on_decompose(tid, s),
                 on_delete=lambda tid=task.id, s=sid: self._on_sub_delete(tid, s),
-                on_add_child=lambda s=sid: self._on_sub_add_child(s),
             )
             append_subtask_detail_actions(
                 self.goal_detail_btn_lay,
@@ -1018,11 +1017,24 @@ class GoalTreeArea(QWidget):
     def _on_tree_select(self, task_id: str, subtask_id: str = "") -> None:
         self._selected_task_id = task_id
         self._selected_subtask_id = subtask_id
+        self._sync_add_parent_from_selection()
         since = self.state.since_roll
         self._apply_tree_selection_ui(
             since_gold=since.gold,
             since_diamond=since.diamond,
         )
+
+    def _sync_add_parent_from_selection(self) -> None:
+        """选中文件夹时表单挂到其下；选顶层/叶子则根级添加。"""
+        parent_id: Optional[str] = None
+        if self._selected_subtask_id:
+            task = self.manager.get(self._selected_task_id)
+            if task is not None:
+                sub = task.find_subtask(self._selected_subtask_id)
+                if sub is not None and sub.is_container():
+                    parent_id = sub.id
+        self._sub_add_parent_id = parent_id
+        self._update_subgoal_add_hint()
 
     def _make_goal_root_row(
         self,
@@ -1063,7 +1075,6 @@ class GoalTreeArea(QWidget):
                 on_complete=lambda: self._on_sub_complete(task.id, sub.id),
                 on_decompose=lambda: self._on_decompose(task.id, sub.id),
                 on_delete=lambda: self._on_sub_delete(task.id, sub.id),
-                on_add_child=lambda: self._on_sub_add_child(sub.id),
             ),
             on_fold=lambda: self._on_sub_toggle_fold(task.id, sub.id),
             on_select=lambda: self._on_tree_select(task.id, sub.id),
@@ -1310,6 +1321,8 @@ class GoalTreeArea(QWidget):
             task = self.manager.get(self._selected_task_id)
             show_add = task is not None and task.status != TaskStatus.COMPLETED
         self.subgoal_actions.setVisible(show_add)
+        if show_add:
+            self._update_subgoal_add_hint()
 
         if not self._selected_task_id:
             self.goal_detail_panel.hide()
@@ -1440,32 +1453,28 @@ class GoalTreeArea(QWidget):
         self._request_state_sync()
 
     def _update_subgoal_add_hint(self) -> None:
+        self.sub_add_btn.setText("添加")
         if self._sub_add_parent_id:
-            active = self.state.active_task()
-            parent = active.find_subtask(self._sub_add_parent_id) if active else None
+            task = self._subgoal_target_task()
+            parent = task.find_subtask(self._sub_add_parent_id) if task else None
             if parent is not None:
                 self.subgoal_input.setPlaceholderText(f"添加到「{parent.title}」下…")
                 self.subgoal_add_context.setText(
                     f"正在向「{parent.title}」添加子目标"
                 )
                 self.subgoal_add_context.show()
-                self.sub_add_btn.setText("添加子项")
                 return
             self._sub_add_parent_id = None
+        task = self._subgoal_target_task()
+        if task is not None:
+            self.subgoal_input.setPlaceholderText(f"添加到「{task.title}」下…")
+            self.subgoal_add_context.setText(
+                f"正在向「{task.title}」添加子目标"
+            )
+            self.subgoal_add_context.show()
+            return
         self.subgoal_input.setPlaceholderText("子目标标题…（根级）")
         self.subgoal_add_context.hide()
-        self.sub_add_btn.setText("添加")
-
-    def _on_sub_add_child(self, parent_subtask_id: str) -> None:
-        task = self._subgoal_target_task()
-        if task is None:
-            return
-        if task.find_subtask(parent_subtask_id) is None:
-            return
-        self._sub_add_parent_id = parent_subtask_id
-        self._update_subgoal_add_hint()
-        self.subgoal_input.setFocus()
-        self.subgoal_input.selectAll()
 
     def _on_subtask_min_changed(self, value: int) -> None:
         self.state.settings["subtask_default_target_minutes"] = max(1, int(value))

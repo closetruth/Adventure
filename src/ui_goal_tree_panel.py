@@ -85,22 +85,7 @@ class GoalTreePanel(QWidget):
 
     def set_selected_subtask_id(self, subtask_id: str) -> None:
         self._selected_subtask_id = subtask_id
-        since = self.state.since_roll
-        self._apply_selection_ui(
-            since_gold=since.gold,
-            since_diamond=since.diamond,
-        )
-
-    def set_add_parent(self, parent_subtask_id: str) -> None:
-        self._sub_add_parent_id = parent_subtask_id
-        self._selected_subtask_id = parent_subtask_id
-        parent = self.task.find_subtask(parent_subtask_id)
-        if parent is not None:
-            self._subgoal_input.setPlaceholderText(f"添加到「{parent.title}」下…")
-        else:
-            self._subgoal_input.setPlaceholderText("子目标标题…")
-        self._update_add_context()
-        self._subgoal_input.setFocus()
+        self._sync_add_parent_from_selection()
         since = self.state.since_roll
         self._apply_selection_ui(
             since_gold=since.gold,
@@ -132,6 +117,8 @@ class GoalTreePanel(QWidget):
 
         self._update_focus_hint()
         self._add_bar.setVisible(self._editable)
+        if self._editable:
+            self._update_add_context()
         self._refresh_detail_panel(since_gold=since_gold, since_diamond=since_diamond)
 
     def _build_ui(self) -> None:
@@ -344,7 +331,6 @@ class GoalTreePanel(QWidget):
                 ),
                 on_decompose=lambda: self._prompt_decompose(sub.id),
                 on_delete=lambda: self.action.emit(task.id, "subtask_delete", sub.id),
-                on_add_child=lambda: self.set_add_parent(sub.id),
             ),
             on_fold=lambda: self._emit_toggle_fold(sub.id),
             on_select=lambda: self._on_tree_select(sub.id),
@@ -360,11 +346,22 @@ class GoalTreePanel(QWidget):
 
     def _on_tree_select(self, subtask_id: str) -> None:
         self._selected_subtask_id = subtask_id
+        self._sync_add_parent_from_selection()
         since = self.state.since_roll
         self._apply_selection_ui(
             since_gold=since.gold,
             since_diamond=since.diamond,
         )
+
+    def _sync_add_parent_from_selection(self) -> None:
+        """选中文件夹时表单挂到其下；选顶层/叶子则根级添加。"""
+        parent_id: Optional[str] = None
+        if self._selected_subtask_id:
+            sub = self.task.find_subtask(self._selected_subtask_id)
+            if sub is not None and sub.is_container():
+                parent_id = sub.id
+        self._sub_add_parent_id = parent_id
+        self._update_add_context()
 
     def _apply_selection_ui(
         self,
@@ -549,7 +546,6 @@ class GoalTreePanel(QWidget):
                 ),
                 on_decompose=lambda: self._prompt_decompose(sid),
                 on_delete=lambda: self.action.emit(task.id, "subtask_delete", sid),
-                on_add_child=lambda: self.set_add_parent(sid),
             )
             append_subtask_detail_actions(
                 self._detail_btn_lay,
@@ -577,10 +573,14 @@ class GoalTreePanel(QWidget):
         if self._sub_add_parent_id:
             parent = self.task.find_subtask(self._sub_add_parent_id)
             if parent is not None:
+                self._subgoal_input.setPlaceholderText(f"添加到「{parent.title}」下…")
                 self._add_context.setText(f"将添加到「{parent.title}」下")
                 self._add_context.show()
                 return
-        self._add_context.hide()
+            self._sub_add_parent_id = None
+        self._subgoal_input.setPlaceholderText(f"添加到「{self.task.title}」下…")
+        self._add_context.setText(f"将添加到「{self.task.title}」下")
+        self._add_context.show()
 
     def _prompt_decompose(self, subtask_id: str) -> None:
         titles = prompt_decompose_titles(self)
@@ -603,6 +603,4 @@ class GoalTreePanel(QWidget):
             f"{title}|{target_minutes}|{self._sub_add_parent_id or ''}",
         )
         self._subgoal_input.clear()
-        self._sub_add_parent_id = None
-        self._subgoal_input.setPlaceholderText("子目标标题…")
-        self._update_add_context()
+        self._sync_add_parent_from_selection()
