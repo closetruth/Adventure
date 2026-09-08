@@ -187,11 +187,14 @@ class GoalTreeArea(QWidget):
 
         self.subgoal_actions = QWidget()
         self.subgoal_actions.setObjectName("SubGoalActions")
+        self.subgoal_actions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         actions_layout = QVBoxLayout(self.subgoal_actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(4)
 
-        actions_layout.addWidget(make_section_title("添加子目标"))
+        self.subgoal_add_title = make_section_title("添加子目标")
+        self.subgoal_add_title.setWordWrap(False)
+        actions_layout.addWidget(self.subgoal_add_title)
 
         add_sub_row = QHBoxLayout()
         add_sub_row.setSpacing(4)
@@ -221,12 +224,6 @@ class GoalTreeArea(QWidget):
         self.add_sub_row = QWidget()
         self.add_sub_row.setLayout(add_sub_row)
         actions_layout.addWidget(self.add_sub_row)
-
-        self.subgoal_add_context = QLabel("")
-        self.subgoal_add_context.setObjectName("SubGoalHint")
-        self.subgoal_add_context.setWordWrap(True)
-        self.subgoal_add_context.hide()
-        actions_layout.addWidget(self.subgoal_add_context)
 
         self.goal_detail_panel = QWidget()
         self.goal_detail_panel.setObjectName("GoalDetailPanel")
@@ -1458,23 +1455,22 @@ class GoalTreeArea(QWidget):
             task = self._subgoal_target_task()
             parent = task.find_subtask(self._sub_add_parent_id) if task else None
             if parent is not None:
+                title = f"正在向「{parent.title}」添加子目标"
+                self.subgoal_add_title.setText(title)
+                self.subgoal_add_title.setToolTip(title)
                 self.subgoal_input.setPlaceholderText(f"添加到「{parent.title}」下…")
-                self.subgoal_add_context.setText(
-                    f"正在向「{parent.title}」添加子目标"
-                )
-                self.subgoal_add_context.show()
                 return
             self._sub_add_parent_id = None
         task = self._subgoal_target_task()
         if task is not None:
+            title = f"正在向「{task.title}」添加子目标"
+            self.subgoal_add_title.setText(title)
+            self.subgoal_add_title.setToolTip(title)
             self.subgoal_input.setPlaceholderText(f"添加到「{task.title}」下…")
-            self.subgoal_add_context.setText(
-                f"正在向「{task.title}」添加子目标"
-            )
-            self.subgoal_add_context.show()
             return
-        self.subgoal_input.setPlaceholderText("子目标标题…（根级）")
-        self.subgoal_add_context.hide()
+        self.subgoal_add_title.setText("添加子目标")
+        self.subgoal_add_title.setToolTip("")
+        self.subgoal_input.setPlaceholderText("子目标标题…")
 
     def _on_subtask_min_changed(self, value: int) -> None:
         self.state.settings["subtask_default_target_minutes"] = max(1, int(value))

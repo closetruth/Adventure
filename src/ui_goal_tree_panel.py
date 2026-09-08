@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -140,13 +141,15 @@ class GoalTreePanel(QWidget):
 
         self._add_bar = QWidget()
         self._add_bar.setObjectName("SubGoalActions")
+        self._add_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         add_outer = QVBoxLayout(self._add_bar)
         add_outer.setContentsMargins(0, 0, 0, 0)
         add_outer.setSpacing(4)
 
-        add_title = QLabel("添加子目标")
-        add_title.setObjectName("SectionTitle")
-        add_outer.addWidget(add_title)
+        self._add_title = QLabel("添加子目标")
+        self._add_title.setObjectName("SectionTitle")
+        self._add_title.setWordWrap(False)
+        add_outer.addWidget(self._add_title)
 
         add_row = QHBoxLayout()
         add_row.setSpacing(4)
@@ -175,12 +178,6 @@ class GoalTreePanel(QWidget):
         self._sub_add_btn.clicked.connect(self._on_add_subgoal)
         add_row.addWidget(self._sub_add_btn)
         add_outer.addLayout(add_row)
-
-        self._add_context = QLabel("")
-        self._add_context.setObjectName("SubGoalHint")
-        self._add_context.setWordWrap(True)
-        self._add_context.hide()
-        add_outer.addWidget(self._add_context)
 
         lay.addWidget(self._add_bar)
 
@@ -573,14 +570,16 @@ class GoalTreePanel(QWidget):
         if self._sub_add_parent_id:
             parent = self.task.find_subtask(self._sub_add_parent_id)
             if parent is not None:
+                title = f"正在向「{parent.title}」添加子目标"
+                self._add_title.setText(title)
+                self._add_title.setToolTip(title)
                 self._subgoal_input.setPlaceholderText(f"添加到「{parent.title}」下…")
-                self._add_context.setText(f"将添加到「{parent.title}」下")
-                self._add_context.show()
                 return
             self._sub_add_parent_id = None
+        title = f"正在向「{self.task.title}」添加子目标"
+        self._add_title.setText(title)
+        self._add_title.setToolTip(title)
         self._subgoal_input.setPlaceholderText(f"添加到「{self.task.title}」下…")
-        self._add_context.setText(f"将添加到「{self.task.title}」下")
-        self._add_context.show()
 
     def _prompt_decompose(self, subtask_id: str) -> None:
         titles = prompt_decompose_titles(self)
