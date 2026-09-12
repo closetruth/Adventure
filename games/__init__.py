@@ -1,1 +1,1 @@
-"""Adventure 小游戏包。"""
+"""AimLoot 小游戏包。"""

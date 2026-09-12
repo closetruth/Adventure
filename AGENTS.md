@@ -64,7 +64,7 @@ QTimer @ 50ms (main thread)
 - `Reward` is gold+diamond plus optional crit multipliers.
 - `RollAccum` tracks rewards accumulated *since* the last roll checkpoint (global display).
 - `RollRuntime` holds the current roll cycle: `next_roll_at`, `roll_span`, `segment_colors`, `gold_chance` / `diamond_chance`, amount ranges, `last_shuffle_at`. Persisted; `settings` roll fields are migration-only.
-- Weekly runtime intervals are **not** in `AppState`; they live in `%APPDATA%\Adventure\runtime_intervals.json` via `src/runtime_intervals.py`.
+- Weekly runtime intervals are **not** in `AppState`; they live in `%APPDATA%\AimLoot\runtime_intervals.json` via `src/runtime_intervals.py`.
 
 ### Operation accounting
 
@@ -89,9 +89,9 @@ Folder-style accounting: parent task `earned_*` / display totals sync from subta
 | `src/reward_system.py` | `maybe_roll(state)`, crit, `reshuffle_roll_params`, random 6–14 op cycles, `RollRuntime` migration |
 | `src/chest_opening.py` | Chest unlock timers + letter/currency open RNG |
 | `src/input_monitor.py` | `InputMonitor`: QTimer + GetAsyncKeyState; mouse-move distance; VM fallbacks |
-| `src/storage.py` | `load_state()` / `save_state()`: atomic JSON to `%APPDATA%\Adventure\data.json`; backups / anchor / snapshots |
+| `src/storage.py` | `load_state()` / `save_state()`: atomic JSON to `%APPDATA%\AimLoot\data.json`; backups / anchor / snapshots |
 | `src/game_launcher.py` | `launch_pet_arena()` / `launch_pixel_tactics()` / `launch_word_arena()` |
-| `src/game_protocol.py` | `GameSession` / `GameResult` JSON protocol under `%APPDATA%\Adventure\game_sessions\` |
+| `src/game_protocol.py` | `GameSession` / `GameResult` JSON protocol under `%APPDATA%\AimLoot\game_sessions\` |
 | `src/migrate_accounting.py` | Flat-task → nested subtask migration; `detach_subtask_progress_to_legacy` for decompose |
 
 ### UI helpers

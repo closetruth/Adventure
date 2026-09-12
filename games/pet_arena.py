@@ -158,7 +158,7 @@ class PetArenaGame:
         self._swap_pick: Optional[int] = None
 
         pygame.init()
-        pygame.display.set_caption("Adventure - 小动物竞技场（AutoPet）")
+        pygame.display.set_caption("AimLoot - 小动物竞技场（AutoPet）")
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.font = load_font(22)

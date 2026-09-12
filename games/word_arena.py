@@ -646,7 +646,7 @@ class WordArenaGame:
         # 与合成波形格式不匹配，Sound(buffer=...) 会失败
         pygame.mixer.pre_init(_SFX_RATE, -16, 1)
         pygame.init()
-        pygame.display.set_caption("Adventure - 计算机词汇自走棋")
+        pygame.display.set_caption("AimLoot - 计算机词汇自走棋")
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.font = load_font(22)

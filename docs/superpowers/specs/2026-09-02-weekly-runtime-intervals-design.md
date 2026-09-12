@@ -15,7 +15,7 @@
 
 新模块 `src/runtime_intervals.py`：跟踪器、读写、按周切片。`TaskManager.tick_active_time()` 每秒把「这一秒算不算运行时间」、当前顶层 `task_id`、当前叶子 `leaf_id`（无子树则为 `null`）交给跟踪器。UI 在 `src/task_dialog.py` 的「本周」Tab，绘制放在 `src/ui_week_runtime.py`。
 
-日志与主存档分离：`%APPDATA%\Adventure\runtime_intervals.json`（非 Windows：`~/.adventure/runtime_intervals.json`，与 `get_data_dir()` 相同）。不写入 `data.json`。
+日志与主存档分离：`%APPDATA%\AimLoot\runtime_intervals.json`（非 Windows：`~/.aimloot/runtime_intervals.json`，与 `get_data_dir()` 相同）。不写入 `data.json`。
 
 ## Data
 

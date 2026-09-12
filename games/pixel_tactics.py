@@ -97,7 +97,7 @@ class PixelTactics:
         self.battle_tick = 0.0
 
         pygame.init()
-        pygame.display.set_caption("Adventure - 像素格子战场")
+        pygame.display.set_caption("AimLoot - 像素格子战场")
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.font = load_font(22)

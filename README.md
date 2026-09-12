@@ -1,12 +1,13 @@
-# Adventure
+# AimLoot
 
 <p align="center">
-  <strong>🌲 桌面悬浮的「目标树 + 键鼠奖励」小部件</strong><br>
+  <strong>目标奖励管理工具</strong><br>
+  桌面悬浮的「目标树 + 键鼠奖励」小部件<br>
   Windows 10 / 11 · 本地存档 · 三个小游戏
 </p>
 
 <p align="center">
-  <a href="https://github.com/closetruth/Adventure/releases/latest"><img src="https://img.shields.io/github/v/release/closetruth/Adventure?label=release&color=2f6fed" alt="Latest release"></a>
+  <a href="https://github.com/closetruth/AimLoot/releases/latest"><img src="https://img.shields.io/github/v/release/closetruth/AimLoot?label=release&color=2f6fed" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--2.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-111827" alt="Platform">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab" alt="Python">
@@ -14,7 +15,7 @@
 
 敲键盘、点鼠标、移动光标会累计操作并周期性开奖；奖励先挂在当前目标上，领进背包后才能花。目标像文件夹一样层层拆解，工作时顺手收集金币、钻石、宝箱和字母。
 
-**当前正式版：[v1.0.8](https://github.com/closetruth/Adventure/releases/tag/v1.0.8)** · 变更说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)
+**当前正式版：[v1.0.8](https://github.com/closetruth/AimLoot/releases/tag/v1.0.8)** · 变更说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ---
 
@@ -75,7 +76,7 @@ B站地址：https://www.bilibili.com/video/BV1wfbJ6iExF/?spm_id_from=0.0.upload
 
 - 换顶层或换叶子会切段；跨午夜按自然日切开
 - 图例按身份配色，对照格子颜色
-- 独立日志：`%APPDATA%\Adventure\runtime_intervals.json`
+- 独立日志：`%APPDATA%\AimLoot\runtime_intervals.json`
 
 设计细节：[周视图规格](docs/superpowers/specs/2026-09-02-weekly-runtime-intervals-design.md)
 
@@ -115,9 +116,9 @@ B站地址：https://www.bilibili.com/video/BV1wfbJ6iExF/?spm_id_from=0.0.upload
 
 ### 💿 正式版（推荐）
 
-1. 🔗 打开 [Releases](https://github.com/closetruth/Adventure/releases/latest)
-2. 📦 下载 `Adventure-vX.Y.Z.zip`（如 `Adventure-v1.0.8.zip`）并解压
-3. ▶️ 双击 `Adventure.exe`
+1. 🔗 打开 [Releases](https://github.com/closetruth/AimLoot/releases/latest)
+2. 📦 下载 `AimLoot-vX.Y.Z.zip`（如 `AimLoot-v1.0.8.zip`）并解压
+3. ▶️ 双击 `AimLoot.exe`
 
 > SmartScreen：点「更多信息」→「仍要运行」（exe 未签名）。首次启动解压内置依赖会稍慢。
 >
@@ -175,7 +176,7 @@ python run.py --game word <session_in.json>
 build.bat
 ```
 
-产物：`dist\Adventure\Adventure.exe`（需根目录 `Adventure.spec`）。
+产物：`dist\AimLoot\AimLoot.exe`（需根目录 `AimLoot.spec`）。
 
 > 非 Windows 无「固定到所有虚拟桌面」；macOS 上 pynput 需辅助功能权限。
 
@@ -203,10 +204,10 @@ build.bat
 
 | 路径 | 用途 |
 |------|------|
-| 💾 `%APPDATA%\Adventure\data.json` | 主存档（目标、背包、开奖…） |
-| 📅 `%APPDATA%\Adventure\runtime_intervals.json` | 本周时段日志 |
-| 🎮 `%APPDATA%\Adventure\game_sessions\` | 小游戏临时会话 |
-| 🔊 `%APPDATA%\Adventure\sfx_cache\` | 非原生音效转码缓存 |
+| 💾 `%APPDATA%\AimLoot\data.json` | 主存档（目标、背包、开奖…） |
+| 📅 `%APPDATA%\AimLoot\runtime_intervals.json` | 本周时段日志 |
+| 🎮 `%APPDATA%\AimLoot\game_sessions\` | 小游戏临时会话 |
+| 🔊 `%APPDATA%\AimLoot\sfx_cache\` | 非原生音效转码缓存 |
 
 - 约每 **15 秒**自动保存，退出时再存一次
 - 损坏时尝试 `.bak*` / `.anchor` / `.snap.*` 恢复，并备份为 `data.broken.*.json`
@@ -244,9 +245,9 @@ build.bat
 <h2 id="项目结构">📁 项目结构</h2>
 
 ```
-Adventure/
+AimLoot/
 ├── run.py / run.bat / install.bat / build.bat / fix_game.bat
-├── Adventure.spec · requirements.txt · LICENSE
+├── AimLoot.spec · requirements.txt · LICENSE
 ├── assets/sounds/          # roll_gold.* ；diamond/ 需自备，仓库不附带
 ├── docs/                   # 概率、开箱、设计规格、demo
 ├── games/

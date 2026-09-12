@@ -84,12 +84,9 @@ def _find_ffmpeg() -> Optional[str]:
 
 
 def _cache_dir() -> Path:
-    root = (
-        Path(os.environ.get("APPDATA") or Path.home()) / "Adventure"
-        if os.name == "nt"
-        else Path.home() / ".adventure"
-    )
-    d = root / "sfx_cache"
+    from .storage import get_data_dir
+
+    d = get_data_dir() / "sfx_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

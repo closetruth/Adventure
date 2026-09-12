@@ -31,12 +31,12 @@ def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> N
         }
         line = json.dumps(payload, ensure_ascii=False) + "\n"
         paths = [
-            r"C:\Users\Adventure\Desktop\Adventure\debug-4283d4.log",
-            r"C:\Users\Adventure\Desktop\Adventure\.cursor\debug-4283d4.log",
+            r"C:\Users\Adventure\Desktop\AimLoot\debug-4283d4.log",
+            r"C:\Users\Adventure\Desktop\AimLoot\.cursor\debug-4283d4.log",
         ]
         appdata = os.environ.get("APPDATA")
         if appdata:
-            paths.append(os.path.join(appdata, "Adventure", "debug-4283d4.log"))
+            paths.append(os.path.join(appdata, "AimLoot", "debug-4283d4.log"))
         for path in paths:
             try:
                 with open(path, "a", encoding="utf-8") as f:

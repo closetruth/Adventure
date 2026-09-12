@@ -4,7 +4,7 @@
 
 **Goal:** Add a Goal Manager "本周" tab that shows a Monday–Sunday calendar of real run intervals for the top-level goal and focused leaf, recorded forever with calendar dates.
 
-**Architecture:** A `RuntimeIntervalLog` in `src/runtime_intervals.py` opens/closes wall-clock segments from the same `recording` predicate as `tick_active_time`. Persist to `%APPDATA%\Adventure\runtime_intervals.json` (never `data.json`). `src/ui_week_runtime.py` paints seven vertical 0–24 columns. `TaskDialog` hosts the tab; the floating widget is unchanged.
+**Architecture:** A `RuntimeIntervalLog` in `src/runtime_intervals.py` opens/closes wall-clock segments from the same `recording` predicate as `tick_active_time`. Persist to `%APPDATA%\AimLoot\runtime_intervals.json` (never `data.json`). `src/ui_week_runtime.py` paints seven vertical 0–24 columns. `TaskDialog` hosts the tab; the floating widget is unchanged.
 
 **Tech Stack:** Python 3.12/3.13, PySide6, stdlib `unittest`, existing `TaskManager` / `PowerMonitor` / `get_data_dir()`.
 

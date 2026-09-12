@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .branding import window_title
 from .goal_actions import try_complete_goal, try_delete_goal
 from .models import AppState, Task, TaskStatus
 from .task_manager import TaskManager
@@ -189,7 +190,7 @@ class TaskDialog(QDialog):
         self._refreshing = False
         self._state_change_pending = False
 
-        self.setWindowTitle("目标管理 - Adventure")
+        self.setWindowTitle(window_title("目标管理"))
         self.resize(640, 640)
         self.setStyleSheet(DIALOG_STYLESHEET)
         self._build()

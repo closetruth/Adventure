@@ -1,4 +1,4 @@
-"""Adventure 应用入口。
+"""AimLoot 应用入口。
 
 启动流程:
 1. 加载本地数据 (AppState);
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import chest_opening
+from .branding import APP_NAME, TRAY_TOOLTIP
 from .game_launcher import launch_pet_arena, launch_pixel_tactics, launch_word_arena
 from .input_monitor import InputMonitor
 from .power_monitor import PowerMonitor
@@ -53,6 +54,7 @@ from .storage import (
     load_state,
     save_state,
     take_load_warning,
+    take_migration_warning,
 )
 from .task_dialog import TaskDialog
 from .task_manager import TaskManager
@@ -73,13 +75,17 @@ class Application(QObject):
         super().__init__()
         self.qt_app = qt_app
         self.qt_app.setQuitOnLastWindowClosed(False)
-        self.qt_app.setApplicationName("Adventure")
+        self.qt_app.setApplicationName(APP_NAME)
 
         self.state: AppState = load_state()
+        mig_warning = take_migration_warning()
+        if mig_warning:
+            logger.warning("存档迁移: %s", mig_warning.replace("\n", " "))
+            QMessageBox.warning(None, APP_NAME, mig_warning)
         load_warning = take_load_warning()
         if load_warning:
             logger.warning("存档恢复: %s", load_warning.replace('\n', ' '))
-            QMessageBox.warning(None, "Adventure", load_warning)
+            QMessageBox.warning(None, APP_NAME, load_warning)
         ensure_roll_runtime(self.state)
         self.power_monitor = PowerMonitor()
         self.manager = TaskManager(self.state, self.power_monitor)
@@ -97,7 +103,7 @@ class Application(QObject):
             if n:
                 QMessageBox.information(
                     None,
-                    "Adventure",
+                    APP_NAME,
                     f"已修复 {n} 个无法点完成的子目标。\n"
                     "时长已经达标的，选中后即可点「完成」。",
                 )
@@ -124,7 +130,7 @@ class Application(QObject):
         if not self.monitor.available():
             logger.warning("全局键鼠监听不可用")
             QMessageBox.warning(
-                None, "Adventure",
+                None, APP_NAME,
                 "全局键鼠监听不可用。\n操作计数仅限点击悬浮窗按钮时触发。",
             )
         else:
@@ -173,7 +179,8 @@ class Application(QObject):
 
         inv = self.state.inventory
         logger.info(
-            "Adventure 启动完成 (data_dir=%s, total_ops=%d, gold=%.1f, diamond=%.1f, tasks=%d)",
+            "%s 启动完成 (data_dir=%s, total_ops=%d, gold=%.1f, diamond=%.1f, tasks=%d)",
+            APP_NAME,
             get_data_dir(), self.state.total_operations, inv.gold, inv.diamond,
             len(self.state.tasks),
         )
@@ -186,7 +193,7 @@ class Application(QObject):
     def _build_tray(self) -> QSystemTrayIcon:
         icon = self._make_icon()
         tray = QSystemTrayIcon(icon, parent=self)
-        tray.setToolTip("Adventure - 目标与奖励小部件")
+        tray.setToolTip(TRAY_TOOLTIP)
         menu = QMenu()
 
         act_show = QAction("显示悬浮窗", menu)
@@ -292,7 +299,7 @@ class Application(QObject):
         prefix = f"「{title}」" if title else "目标"
         text = f"{prefix}已领取 {format_reward_gain(reward.gold, reward.diamond)}"
         if self.tray.isVisible():
-            self.tray.showMessage("Adventure", text, QSystemTrayIcon.MessageIcon.Information, 2500)
+            self.tray.showMessage(APP_NAME, text, QSystemTrayIcon.MessageIcon.Information, 2500)
 
     def _on_app_state_changed(self, state: Qt.ApplicationState) -> None:
         # 仅在休眠唤醒时丢掉旧播放器，避免点击悬浮窗获得焦点时误杀正在播放的音效
@@ -567,7 +574,8 @@ class Application(QObject):
     def quit(self) -> None:
         inv = self.state.inventory
         logger.info(
-            "Adventure 退出 (total_ops=%d, gold=%.1f, diamond=%.1f, tasks=%d)",
+            "%s 退出 (total_ops=%d, gold=%.1f, diamond=%.1f, tasks=%d)",
+            APP_NAME,
             self.state.total_operations, inv.gold, inv.diamond,
             len(self.state.tasks),
         )
@@ -626,7 +634,7 @@ class Application(QObject):
                 self._save_reject_notified = True
                 if self.tray.isVisible():
                     self.tray.showMessage(
-                        "Adventure",
+                        APP_NAME,
                         "检测到内存数据异常，已拒绝自动保存以保护备份。请重启应用。",
                         QSystemTrayIcon.MessageIcon.Warning,
                         5000,
@@ -652,7 +660,7 @@ def _acquire_single_instance() -> QLockFile | None:
 def main() -> int:
     data_dir = get_data_dir()
     setup_logging(data_dir)
-    logger.info("--- Adventure 启动 (v2) ---")
+    logger.info("--- %s 启动 (v2) ---", APP_NAME)
 
     qt_app = QApplication(sys.argv)
     instance_lock = _acquire_single_instance()
@@ -660,8 +668,8 @@ def main() -> int:
         logger.info("检测到已有实例运行，退出")
         QMessageBox.information(
             None,
-            "Adventure",
-            "Adventure 已在运行中。\n请使用系统托盘中的实例，避免多开导致存档互相覆盖。",
+            APP_NAME,
+            f"{APP_NAME} 已在运行中。\n请使用系统托盘中的实例，避免多开导致存档互相覆盖。",
         )
         return 0
     app = Application(qt_app)

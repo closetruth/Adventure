@@ -16,7 +16,7 @@ echo === Uninstall old pygame, install pygame-ce ===
 ".venv\Scripts\python.exe" -c "import pygame; print('OK', pygame.version.ver)"
 
 echo.
-echo Done. Restart Adventure and try the game again.
+echo Done. Restart AimLoot and try the game again.
 pause
 popd
 endlocal

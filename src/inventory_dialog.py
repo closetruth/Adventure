@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import chest_opening
+from .branding import window_title
 from .models import AppState, TaskStatus
 from .ui_confirm import ask_yes_no
 from .ui_roll_bar import CHEST_RARITY_COLORS, CHEST_RARITY_NAMES
@@ -91,7 +92,7 @@ class InventoryDialog(QDialog):
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
         self.state = state
-        self.setWindowTitle("奖励背包 - Adventure")
+        self.setWindowTitle(window_title("奖励背包"))
         self.setStyleSheet(INVENTORY_DIALOG_QSS)
         self._build()
         self._apply_dialog_size()

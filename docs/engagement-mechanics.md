@@ -1,6 +1,6 @@
 ﻿# 可做的成瘾 / 留存机制
 
-面向 Adventure 悬浮窗 + 落点连通开奖的扩展想法。按 **好做程度 × 上瘾程度** 排序，并标注建议改动的模块。
+面向 AimLoot 悬浮窗 + 落点连通开奖的扩展想法。按 **好做程度 × 上瘾程度** 排序，并标注建议改动的模块。
 
 > 原则：机制应强化「真实工作时的正反馈」，避免让人为刷键而刷键。已有防护：需有活跃任务才记子任务奖励；关屏 / 空闲停表。
 
@@ -130,7 +130,7 @@
 | 操作速率 | `op_tracker.py` |
 | 子任务进度 | `Task.subtask_progress`, `ui_text.py` |
 | 本周期掉落展示 | `since_roll`, `ui_text.py` |
-| 持久化 | `storage.py` → `%APPDATA%\Adventure\data.json` |
+| 持久化 | `storage.py` → `%APPDATA%\AimLoot\data.json` |
 
 ---
 

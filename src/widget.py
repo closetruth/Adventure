@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .branding import APP_NAME
 from .currency_display import CurrencyDisplay
 from .models import AppState, Reward
 from .op_tracker import OpRateTracker
@@ -155,7 +156,7 @@ class FloatingWidget(QWidget):
         self.state = state
         self.manager = manager
 
-        self.setWindowTitle("Adventure")
+        self.setWindowTitle(APP_NAME)
         self.setObjectName("WidgetWindow")
         # 不透明顶层窗：避免 WS_EX_LAYERED 点穿。圆角只是视觉，HWND 仍是矩形。
         self.setAttribute(Qt.WA_TranslucentBackground, False)
@@ -222,7 +223,7 @@ class FloatingWidget(QWidget):
         drag_lay = QHBoxLayout(drag_handle)
         drag_lay.setContentsMargins(0, 0, 0, 0)
         drag_lay.setSpacing(4)
-        title = QLabel("Adventure")
+        title = QLabel(APP_NAME)
         title.setObjectName("Title")
         drag_lay.addWidget(title)
         drag_lay.addStretch(1)
@@ -374,7 +375,7 @@ class FloatingWidget(QWidget):
         menu.addAction(act_sound)
 
         menu.addSeparator()
-        act_exit = QAction("退出 Adventure", self)
+        act_exit = QAction(f"退出 {APP_NAME}", self)
         act_exit.triggered.connect(self.request_quit)
         menu.addAction(act_exit)
 

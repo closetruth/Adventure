@@ -1,5 +1,5 @@
 @echo off
-REM ===== Bundle Adventure into a standalone Windows executable =====
+REM ===== Bundle AimLoot into a standalone Windows executable =====
 setlocal
 pushd "%~dp0"
 
@@ -21,9 +21,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo === Building Adventure.exe ===
+echo === Building AimLoot.exe ===
 ".venv\Scripts\python.exe" -m pip install pygame-ce -q
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean Adventure.spec
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean AimLoot.spec
 
 if errorlevel 1 (
     echo [ERROR] Build failed.
@@ -35,7 +35,7 @@ if errorlevel 1 (
 
 echo.
 echo === Build finished ===
-echo Executable: dist\Adventure\Adventure.exe
+echo Executable: dist\AimLoot\AimLoot.exe
 pause
 popd
 endlocal

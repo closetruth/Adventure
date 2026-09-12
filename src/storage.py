@@ -48,6 +48,19 @@ _MAX_DAILY_SNAPSHOTS = 7
 _HASH_KEY = "_content_hash"
 
 _load_warning: Optional[str] = None
+_migration_warning: Optional[str] = None
+_resolved_data_dir: Optional[Path] = None
+
+_LEGACY_DIR_NAME_WIN = "Adventure"
+_LEGACY_DIR_NAME_UNIX = ".adventure"
+_NEW_DIR_NAME_WIN = "AimLoot"
+_NEW_DIR_NAME_UNIX = ".aimloot"
+
+_MIGRATE_FAIL_MSG = (
+    "未能将旧版 Adventure 存档迁移到 AimLoot 目录。\n"
+    "本会话仍使用旧目录读写；下次启动会再试。\n"
+    "旧数据不会被删除。"
+)
 
 
 def take_load_warning() -> Optional[str]:
@@ -55,6 +68,20 @@ def take_load_warning() -> Optional[str]:
     global _load_warning
     msg, _load_warning = _load_warning, None
     return msg
+
+
+def take_migration_warning() -> Optional[str]:
+    """读取并清除存档目录迁移警告（供 UI 弹窗）。"""
+    global _migration_warning
+    msg, _migration_warning = _migration_warning, None
+    return msg
+
+
+def reset_data_dir_cache() -> None:
+    """测试用：清除 get_data_dir 进程内缓存。"""
+    global _resolved_data_dir, _migration_warning
+    _resolved_data_dir = None
+    _migration_warning = None
 
 
 class SaveRejectedError(OSError):
@@ -65,19 +92,110 @@ class SaveRejectedError(OSError):
         super().__init__(reason)
 
 
+def default_data_dir_path() -> Path:
+    """AimLoot 数据目录路径（不创建、不迁移）。"""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home())
+        return Path(base) / _NEW_DIR_NAME_WIN
+    return Path.home() / _NEW_DIR_NAME_UNIX
+
+
+def legacy_data_dir_path() -> Path:
+    """旧版 Adventure 数据目录路径（不创建）。"""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home())
+        return Path(base) / _LEGACY_DIR_NAME_WIN
+    return Path.home() / _LEGACY_DIR_NAME_UNIX
+
+
+def has_valid_save(data_dir: Path) -> bool:
+    """目录下是否有可读的 data.json（非空且 JSON 对象）。"""
+    path = data_dir / "data.json"
+    try:
+        if not path.is_file() or path.stat().st_size < 2:
+            return False
+        raw = path.read_bytes()
+        if _file_is_blank(raw):
+            return False
+        data = json.loads(raw.decode("utf-8"))
+        return isinstance(data, dict)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return False
+
+
+def _dir_has_any_entries(data_dir: Path) -> bool:
+    try:
+        if not data_dir.is_dir():
+            return False
+        next(data_dir.iterdir())
+        return True
+    except (OSError, StopIteration):
+        return False
+
+
+def _remove_incomplete_new_dir(new_dir: Path) -> None:
+    """迁移失败时清掉不完整的新目录，避免下次误判为已有存档。"""
+    try:
+        if new_dir.is_dir():
+            shutil.rmtree(new_dir)
+    except OSError as exc:
+        logger.warning("清理不完整迁移目录失败: %s (%s)", new_dir, exc)
+
+
+def migrate_legacy_data_dir(
+    new_dir: Path, old_dir: Path
+) -> tuple[Path, Optional[str]]:
+    """按规则决定使用新/旧目录；成功时复制旧→新且保留旧目录。
+
+    返回 (本会话应使用的目录, 可选警告文案)。
+    """
+    if has_valid_save(new_dir):
+        new_dir.mkdir(parents=True, exist_ok=True)
+        return new_dir, None
+
+    old_useful = has_valid_save(old_dir) or _dir_has_any_entries(old_dir)
+    if not old_useful:
+        new_dir.mkdir(parents=True, exist_ok=True)
+        return new_dir, None
+
+    # 新目录若已有残缺内容，先清掉再复制，避免 dirs_exist_ok 混入脏文件
+    if new_dir.exists():
+        _remove_incomplete_new_dir(new_dir)
+
+    try:
+        new_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(old_dir, new_dir)
+    except OSError as exc:
+        logger.warning("存档迁移复制失败: %s -> %s (%s)", old_dir, new_dir, exc)
+        _remove_incomplete_new_dir(new_dir)
+        return old_dir, _MIGRATE_FAIL_MSG
+
+    if has_valid_save(old_dir) and not has_valid_save(new_dir):
+        logger.warning("存档迁移后新目录缺少有效 data.json，回退旧目录")
+        _remove_incomplete_new_dir(new_dir)
+        return old_dir, _MIGRATE_FAIL_MSG
+
+    new_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("已从旧目录复制存档到 %s（旧目录保留）", new_dir)
+    return new_dir, None
+
+
 def get_data_dir() -> Path:
     """返回数据存放目录，跨平台兼容。
 
-    Windows: %APPDATA%\\Adventure
-    其他:    ~/.adventure
+    Windows: %APPDATA%\\AimLoot（必要时从 Adventure 复制迁移）
+    其他:    ~/.aimloot（必要时从 ~/.adventure 复制迁移）
     """
-    if os.name == "nt":
-        base = os.environ.get("APPDATA") or str(Path.home())
-        d = Path(base) / "Adventure"
-    else:
-        d = Path.home() / ".adventure"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    global _resolved_data_dir, _migration_warning
+    if _resolved_data_dir is not None:
+        return _resolved_data_dir
+    used, warn = migrate_legacy_data_dir(
+        default_data_dir_path(), legacy_data_dir_path()
+    )
+    _migration_warning = warn
+    used.mkdir(parents=True, exist_ok=True)
+    _resolved_data_dir = used
+    return used
 
 
 def get_data_file() -> Path:
@@ -479,7 +597,7 @@ def load_state() -> AppState:
         logger.error("无法读取任何有效存档，新建空白数据")
         _load_warning = (
             "无法读取任何有效存档（可能因异常退出导致文件损坏）。\n"
-            "已新建空白存档；请查看 %APPDATA%\\Adventure 下的 .bak 备份文件。"
+            "已新建空白存档；请查看 %APPDATA%\\AimLoot（或旧版 Adventure）下的 .bak 备份文件。"
         )
     return AppState()
 

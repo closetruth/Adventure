@@ -95,8 +95,11 @@ def set_startup(enabled: bool, exe_path: Optional[str] = None) -> bool:
     except Exception:
         return False
 
+    from .branding import APP_NAME
+
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    name = "Adventure"
+    name = APP_NAME
+    legacy_name = "Adventure"
     if exe_path is None:
         exe_path = sys.argv[0]
 
@@ -107,11 +110,16 @@ def set_startup(enabled: bool, exe_path: Optional[str] = None) -> bool:
         ) as k:
             if enabled:
                 winreg.SetValueEx(k, name, 0, winreg.REG_SZ, f'"{exe_path}"')
-            else:
                 try:
-                    winreg.DeleteValue(k, name)
+                    winreg.DeleteValue(k, legacy_name)
                 except FileNotFoundError:
                     pass
+            else:
+                for key_name in (name, legacy_name):
+                    try:
+                        winreg.DeleteValue(k, key_name)
+                    except FileNotFoundError:
+                        pass
         return True
     except OSError:
         return False

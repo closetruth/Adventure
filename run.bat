@@ -1,5 +1,5 @@
 @echo off
-REM ===== Launch Adventure (uses the .venv created by install.bat) =====
+REM ===== Launch AimLoot (uses the .venv created by install.bat) =====
 setlocal
 pushd "%~dp0"
 

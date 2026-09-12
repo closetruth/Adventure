@@ -1,5 +1,5 @@
 @echo off
-REM ===== Adventure installer (Windows) =====
+REM ===== AimLoot installer (Windows) =====
 REM Prefer Python 3.12/3.13 (pygame-ce wheels). Python 3.14 needs pygame-ce, not pygame.
 setlocal EnableExtensions EnableDelayedExpansion
 pushd "%~dp0"
@@ -98,7 +98,7 @@ if errorlevel 1 (
 
 echo.
 echo === Install finished ===
-echo Double-click run.bat to start Adventure.
+echo Double-click run.bat to start AimLoot.
 pause
 popd
 endlocal
