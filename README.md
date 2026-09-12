@@ -122,7 +122,7 @@ B站地址：https://www.bilibili.com/video/BV1wfbJ6iExF/?spm_id_from=0.0.upload
 
 > SmartScreen：点「更多信息」→「仍要运行」（exe 未签名）。首次启动解压内置依赖会稍慢。
 >
-> 钻石命中 / 缓动条满格的音效**不会随仓库或安装包附带**，需自己放到 `assets/sounds/diamond/`（正式版 exe 则放 `_internal/assets/sounds/diamond/`）。
+> 音效文件**不会随仓库或安装包附带**。把文件放到 `assets/sounds/` 下对应位置（正式版 exe 则放 `_internal/assets/sounds/`）。右键菜单可开关音效。
 
 ### 🧬 从源码运行
 
@@ -217,14 +217,19 @@ build.bat
 
 ### 🔊 音效（可选）
 
-仓库**不附带钻石音效**，要自己加文件才会在钻石命中、缓动条满格时出声：
+仓库**不附带音效文件**，要自己加才会出声：
 
 | 放哪里 | 何时播放 |
 |--------|----------|
 | `assets/sounds/roll_gold.*` | 金币开奖 |
-| `assets/sounds/diamond/` 下任意若干文件 | 钻石开奖 / 缓动条满格（多文件则随机抽） |
+| `assets/sounds/roll_diamond.*` | 钻石开奖 |
+| `assets/sounds/op/` 下若干短音 | 活跃目标记数操作，每次 20% 随机抽一条（可叠播） |
+| `assets/sounds/grid_full.*` | 离散开奖格子满格（先播） |
+| `assets/sounds/ease/` 下若干音乐 | 连续进度条满格必播；离散格子满格后 8% 叠播一条 |
+| `assets/sounds/chest_get.*` | 点箱子领取进背包 |
+| `assets/sounds/aim/` 下若干音乐 | 完成子目标或根目标，随机抽一条 |
 
-正式版 exe 把同样路径放到解压目录的 `_internal/` 下（即 `_internal/assets/sounds/diamond/`）。支持 wav / ogg / mp3 等；部分格式需本机 ffmpeg。右键菜单可开关开奖音效。
+正式版 exe 把同样路径放到解压目录的 `_internal/assets/sounds/`。支持 wav / ogg / mp3 等；部分格式需本机 ffmpeg。右键菜单可开关音效。
 
 ---
 
@@ -248,7 +253,7 @@ build.bat
 AimLoot/
 ├── run.py / run.bat / install.bat / build.bat / fix_game.bat
 ├── AimLoot.spec · requirements.txt · LICENSE
-├── assets/sounds/          # roll_gold.* ；diamond/ 需自备，仓库不附带
+├── assets/sounds/          # roll_gold.* / roll_diamond.* / grid_full.* / chest_get.* ；op/ ease/ aim/ 需自备
 ├── docs/                   # 概率、开箱、设计规格、demo
 ├── games/
 │   ├── pet_arena.py        # 小动物竞技场

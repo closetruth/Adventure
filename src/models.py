@@ -687,6 +687,8 @@ class AppState:
         "sound_enabled": True,
         "sound_volume": 0.8,
         "sound_on_roll_hit": True,
+        "sound_op_chance": 0.2,
+        "sound_grid_ease_chance": 0.08,
         "roll_interval": 10,           # 每多少次操作触发一次开奖
         "roll_chance": 0.35,           # 旧字段：迁移用（现为 gold_chance）
         "gold_chance": 0.35,           # 金币掉落概率（与钻石独立）
@@ -755,6 +757,11 @@ class AppState:
             ),
         )
         s.settings.update(data.get("settings", {}))
+        # 刚落地的旧默认尚未被用户调过；统一迁到现行默认
+        if s.settings.get("sound_grid_ease_chance") == 0.25:
+            s.settings["sound_grid_ease_chance"] = 0.08
+        if s.settings.get("sound_op_chance") == 0.4:
+            s.settings["sound_op_chance"] = 0.2
         return s
 
 

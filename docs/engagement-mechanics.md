@@ -126,7 +126,7 @@
 | 缓动宝箱条（约 5 分钟、终点一箱、点领取入包） | `ui_roll_bar.py`, `EaseChestsState` |
 | 随机间隔 6～14 | `INTERVAL_MIN/MAX` |
 | 金/钻独立概率 | `maybe_roll` |
-| 开奖音效 | `sfx.py`, `sound_on_roll_hit` |
+| 开奖 / 操作 / 满格 / 完成音效 | `sfx.py`, `sound_on_roll_hit`, `sound_op_chance` |
 | 操作速率 | `op_tracker.py` |
 | 子任务进度 | `Task.subtask_progress`, `ui_text.py` |
 | 本周期掉落展示 | `since_roll`, `ui_text.py` |

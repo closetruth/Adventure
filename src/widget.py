@@ -149,6 +149,7 @@ class FloatingWidget(QWidget):
     subtask_claimed = Signal(str, object)  # (title, Reward)
     state_changed = Signal()
     ease_point_reached = Signal()
+    goal_completed = Signal()
     chest_bagged = Signal()  # 宝箱已写入背包
 
     def __init__(self, state: AppState, manager: TaskManager):
@@ -309,6 +310,7 @@ class FloatingWidget(QWidget):
         # --- 目标树区域（独立类） ---
         self.goal_tree = GoalTreeArea(self.state, self.manager, parent=root)
         self.goal_tree.subtask_claimed.connect(self.subtask_claimed)
+        self.goal_tree.goal_completed.connect(self.goal_completed)
         self.goal_tree.state_changed.connect(self.state_changed)
         v.addWidget(self.goal_tree, 1)
 
@@ -369,7 +371,7 @@ class FloatingWidget(QWidget):
         act_startup.toggled.connect(self._toggle_startup)
         menu.addAction(act_startup)
 
-        act_sound = QAction("开奖音效", self, checkable=True)
+        act_sound = QAction("音效", self, checkable=True)
         act_sound.setChecked(bool(s.get("sound_enabled", True)))
         act_sound.toggled.connect(self._toggle_sound)
         menu.addAction(act_sound)
@@ -414,7 +416,7 @@ class FloatingWidget(QWidget):
     def _toggle_sound(self, checked: bool) -> None:
         self.state.settings["sound_enabled"] = checked
         save_state(self.state)
-        logger.info("开奖音效: %s", checked)
+        logger.info("音效: %s", checked)
 
     def _paint_ops_and_reels(self, ops_1min: int) -> None:
         set_label_html(

@@ -181,6 +181,7 @@ class TaskDialog(QDialog):
 
     state_changed = Signal()
     subtask_claimed = Signal(str, object)  # (title, Reward)
+    goal_completed = Signal()
 
     def __init__(self, state: AppState, manager: TaskManager, parent=None):
         super().__init__(parent)
@@ -348,7 +349,10 @@ class TaskDialog(QDialog):
             if ret != QMessageBox.Yes:
                 self.refresh()
                 return
+            was_done = sub.done
             reward = self.manager.complete_and_claim_subtask(task_id, extra)
+            if not was_done and sub.done:
+                self.goal_completed.emit()
             if reward is not None:
                 self.subtask_claimed.emit(sub.title, reward)
             self._emit_state_changed()
@@ -360,7 +364,10 @@ class TaskDialog(QDialog):
             sub = task.find_subtask(extra)
             if sub is None:
                 return
+            was_done = sub.done
             reward = self.manager.complete_and_claim_subtask(task_id, extra)
+            if not was_done and sub.done:
+                self.goal_completed.emit()
             if reward is not None:
                 self.subtask_claimed.emit(sub.title, reward)
             self._emit_state_changed()
@@ -388,6 +395,7 @@ class TaskDialog(QDialog):
             return
         elif action == "complete":
             if try_complete_goal(self, self.manager, task_id):
+                self.goal_completed.emit()
                 self._emit_state_changed()
             return
         # 由主程序统一 refresh 对话框，避免与按钮回调同步重建冲突

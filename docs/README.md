@@ -11,7 +11,7 @@
 | 🌲 [../README.md](../README.md) | 功能、安装、使用、隐私 |
 | 📝 [../RELEASE_NOTES.md](../RELEASE_NOTES.md) | 各版本变更（当前 v1.0.8） |
 | 🎬 [Adventure_min_show.mp4](Adventure_min_show.mp4) | 本地演示视频 |
-| 🔊 [../README.md#数据与隐私](../README.md#数据与隐私) | 钻石音效需自行放入 `assets/sounds/diamond/` |
+| 🔊 [../README.md#音效可选](../README.md#音效可选) | 音效需自行放入 `assets/sounds/` |
 
 ---
 

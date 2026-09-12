@@ -67,6 +67,22 @@ class TaskManagerFlowTests(unittest.TestCase):
         self.assertEqual(a.pending_summary().gold, 1.0)
         self.assertEqual(state.since_roll.gold, 1.0)
 
+    def test_will_count_operation_flat_active(self):
+        state, m = _make(self)
+        self.assertFalse(m.will_count_operation())
+        t = m.create("甲")
+        self.assertTrue(m.will_count_operation())
+        m.pause(t.id)
+        self.assertFalse(m.will_count_operation())
+
+    def test_will_count_operation_needs_focused_leaf(self):
+        state, m = _make(self)
+        t = m.create("甲")
+        m.add_subtask(t.id, "A", target_minutes=10)
+        self.assertTrue(m.will_count_operation())
+        t.current_subtask_id = None
+        self.assertFalse(m.will_count_operation())
+
     def test_focus_rejects_container(self):
         state, m = _make(self)
         t = m.create("甲")

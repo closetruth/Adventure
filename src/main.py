@@ -120,7 +120,8 @@ class Application(QObject):
         self.widget.request_quit.connect(self.quit)
         self.widget.subtask_claimed.connect(self._on_subtask_claimed)
         self.widget.state_changed.connect(self._on_widget_state_changed)
-        self.widget.ease_point_reached.connect(self.sfx.play_random_diamond)
+        self.widget.ease_point_reached.connect(self.sfx.play_ease_full)
+        self.widget.goal_completed.connect(self._on_goal_completed)
         self.widget.chest_bagged.connect(self._on_chest_bagged)
 
         # 桥接全局输入事件
@@ -314,9 +315,12 @@ class Application(QObject):
         if self._typing_in_app():
             return
         self.manager.note_activity()
+        if self.manager.will_count_operation():
+            self.sfx.play_op_tick()
         self.state.total_operations += 1
         reward = maybe_roll(self.state)
         if reward is not None:
+            self.sfx.play_grid_full()
             logger.debug("操作 #%d: 开奖 gold=%.1f diamond=%.1f",
                          self.state.total_operations, reward.gold, reward.diamond)
         subtask_reward = self.manager.record_operation(reward)
@@ -350,6 +354,9 @@ class Application(QObject):
         logger.info("10 分钟定时重抽开奖参数完成")
 
     # ---------- 子窗口 ----------
+    def _on_goal_completed(self) -> None:
+        self.sfx.play_goal_complete()
+
     def _on_subtask_claimed(self, title: str, reward: Reward) -> None:
         logger.info("领取子目标「%s」: gold=%.1f diamond=%.1f", title, reward.gold, reward.diamond)
         self._notify_subtask_claim(reward, title=title)
@@ -360,6 +367,7 @@ class Application(QObject):
         )
 
     def _on_chest_bagged(self) -> None:
+        self.sfx.play_chest_get()
         n = len(self.state.inventory.chests)
         logger.info("宝箱进背包 (chests=%d)", n)
         if self._inv_dialog is not None and self._inv_dialog.isVisible():
@@ -380,6 +388,7 @@ class Application(QObject):
             self._task_dialog = TaskDialog(self.state, self.manager, parent=self.widget)
             self._task_dialog.state_changed.connect(self._on_widget_state_changed)
             self._task_dialog.subtask_claimed.connect(self._on_subtask_claimed)
+            self._task_dialog.goal_completed.connect(self._on_goal_completed)
         self._task_dialog.refresh()
         self._task_dialog.show()
         self._task_dialog.raise_()

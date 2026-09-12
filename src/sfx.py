@@ -1,4 +1,4 @@
-"""开奖音效：Qt 播 wav/ogg/真 mp3；其它格式预热时 ffmpeg 转进 sfx_cache。"""
+"""反馈音效：Qt 播 wav/ogg/真 mp3；其它格式预热时 ffmpeg 转进 sfx_cache。"""
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +8,7 @@ import random
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtWidgets import QApplication
@@ -21,17 +21,22 @@ logger = logging.getLogger(__name__)
 _SOUND_EXTS = (".wav", ".ogg", ".mp3", ".m4a", ".aac", ".mp4")
 _NATIVE = {"mp3", "wav", "ogg"}
 _GOLD_STEM = "roll_gold"
+_DIAMOND_STEM = "roll_diamond"
+_GRID_STEM = "grid_full"
+_CHEST_STEM = "chest_get"
+_RANDOM_FOLDERS = ("op", "ease", "aim")
 _PREWARM_MS = 500
 _MAX_VOICES = 8
+_MAX_OP_VOICES = 3
+_SHORT_LANES = frozenset({"op", "gold", "diamond", "grid", "chest"})
 _NO_WINDOW = 0x08000000
+_OP_VOLUME_SCALE = 0.4
+_DEFAULT_OP_CHANCE = 0.2
+_DEFAULT_GRID_EASE_CHANCE = 0.08
 
 
 def _sounds_dir() -> Path:
     return project_root() / "assets" / "sounds"
-
-
-def _diamond_dir() -> Path:
-    return _sounds_dir() / "diamond"
 
 
 def sniff_audio_kind(path: Path) -> str:
@@ -52,8 +57,7 @@ def sniff_audio_kind(path: Path) -> str:
     return "unknown"
 
 
-def _iter_diamond_paths() -> List[Path]:
-    folder = _diamond_dir()
+def _iter_sound_dir(folder: Path) -> List[Path]:
     if not folder.is_dir():
         return []
     return sorted(
@@ -65,9 +69,27 @@ def _iter_diamond_paths() -> List[Path]:
     )
 
 
+def _stem_exists(stem: str) -> bool:
+    return any((_sounds_dir() / f"{stem}{ext}").exists() for ext in _SOUND_EXTS)
+
+
+def _find_stem(stem: str) -> Optional[Path]:
+    for ext in _SOUND_EXTS:
+        path = _sounds_dir() / f"{stem}{ext}"
+        if path.exists():
+            return path
+    return None
+
+
 def _probe_sound_files() -> bool:
-    gold = any((_sounds_dir() / f"{_GOLD_STEM}{ext}").exists() for ext in _SOUND_EXTS)
-    return gold or bool(_iter_diamond_paths())
+    if (
+        _stem_exists(_GOLD_STEM)
+        or _stem_exists(_DIAMOND_STEM)
+        or _stem_exists(_GRID_STEM)
+        or _stem_exists(_CHEST_STEM)
+    ):
+        return True
+    return any(_iter_sound_dir(_sounds_dir() / name) for name in _RANDOM_FOLDERS)
 
 
 def _find_ffmpeg() -> Optional[str]:
@@ -135,16 +157,17 @@ def _qt_types():
 
 
 class _Voice:
-    __slots__ = ("player", "output", "busy")
+    __slots__ = ("player", "output", "busy", "lane")
 
     def __init__(self, player: object, output: object) -> None:
         self.player = player
         self.output = output
         self.busy = False
+        self.lane = ""
 
 
 class SfxPlayer(QObject):
-    """声道池叠加播放：同一音效再触发时旧声继续、新声叠上。无文件或关闭音效时 no-op。"""
+    """叠加池给开奖 / op / ease；aim/grid/chest 独占声道。无文件或关闭音效时 no-op。"""
 
     def __init__(self, settings: dict, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -153,8 +176,9 @@ class SfxPlayer(QObject):
         self._qt = _qt_types() if self._has_files else None
         self._pool: List[_Voice] = []
         self._busy_order: List[_Voice] = []
+        self._exclusive: Dict[str, _Voice] = {}
         self._skip: set[str] = set()
-        self._diamonds: Optional[List[Path]] = None
+        self._folder_cache: Dict[str, List[Path]] = {}
         self._prewarm_timer: Optional[QTimer] = None
         if QApplication.instance() is None:
             self._qt = None
@@ -173,6 +197,21 @@ class SfxPlayer(QObject):
         except (TypeError, ValueError):
             return 0.8
 
+    def _op_chance(self) -> float:
+        try:
+            return max(0.0, min(1.0, float(self._settings.get("sound_op_chance", _DEFAULT_OP_CHANCE))))
+        except (TypeError, ValueError):
+            return _DEFAULT_OP_CHANCE
+
+    def _grid_ease_chance(self) -> float:
+        try:
+            return max(
+                0.0,
+                min(1.0, float(self._settings.get("sound_grid_ease_chance", _DEFAULT_GRID_EASE_CHANCE))),
+            )
+        except (TypeError, ValueError):
+            return _DEFAULT_GRID_EASE_CHANCE
+
     def prewarm(self) -> None:
         if not self.capable():
             return
@@ -184,6 +223,9 @@ class SfxPlayer(QObject):
 
     def invalidate(self) -> None:
         self._drop()
+        self._has_files = _probe_sound_files()
+        if self._has_files and self._qt is None:
+            self._qt = _qt_types()
         if self.capable():
             self.prewarm()
 
@@ -200,43 +242,114 @@ class SfxPlayer(QObject):
             if gold is not None:
                 self._play("gold", gold)
         if reward.diamond > 0:
-            self.play_random_diamond()
+            diamond = self._diamond_path()
+            if diamond is not None:
+                self._play("diamond", diamond)
 
-    def play_random_diamond(self) -> None:
+    def play_op_tick(self, rng: Optional[object] = None) -> None:
         if not self.capable():
             return
-        paths = [p for p in self._diamond_paths() if str(p.resolve()) not in self._skip]
-        if not paths:
+        picker = rng if rng is not None else random
+        if picker.random() >= self._op_chance():
             return
-        self._play("diamond", random.choice(paths))
+        path = self._pick_from("op", picker)
+        if path is None:
+            return
+        self._play("op", path, volume_scale=_OP_VOLUME_SCALE)
+
+    def play_ease_full(self) -> None:
+        if not self.capable():
+            return
+        path = self._pick_from("ease")
+        if path is None:
+            return
+        self._play("ease", path)
+
+    def play_grid_full(self, rng: Optional[object] = None) -> None:
+        if not self.capable():
+            return
+        picker = rng if rng is not None else random
+        want_ease = picker.random() < self._grid_ease_chance()
+        ding = _find_stem(_GRID_STEM)
+        if ding is not None:
+            self._play_exclusive("grid", ding)
+        if want_ease:
+            self.play_ease_full()
+
+    def play_chest_get(self) -> None:
+        if not self.capable():
+            return
+        path = _find_stem(_CHEST_STEM)
+        if path is None:
+            return
+        self._play_exclusive("chest", path)
+
+    def play_goal_complete(self) -> None:
+        if not self.capable():
+            return
+        path = self._pick_from("aim")
+        if path is None:
+            return
+        self._play_exclusive("aim", path)
 
     def _gold_path(self) -> Optional[Path]:
-        for ext in _SOUND_EXTS:
-            path = _sounds_dir() / f"{_GOLD_STEM}{ext}"
-            if path.exists():
-                return path
-        return None
+        return _find_stem(_GOLD_STEM)
 
-    def _diamond_paths(self) -> List[Path]:
-        if self._diamonds is None:
-            self._diamonds = _iter_diamond_paths()
-        return self._diamonds
+    def _diamond_path(self) -> Optional[Path]:
+        return _find_stem(_DIAMOND_STEM)
 
-    def _play(self, lane: str, src: Path) -> None:
-        voice = self._acquire()
+    def _folder_paths(self, name: str) -> List[Path]:
+        cached = self._folder_cache.get(name)
+        if cached is None:
+            cached = _iter_sound_dir(_sounds_dir() / name)
+            self._folder_cache[name] = cached
+        return cached
+
+    def _pick_from(self, name: str, rng: Optional[object] = None) -> Optional[Path]:
+        paths = [p for p in self._folder_paths(name) if str(p.resolve()) not in self._skip]
+        if not paths:
+            return None
+        picker = rng if rng is not None else random
+        return picker.choice(paths)  # type: ignore[union-attr]
+
+    def _play(self, lane: str, src: Path, volume_scale: float = 1.0) -> None:
+        voice = self._acquire(prefer_lane=lane)
         if voice is None:
             return
+        self._start_voice(voice, lane, src, self._volume() * volume_scale, pooled=True)
+
+    def _play_exclusive(self, lane: str, src: Path, volume_scale: float = 1.0) -> None:
+        voice = self._exclusive.get(lane)
+        if voice is None:
+            voice = self._new_voice()
+            if voice is None:
+                return
+            self._exclusive[lane] = voice
+        else:
+            self._stop_player(voice.player)
+        self._start_voice(voice, lane, src, self._volume() * volume_scale, pooled=False)
+
+    def _start_voice(
+        self,
+        voice: _Voice,
+        lane: str,
+        src: Path,
+        volume: float,
+        *,
+        pooled: bool,
+    ) -> None:
         ready = qt_ready_path(src)
         try:
-            voice.output.setVolume(self._volume())  # type: ignore[attr-defined]
+            voice.output.setVolume(max(0.0, min(1.0, volume)))  # type: ignore[attr-defined]
             player = voice.player
             player.stop()  # type: ignore[attr-defined]
             player.setSource(QUrl())
             player.setSource(QUrl.fromLocalFile(str(ready.resolve())))
             player.setPosition(0)  # type: ignore[attr-defined]
             player.play()  # type: ignore[attr-defined]
+            voice.lane = lane
             # stop/清 source 可能同步打出 EndOfMedia，把刚占用的声道放掉
-            self._mark_busy(voice)
+            self._mark_busy(voice, pooled=pooled)
         except Exception as exc:
             logger.warning("播放失败(%s) %s: %s", lane, src.name, exc)
             self._skip.add(str(src.resolve()))
@@ -269,13 +382,38 @@ class SfxPlayer(QObject):
         logger.warning("播放失败: %s %s", error, message)
         self._release(voice)
 
-    def _mark_busy(self, voice: _Voice) -> None:
+    def _mark_busy(self, voice: _Voice, *, pooled: bool = True) -> None:
         voice.busy = True
+        if not pooled:
+            return
         if voice in self._busy_order:
             self._busy_order.remove(voice)
         self._busy_order.append(voice)
 
-    def _acquire(self) -> Optional[_Voice]:
+    def _busy_lane_count(self, lane: str) -> int:
+        return sum(1 for voice in self._pool if voice.busy and voice.lane == lane)
+
+    def _steal_from_busy(self, prefer_lane: str) -> Optional[_Voice]:
+        """池满时：优先同 lane → 其它短音 → 最后 ease。"""
+        for voice in self._busy_order:
+            if voice.lane == prefer_lane:
+                return voice
+        for voice in self._busy_order:
+            if voice.lane in _SHORT_LANES and voice.lane != prefer_lane:
+                return voice
+        for voice in self._busy_order:
+            if voice.lane == "ease":
+                return voice
+        return self._busy_order[0] if self._busy_order else None
+
+    def _acquire(self, prefer_lane: str = "") -> Optional[_Voice]:
+        if prefer_lane == "op" and self._busy_lane_count("op") >= _MAX_OP_VOICES:
+            stolen = self._steal_from_busy("op")
+            if stolen is None:
+                return None
+            self._stop_player(stolen.player)
+            self._mark_busy(stolen)
+            return stolen
         for voice in self._pool:
             if not voice.busy:
                 self._mark_busy(voice)
@@ -287,7 +425,11 @@ class SfxPlayer(QObject):
             self._pool.append(voice)
             self._mark_busy(voice)
             return voice
-        stolen = self._busy_order[0]
+        stolen = self._steal_from_busy(prefer_lane) if prefer_lane else (
+            self._busy_order[0] if self._busy_order else None
+        )
+        if stolen is None:
+            return None
         self._stop_player(stolen.player)
         self._mark_busy(stolen)
         return stolen
@@ -296,6 +438,7 @@ class SfxPlayer(QObject):
         if not voice.busy:
             return
         voice.busy = False
+        voice.lane = ""
         if voice in self._busy_order:
             self._busy_order.remove(voice)
         self._stop_player(voice.player)
@@ -308,11 +451,14 @@ class SfxPlayer(QObject):
             pass
 
     def _drop(self) -> None:
-        for voice in self._pool:
+        voices: Sequence[_Voice] = (*self._pool, *self._exclusive.values())
+        for voice in voices:
             voice.busy = False
             self._stop_player(voice.player)
         self._pool.clear()
         self._busy_order.clear()
+        self._exclusive.clear()
+        self._folder_cache.clear()
 
     def _prewarm_now(self) -> None:
         if not self.capable():
@@ -322,12 +468,20 @@ class SfxPlayer(QObject):
         if gold is not None:
             qt_ready_path(gold)
             want = 1
-        files = self._diamond_paths()
-        for path in files:
-            qt_ready_path(path)
-        if files:
+        diamond = self._diamond_path()
+        if diamond is not None:
+            qt_ready_path(diamond)
             want = 2 if want else 1
-            logger.info("钻石音效 %d 条", len(files))
+        for stem in (_GRID_STEM, _CHEST_STEM):
+            path = _find_stem(stem)
+            if path is not None:
+                qt_ready_path(path)
+        for name in _RANDOM_FOLDERS:
+            files = self._folder_paths(name)
+            for path in files:
+                qt_ready_path(path)
+            if files:
+                logger.info("%s 音效 %d 条", name, len(files))
         while len(self._pool) < want:
             voice = self._new_voice()
             if voice is None:

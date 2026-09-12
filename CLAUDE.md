@@ -110,7 +110,7 @@ Folder-style accounting: parent task `earned_*` / display totals sync from subta
 - `src/op_tracker.py` — sliding 60s window of op timestamps (in-memory only).
 - `src/active_time.py` — increments focused leaf or flat task `active_seconds` every 1s tick.
 - `src/power_monitor.py` — `should_count_time()`: false when display is off.
-- `src/sfx.py` — roll hit sounds via Qt Multimedia. Gold = `roll_gold.*`; diamond / ease chest = random under `assets/sounds/diamond/`.
+- `src/sfx.py` — Qt Multimedia. Gold = `roll_gold.*`; diamond = `roll_diamond.*`; grid fill = `grid_full.*` then 8% overlay `ease/`; chest bag = `chest_get.*`; `op/` `ease/` `aim/` folders pick at random.
 - `src/win_utils.py` — pin to all desktops (pyvda), startup registry. No-ops on non-Windows.
 
 ### Game subprocess protocol
@@ -123,7 +123,7 @@ Entry costs (gold): pet 10, grid 12, word 10.
 
 ### Settings (in `data.json` → `settings`)
 
-Key tunables: `roll_interval`, `roll_chance` / `gold_chance`, `gold_min`/`gold_max`, `diamond_chance`, `diamond_min`/`diamond_max`, `subtask_default_target_minutes`, `subtask_completion_bonus_gold`, `idle_pause_minutes`, window/sound flags. Runtime roll values live in `roll_runtime`; settings roll fields are for **legacy migration** only. Defaults in `AppState.__init__` (`src/models.py`).
+Key tunables: `roll_interval`, `roll_chance` / `gold_chance`, `gold_min`/`gold_max`, `diamond_chance`, `diamond_min`/`diamond_max`, `subtask_default_target_minutes`, `subtask_completion_bonus_gold`, `idle_pause_minutes`, `sound_op_chance`, `sound_grid_ease_chance`, window/sound flags. Runtime roll values live in `roll_runtime`; settings roll fields are for **legacy migration** only. Defaults in `AppState.__init__` (`src/models.py`).
 
 ### Save behavior
 

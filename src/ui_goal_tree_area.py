@@ -77,6 +77,7 @@ class GoalTreeArea(QWidget):
 
     state_changed = Signal()
     subtask_claimed = Signal(str, object)  # (title, Reward)
+    goal_completed = Signal()
 
     def __init__(
         self,
@@ -1354,6 +1355,7 @@ class GoalTreeArea(QWidget):
 
     def _on_goal_complete(self, task_id: str) -> None:
         if try_complete_goal(self, self.manager, task_id):
+            self.goal_completed.emit()
             self._request_state_sync()
 
     def _on_goal_delete(self, task_id: str) -> None:
@@ -1406,7 +1408,10 @@ class GoalTreeArea(QWidget):
         sub = task.find_subtask(subtask_id)
         if sub is None:
             return
+        was_done = sub.done
         reward = self.manager.complete_and_claim_subtask(task_id, subtask_id)
+        if not was_done and sub.done:
+            self.goal_completed.emit()
         if reward is not None:
             self.subtask_claimed.emit(sub.title, reward)
         self._request_state_sync()
@@ -1418,7 +1423,10 @@ class GoalTreeArea(QWidget):
         sub = task.find_subtask(subtask_id)
         if sub is None:
             return
+        was_done = sub.done
         reward = self.manager.complete_and_claim_subtask(task_id, subtask_id)
+        if not was_done and sub.done:
+            self.goal_completed.emit()
         if reward is not None:
             self.subtask_claimed.emit(sub.title, reward)
         self._request_state_sync()

@@ -799,6 +799,15 @@ class TaskManager:
         self.state.since_roll.diamond += reward.diamond
 
     # ----- 操作数与奖励 -----
+    def will_count_operation(self) -> bool:
+        """这次键鼠操作会记入活跃目标（扁平目标或聚焦中的未完成叶子）。"""
+        active = self.state.active_task()
+        if active is None:
+            return False
+        if active.subtasks:
+            return active.current_subtask() is not None
+        return True
+
     def record_operation(self, reward: Optional[Reward]) -> Optional[Reward]:
         """处理一次操作：仅记入聚焦叶子或无子树时的目标本身。
 
